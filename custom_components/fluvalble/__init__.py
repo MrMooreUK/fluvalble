@@ -130,7 +130,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         change: bluetooth.BluetoothChange,
     ) -> None:
         if device := entry_data["device"]:
-            device.update_ble(service_info.advertisement)
+            device.update_ble(service_info.advertisement, service_info.device)
             return
 
         # First time seeing the device via BLE advertisement

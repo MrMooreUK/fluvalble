@@ -60,10 +60,19 @@ class Device:
         """Expose the MAC address of the device."""
         return self.client.device.address
 
-    def update_ble(self, advertisement: AdvertisementData) -> None:
-        """Update BLE metadata."""
+    def update_ble(
+        self,
+        advertisement: AdvertisementData,
+        ble_device: BLEDevice | None = None,
+    ) -> None:
+        """Update BLE metadata and refresh the device reference for the client."""
         self.conn_info["last_seen"] = datetime.now(UTC)
         self.conn_info["rssi"] = advertisement.rssi
+
+        # Keep the client's BLEDevice fresh — important for BLE proxies
+        # where the connection path can change between advertisements.
+        if ble_device is not None:
+            self.client.update_ble_device(ble_device)
 
         for handler in self.updates_connect:
             handler()

@@ -16,7 +16,9 @@ _LOGGER = logging.getLogger(__name__)
 ACTIVE_TIME = 120
 COMMAND_TIME = 15
 PING_INTERVAL = 10
-RECONNECT_DELAY = 5
+RECONNECT_DELAY = 30
+INITIAL_RETRY_DELAY = 10
+MAX_INITIAL_RETRIES = 30  # ~5 minutes of retrying at 10s intervals
 
 CHAR_NOTIFY = "00001002-0000-1000-8000-00805F9B34FB"
 CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805F9B34FB"
@@ -47,13 +49,17 @@ class Client:
 
         self.send_data = None
         self.send_time = 0
-        self.connect_task = asyncio.create_task(self._connect())
+        self.connect_task = asyncio.create_task(self._connect_with_retry())
 
         self.receive_buffer = b""
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
+
+    def update_ble_device(self, ble_device: BLEDevice):
+        """Update the BLEDevice reference (e.g. from a newer advertisement)."""
+        self.device = ble_device
 
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
@@ -112,11 +118,45 @@ class Client:
             self.receive_buffer = b""
 
     # ------------------------------------------------------------------
-    # Internal: initial connection
+    # Internal: initial connection with retry
     # ------------------------------------------------------------------
 
-    async def _connect(self):
-        """Connect to the Fluval and subscribe to notifications."""
+    async def _connect_with_retry(self):
+        """Try to connect, retrying on failure until success or stopped."""
+        for attempt in range(1, MAX_INITIAL_RETRIES + 1):
+            if self._stopped:
+                return
+
+            _LOGGER.warning(
+                "[fluvalble] Connection attempt %d/%d to %s",
+                attempt,
+                MAX_INITIAL_RETRIES,
+                self.device.address,
+            )
+
+            if await self._do_connect():
+                return  # Success
+
+            if self._stopped:
+                return
+
+            _LOGGER.warning(
+                "[fluvalble] Attempt %d failed for %s — retrying in %ds",
+                attempt,
+                self.device.address,
+                INITIAL_RETRY_DELAY,
+            )
+            await asyncio.sleep(INITIAL_RETRY_DELAY)
+
+        _LOGGER.warning(
+            "[fluvalble] Gave up connecting to %s after %d attempts. "
+            "Will retry when a command is sent.",
+            self.device.address,
+            MAX_INITIAL_RETRIES,
+        )
+
+    async def _do_connect(self) -> bool:
+        """Single connection attempt. Returns True on success."""
         try:
             self.client = await establish_connection(
                 BleakClient, self.device, self.device.address
@@ -136,13 +176,15 @@ class Client:
                 response=False,
             )
             _LOGGER.warning("[fluvalble] Connected to Fluval %s", self.device.address)
+            return True
         except (BleakError, TimeoutError, OSError) as err:
             _LOGGER.warning(
-                "[fluvalble] Initial connection to %s failed: %s — will retry via ping loop",
+                "[fluvalble] Connection to %s failed: %s",
                 self.device.address,
                 err,
             )
             self._set_status(False)
+            return False
 
     # ------------------------------------------------------------------
     # Internal: keep-alive / reconnect loop
@@ -156,21 +198,13 @@ class Client:
             try:
                 # (Re-)establish connection if needed
                 if not self.client or not self.client.is_connected:
-                    _LOGGER.debug("Reconnecting to %s", self.device.address)
-                    self.client = await establish_connection(
-                        BleakClient, self.device, self.device.address
+                    _LOGGER.warning(
+                        "[fluvalble] Reconnecting to %s", self.device.address
                     )
-                    await self.client.start_notify(CHAR_NOTIFY, self.notify_callback)
-                    self._set_status(True)
-
-                    # Re-do handshake after reconnect
-                    await self.client.read_gatt_char(CHAR_KEEPALIVE)
-                    await self.client.write_gatt_char(
-                        CHAR_COMMAND_OUT,
-                        data=encrypt([0x68, 0x05]),
-                        response=False,
-                    )
-                    _LOGGER.warning("[fluvalble] Reconnected to Fluval %s", self.device.address)
+                    if not await self._do_connect():
+                        # Connection failed — wait and retry
+                        await asyncio.sleep(RECONNECT_DELAY)
+                        continue
 
                 # Keep-alive read
                 await self.client.read_gatt_char(CHAR_KEEPALIVE)
@@ -182,7 +216,9 @@ class Client:
                         data=encrypt(self.send_data),
                         response=True,
                     )
-                    _LOGGER.debug("Sent command to %s", self.device.address)
+                    _LOGGER.warning(
+                        "[fluvalble] Sent command to %s", self.device.address
+                    )
                 self.send_data = None
 
                 # Interruptible sleep (cancelled early when send() is called)
@@ -208,7 +244,8 @@ class Client:
                 await self._safe_disconnect()
             except Exception:
                 _LOGGER.exception(
-                    "[fluvalble] Unexpected error in ping loop for %s", self.device.address
+                    "[fluvalble] Unexpected error in ping loop for %s",
+                    self.device.address,
                 )
                 await self._safe_disconnect()
 
@@ -219,7 +256,9 @@ class Client:
         # Cleanly disconnect when the active window expires
         await self._safe_disconnect()
         self.ping_task = None
-        _LOGGER.debug("Ping loop ended for %s", self.device.address)
+        _LOGGER.warning(
+            "[fluvalble] Ping loop ended for %s", self.device.address
+        )
 
     # ------------------------------------------------------------------
     # Helpers
