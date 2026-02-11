@@ -1,5 +1,6 @@
 """A single Fluval BLE connected LED device."""
 
+import asyncio
 from collections.abc import Callable
 from datetime import UTC, datetime
 import logging
@@ -17,7 +18,7 @@ MODES = ["manual", "automatic", "professional"]
 
 
 class Attribute(TypedDict, total=False):
-    """Attributes used by enitites like binary_sensor and number."""
+    """Attributes used by entities like binary_sensor and number."""
 
     options: list[str]
     default: str
@@ -68,9 +69,20 @@ class Device:
             handler()
 
     def set_connected(self, connected: bool):
-        """Set the connection status."""
+        """Set the connection status (may be called from a BLE callback thread)."""
         self.connected = connected
 
+        # Schedule HA state updates on the event loop (Bleak callbacks may
+        # arrive on a background thread, so calling _async_write_ha_state
+        # directly would raise).
+        try:
+            loop = asyncio.get_running_loop()
+            loop.call_soon_threadsafe(self._fire_connect_handlers)
+        except RuntimeError:
+            # Already on the event loop — call directly
+            self._fire_connect_handlers()
+
+    def _fire_connect_handlers(self):
         for handler in self.updates_connect:
             handler()
 
@@ -84,7 +96,6 @@ class Device:
 
     def attribute(self, attr: str) -> Attribute:
         """Provide attributes to the entities like switches, numbers etc."""
-        _LOGGER.debug("XXX -> attr: %s", attr)
         if attr == "connection":
             return Attribute(is_on=self.connected, extra=self.conn_info)
         if attr.startswith("channel_"):
@@ -103,22 +114,29 @@ class Device:
 
     def set_value(self, attr: str, value: int) -> None:
         """Set values received by entities such as numbers and switches."""
-        _LOGGER.debug("Value %s changed to %s ", attr, str(value))
+        _LOGGER.debug("Value %s changed to %s", attr, value)
         self.values[attr] = value
+
+        # Build and send channel-brightness packet
+        # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then 5 channels as 16-bit LE
+        cmd = bytearray([0x68, 0x04])
+        for ch in NUMBERS:
+            v = self.values.get(ch, 0)
+            cmd.append(v & 0xFF)
+            cmd.append((v >> 8) & 0xFF)
+        self.client.send(cmd)
 
     def select_option(self, attr: str, option: str) -> None:
         """Set option for select entities (e.g. mode)."""
         _LOGGER.debug("Option %s changed to %s", attr, option)
         self.values[attr] = option
-        # TODO: send BLE command to set mode when protocol is known
         if attr == "mode" and option in MODES:
             mode_byte = MODES.index(option)
-            # Build and send mode-change packet via self.client when format is known
-            _LOGGER.debug("Mode byte would be %s", mode_byte)
+            cmd = bytearray([0x68, 0x02, mode_byte])
+            self.client.send(cmd)
 
     def set_led_power(self, on: bool) -> None:
         """Send BLE command to turn the LED on or off (CMD_SWITCH 0x03)."""
-        # Protocol: 0x68 header, 0x03 = CMD_SWITCH, 0x00 off / 0x01 on; CRC added by client
         cmd = bytearray([0x68, 0x03, 0x01 if on else 0x00])
         self.client.send(cmd)
         self.values["led_on_off"] = on
@@ -127,6 +145,10 @@ class Device:
 
     def decode_update_packet(self, data: bytearray):
         """Decode the received Fluval packet and sort into values."""
+        if not data or len(data) < 13:
+            _LOGGER.warning("Received incomplete packet (%d bytes)", len(data) if data else 0)
+            return
+
         if data[2] == 0x00:
             self.values["mode"] = MODES[0]
         elif data[2] == 0x01:
@@ -148,18 +170,13 @@ class Device:
             self.values["channel_4"] = 0
 
         _LOGGER.debug(
-            "led: "
-            + str(self.values["led_on_off"])
-            + " mode: "
-            + str(self.values["mode"])
-            + " channels: "
-            + str(self.values["channel_1"])
-            + " / "
-            + str(self.values["channel_2"])
-            + " / "
-            + str(self.values["channel_3"])
-            + " / "
-            + str(self.values["channel_4"])
+            "State update — led:%s mode:%s ch:[%s/%s/%s/%s]",
+            self.values["led_on_off"],
+            self.values["mode"],
+            self.values["channel_1"],
+            self.values["channel_2"],
+            self.values["channel_3"],
+            self.values["channel_4"],
         )
 
         for handler in self.updates_component:

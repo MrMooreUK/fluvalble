@@ -1,18 +1,29 @@
 from homeassistant.components.number import NumberEntity
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core import DOMAIN
+from .core.device import Device
 from .core.entity import FluvalEntity
+
+
+def create_entities(device: Device) -> list:
+    """Build the entity list for this platform."""
+    return [FluvalNumber(device, ch) for ch in device.numbers()]
 
 
 async def async_setup_entry(
     hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback
 ) -> None:
-    device = hass.data[DOMAIN][config_entry.entry_id]
+    entry_data = hass.data[DOMAIN][config_entry.entry_id]
+    device = entry_data["device"]
 
-    add_entities([FluvalNumber(device, select) for select in device.numbers()])
+    if device:
+        add_entities(create_entities(device))
+    else:
+        entry_data["pending_add_entities"][Platform.NUMBER] = add_entities
 
 
 class FluvalNumber(FluvalEntity, NumberEntity):

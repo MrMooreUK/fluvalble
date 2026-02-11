@@ -39,10 +39,14 @@ def normalize_mac(mac: str) -> str:
 
 def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
     """True if this device advertises the Fluval service UUID or has Fluval in the name."""
-    name = (info.advertisement.local_name or info.name or "").lower()
-    uuids = list(info.advertisement.service_uuids) if info.advertisement.service_uuids else []
+    try:
+        adv = info.advertisement if info else None
+        name = ((adv.local_name if adv else None) or getattr(info, "name", None) or "").lower()
+        uuids = list(adv.service_uuids) if (adv and adv.service_uuids) else []
+    except Exception:  # noqa: BLE001
+        return False
     return (
-        FLUVAL_SERVICE_UUID.lower() in [u.lower() for u in uuids]
+        FLUVAL_SERVICE_UUID.lower() in [str(u).lower() for u in uuids]
         or "fluval" in name
     )
 
@@ -53,19 +57,26 @@ def _device_display_name(
     is_fluval: bool = False,
 ) -> str:
     """Build a clear display name so Fluval lights are easy to find in the list."""
-    name = (
-        (service_info.advertisement.local_name or service_info.name or "")
-        .strip()
-    )
+    try:
+        adv = service_info.advertisement if service_info else None
+        name = (
+            (adv.local_name if adv else None) or getattr(service_info, "name", None) or ""
+        ).strip()
+        address = getattr(service_info, "address", "") or ""
+    except Exception:  # noqa: BLE001
+        return "Unknown device"
     if not name or name.lower() == "unknown":
         name = "Fluval LED" if is_fluval else "Unknown device"
-    return f"{name} ({service_info.address})"
+    return f"{name} ({address})"
 
 
 async def _get_discovered_devices(hass: HomeAssistant) -> list[bluetooth.BluetoothServiceInfoBleak]:
     """Return only devices that look like Fluval lights (by service UUID or name)."""
     try:
-        all_devices = bluetooth.async_discovered_service_info(hass, connectable=True)
+        get_discovered = getattr(bluetooth, "async_discovered_service_info", None)
+        if not get_discovered:
+            return []
+        all_devices = get_discovered(hass, connectable=True)
     except Exception:  # noqa: BLE001
         return []
     # Only show devices that advertise the Fluval service or have "Fluval" in the name,

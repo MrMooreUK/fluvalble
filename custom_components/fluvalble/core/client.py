@@ -15,6 +15,13 @@ _LOGGER = logging.getLogger(__name__)
 
 ACTIVE_TIME = 120
 COMMAND_TIME = 15
+PING_INTERVAL = 10
+RECONNECT_DELAY = 5
+
+CHAR_NOTIFY = "00001002-0000-1000-8000-00805F9B34FB"
+CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805F9B34FB"
+CHAR_COMMAND_OUT = "00001001-0000-1000-8000-00805F9B34FB"
+CHAR_COMMAND_IO = "00001002-0000-1000-8000-00805F9B34FB"
 
 
 class Client:
@@ -32,6 +39,7 @@ class Client:
         self.update_callback = update_callback
 
         self.client: BleakClient | None = None
+        self._stopped = False
 
         self.ping_future: asyncio.Future | None = None
         self.ping_task: asyncio.Task | None = None
@@ -43,105 +51,194 @@ class Client:
 
         self.receive_buffer = b""
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
         self.ping_time = time.time() + ACTIVE_TIME
 
-        if not self.ping_task:
+        if not self.ping_task or self.ping_task.done():
             self.ping_task = asyncio.create_task(self._ping_loop())
+
+    def send(self, data: bytes):
+        """Queue a packet to send to the Fluval on the next ping cycle."""
+        self.send_time = time.time() + COMMAND_TIME
+        self.send_data = data
+        self.ping()
+
+        if self.ping_future and not self.ping_future.done():
+            self.ping_future.cancel()
+
+    async def stop(self):
+        """Disconnect and cancel all background tasks."""
+        self._stopped = True
+
+        if self.ping_future and not self.ping_future.done():
+            self.ping_future.cancel()
+
+        for task in (self.connect_task, self.ping_task):
+            if task and not task.done():
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+
+        if self.client:
+            try:
+                await self.client.disconnect()
+            except (BleakError, TimeoutError, OSError):
+                pass
+            self.client = None
+
+        self._set_status(False)
+
+    # ------------------------------------------------------------------
+    # BLE notification handler
+    # ------------------------------------------------------------------
 
     def notify_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
         """Handle packets sent by the Fluval."""
         decrypted = decrypt(data)
         if len(decrypted) == 17:
+            # Partial packet — accumulate
             self.receive_buffer += decrypted
         else:
-            _LOGGER.debug("Got all data: %s ", to_hex(self.receive_buffer))
-            self.update_callback(self.receive_buffer)
+            # Final fragment (or single packet): append, deliver, reset
+            full_payload = self.receive_buffer + decrypted
+            _LOGGER.debug("Got all data: %s", to_hex(full_payload))
+            if self.update_callback:
+                self.update_callback(full_payload)
             self.receive_buffer = b""
+
+    # ------------------------------------------------------------------
+    # Internal: initial connection
+    # ------------------------------------------------------------------
 
     async def _connect(self):
         """Connect to the Fluval and subscribe to notifications."""
-        self.client = await establish_connection(
-            BleakClient, self.device, self.device.address
-        )
+        try:
+            self.client = await establish_connection(
+                BleakClient, self.device, self.device.address
+            )
 
-        await self.client.start_notify(
-            "00001002-0000-1000-8000-00805F9B34FB", self.notify_callback
-        )
+            await self.client.start_notify(CHAR_NOTIFY, self.notify_callback)
 
-        if self.status_callback:
-            self.status_callback(True)
+            self._set_status(True)
 
-        # Step 0
-        await self.client.read_gatt_char("00001004-0000-1000-8000-00805F9B34FB")
+            # Handshake step 0 — dummy read
+            await self.client.read_gatt_char(CHAR_KEEPALIVE)
 
-        # Step 1
+            # Handshake step 1 — request current state
+            await self.client.write_gatt_char(
+                CHAR_COMMAND_OUT,
+                data=encrypt([0x68, 0x05]),
+                response=False,
+            )
+            _LOGGER.info("Connected to Fluval %s", self.device.address)
+        except (BleakError, TimeoutError, OSError) as err:
+            _LOGGER.warning(
+                "Initial connection to %s failed: %s — will retry via ping loop",
+                self.device.address,
+                err,
+            )
+            self._set_status(False)
 
-        await self.client.write_gatt_char(
-            "00001001-0000-1000-8000-00805F9B34FB",
-            data=encrypt([0x68, 0x05]),
-            response=False,
-        )
-
-    def send(self, data: bytes):
-        """Send a packet to the Fluval."""
-        # if send loop active - we change sending data
-        self.send_time = time.time() + COMMAND_TIME
-        self.send_data = data
-
-        self.ping()
-
-        if self.ping_future:
-            self.ping_future.cancel()
+    # ------------------------------------------------------------------
+    # Internal: keep-alive / reconnect loop
+    # ------------------------------------------------------------------
 
     async def _ping_loop(self):
-        """Ping the Fluval to keep connection."""
-        # TODO: Set current time instead of dummy packet
+        """Ping the Fluval to keep connection alive, reconnect on drop."""
         loop = asyncio.get_event_loop()
-        while time.time() < self.ping_time or True:
+
+        while not self._stopped and time.time() < self.ping_time:
             try:
-                self.client = await establish_connection(
-                    BleakClient, self.device, self.device.address
-                )
-                if self.status_callback:
-                    self.status_callback(True)
-
-                # heartbeat loop
-                while time.time() < self.ping_time or True:
-                    # important dummy read for keep connection
-                    await self.client.read_gatt_char(
-                        "00001004-0000-1000-8000-00805F9B34FB"
+                # (Re-)establish connection if needed
+                if not self.client or not self.client.is_connected:
+                    _LOGGER.debug("Reconnecting to %s", self.device.address)
+                    self.client = await establish_connection(
+                        BleakClient, self.device, self.device.address
                     )
-                    if self.send_data:
-                        if time.time() < self.send_time:
-                            await self.client.write_gatt_char(
-                                "00001002-0000-1000-8000-00805F9B34FB",
-                                data=encrypt(self.send_data),
-                                response=True,
-                            )
-                        self.send_data = None
+                    await self.client.start_notify(CHAR_NOTIFY, self.notify_callback)
+                    self._set_status(True)
 
-                    # asyncio.sleep(10) with cancel
-                    self.ping_future = loop.create_future()
-                    loop.call_later(10, self.ping_future.cancel)
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await self.ping_future
+                    # Re-do handshake after reconnect
+                    await self.client.read_gatt_char(CHAR_KEEPALIVE)
+                    await self.client.write_gatt_char(
+                        CHAR_COMMAND_OUT,
+                        data=encrypt([0x68, 0x05]),
+                        response=False,
+                    )
+                    _LOGGER.info("Reconnected to Fluval %s", self.device.address)
 
-                await self.client.disconnect()
+                # Keep-alive read
+                await self.client.read_gatt_char(CHAR_KEEPALIVE)
+
+                # Send queued command if within the time window
+                if self.send_data and time.time() < self.send_time:
+                    await self.client.write_gatt_char(
+                        CHAR_COMMAND_IO,
+                        data=encrypt(self.send_data),
+                        response=True,
+                    )
+                    _LOGGER.debug("Sent command to %s", self.device.address)
+                self.send_data = None
+
+                # Interruptible sleep (cancelled early when send() is called)
+                self.ping_future = loop.create_future()
+                loop.call_later(PING_INTERVAL, self.ping_future.cancel)
+                with contextlib.suppress(asyncio.CancelledError):
+                    await self.ping_future
+
+            except asyncio.CancelledError:
+                break
             except TimeoutError:
-                pass
-            except BleakError as e:
-                _LOGGER.debug("ping error", exc_info=e)
-            except Exception as e:
-                _LOGGER.warning("ping error", exc_info=e)
-            finally:
-                self.client = None
-                if self.status_callback:
-                    self.status_callback(False)
-                await asyncio.sleep(1)
+                _LOGGER.warning(
+                    "Timeout communicating with %s — will reconnect",
+                    self.device.address,
+                )
+                await self._safe_disconnect()
+            except BleakError as err:
+                _LOGGER.warning(
+                    "BLE error with %s: %s — will reconnect",
+                    self.device.address,
+                    err,
+                )
+                await self._safe_disconnect()
+            except Exception:
+                _LOGGER.exception(
+                    "Unexpected error in ping loop for %s", self.device.address
+                )
+                await self._safe_disconnect()
 
+            # Brief pause before reconnect attempt (unless we're shutting down)
+            if not self._stopped:
+                await asyncio.sleep(RECONNECT_DELAY)
+
+        # Cleanly disconnect when the active window expires
+        await self._safe_disconnect()
         self.ping_task = None
+        _LOGGER.debug("Ping loop ended for %s", self.device.address)
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _set_status(self, connected: bool):
+        """Notify the device of connection status changes."""
+        if self.status_callback:
+            self.status_callback(connected)
+
+    async def _safe_disconnect(self):
+        """Disconnect the BLE client without raising."""
+        self._set_status(False)
+        if self.client:
+            try:
+                await self.client.disconnect()
+            except (BleakError, TimeoutError, OSError):
+                pass
+            self.client = None
 
 
 def encrypt(data: bytearray) -> bytearray:
