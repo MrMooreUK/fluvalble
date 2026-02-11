@@ -23,11 +23,16 @@ PLATFORMS: list[Platform] = [
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Fluval Aquarium LED from a config entry."""
     hass.data.setdefault(DOMAIN, {})
-    mac = entry.data.get(CONF_MAC)
+    mac_raw = entry.data.get(CONF_MAC)
+    # HA's Bluetooth stack uses uppercase MACs internally. Normalize here
+    # so the address filter in async_register_callback matches correctly,
+    # even if an older config entry stored it as lowercase.
+    mac = mac_raw.strip().upper() if mac_raw else None
 
     _LOGGER.warning(
-        "[fluvalble] async_setup_entry called — mac=%s, entry_id=%s",
+        "[fluvalble] async_setup_entry called — mac=%s (raw=%s), entry_id=%s",
         mac,
+        mac_raw,
         entry.entry_id,
     )
 

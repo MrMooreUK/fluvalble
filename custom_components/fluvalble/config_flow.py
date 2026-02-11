@@ -28,12 +28,16 @@ MANUAL_ENTRY = "__manual__"
 
 
 def normalize_mac(mac: str) -> str:
-    """Normalize MAC to lowercase colon-separated for HA Bluetooth API."""
-    mac = mac.strip().lower().replace("-", ":").replace(" ", "")
+    """Normalize MAC to uppercase colon-separated for HA Bluetooth API.
+
+    HA's habluetooth stack stores addresses in uppercase (e.g. AA:BB:CC:DD:EE:FF).
+    The address filter in async_register_callback must match that format exactly.
+    """
+    mac = mac.strip().upper().replace("-", ":").replace(" ", "")
     if len(mac) == 12 and mac.isalnum():
         return ":".join(mac[i : i + 2] for i in range(0, 12, 2))
     if MAC_REGEX.match(mac):
-        return mac.lower()
+        return mac.upper()
     return mac
 
 
