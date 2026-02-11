@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -16,8 +17,20 @@ from .core import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
-# TODO adjust the data schema to the data that you need
-# To connect, only mac is required. Later we need things like number of lights etc.
+# Bluetooth address filter expects lowercase with colons (e.g. aa:bb:cc:dd:ee:ff)
+MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})$")
+
+
+def normalize_mac(mac: str) -> str:
+    """Normalize MAC to lowercase colon-separated for HA Bluetooth API."""
+    mac = mac.strip().lower().replace("-", ":").replace(" ", "")
+    if len(mac) == 12 and mac.isalnum():
+        return ":".join(mac[i : i + 2] for i in range(0, 12, 2))
+    if MAC_REGEX.match(mac):
+        return mac.lower()
+    return mac
+
+
 STEP_USER_DATA_SCHEMA = vol.Schema({vol.Required(CONF_MAC): str})
 
 
@@ -37,24 +50,14 @@ class PlaceholderHub:
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect.
-
-    Data has the keys from STEP_USER_DATA_SCHEMA with values provided by the user.
-    """
-    # TODO validate the data can be used to set up a connection.
-
-    hub = PlaceholderHub(data[CONF_MAC])
-
+    """Validate the user input allows us to connect."""
+    mac = normalize_mac(data[CONF_MAC])
+    if not MAC_REGEX.match(mac):
+        raise CannotConnect
+    hub = PlaceholderHub(mac)
     if not await hub.connect_test():
         raise CannotConnect
-
-    # If you cannot connect:
-    # throw CannotConnect
-    # If the authentication is wrong:
-    # InvalidAuth
-
-    # Return info that you want to store in the config entry.
-    return {"title": f"Fluval {data[CONF_MAC]}"}
+    return {"title": f"Fluval {mac}", CONF_MAC: mac}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -68,15 +71,19 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
         errors: dict[str, str] = {}
         if user_input is not None:
+            mac = normalize_mac(user_input[CONF_MAC])
+            if MAC_REGEX.match(mac):
+                await self.async_set_unique_id(mac)
+                self._abort_if_unique_id_configured()
             try:
-                info = await validate_input(self.hass, user_input)
+                info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
             except CannotConnect:
                 errors["base"] = "cannot_connect"
             except Exception:  # pylint: disable=broad-except
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                return self.async_create_entry(title=info["title"], data=user_input)
+                return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
 
         return self.async_show_form(
             step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
