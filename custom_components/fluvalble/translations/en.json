@@ -1,18 +1,25 @@
 {
-    "config": {
-        "abort": {
-            "already_configured": "Device is already configured"
+  "config": {
+    "abort": {
+      "already_configured": "Device is already configured"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect",
+      "unknown": "Unexpected error"
+    },
+    "step": {
+      "user": {
+        "data": {
+          "mac": "Device"
         },
-        "error": {
-            "cannot_connect": "Failed to connect",
-            "unknown": "Unexpected error"
+        "description": "Select your Fluval aquarium LED light. Ensure the light is on and in range. Found {count} device(s)."
+      },
+      "manual": {
+        "data": {
+          "mac": "MAC address"
         },
-        "step": {
-            "user": {
-                "data": {
-                    "mac": "Mac"
-                }
-            }
-        }
+        "description": "Enter the Bluetooth MAC address of your Fluval light (e.g. {mac_example}). You can find it in your phone's Bluetooth settings or the Fluval app."
+      }
     }
+  }
 }

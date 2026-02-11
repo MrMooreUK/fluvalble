@@ -3,8 +3,15 @@
     "step": {
       "user": {
         "data": {
+          "mac": "Device"
+        },
+        "description": "Select your Fluval aquarium LED light. Ensure the light is on and in range. Found {count} device(s)."
+      },
+      "manual": {
+        "data": {
           "mac": "[%key:common::config_flow::data::mac%]"
-        }
+        },
+        "description": "Enter the Bluetooth MAC address of your Fluval light (e.g. {mac_example}). You can find it in your phone's Bluetooth settings or the Fluval app."
       }
     },
     "error": {
