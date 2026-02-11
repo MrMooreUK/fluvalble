@@ -37,34 +37,40 @@ def normalize_mac(mac: str) -> str:
     return mac
 
 
-def _device_display_name(service_info: bluetooth.BluetoothServiceInfoBleak) -> str:
-    """Build a display name for a discovered device."""
+def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
+    """True if this device advertises the Fluval service UUID or has Fluval in the name."""
+    name = (info.advertisement.local_name or info.name or "").lower()
+    uuids = list(info.advertisement.service_uuids) if info.advertisement.service_uuids else []
+    return (
+        FLUVAL_SERVICE_UUID.lower() in [u.lower() for u in uuids]
+        or "fluval" in name
+    )
+
+
+def _device_display_name(
+    service_info: bluetooth.BluetoothServiceInfoBleak,
+    *,
+    is_fluval: bool = False,
+) -> str:
+    """Build a clear display name so Fluval lights are easy to find in the list."""
     name = (
         (service_info.advertisement.local_name or service_info.name or "")
         .strip()
-        or "Unknown"
     )
+    if not name or name.lower() == "unknown":
+        name = "Fluval LED" if is_fluval else "Unknown device"
     return f"{name} ({service_info.address})"
 
 
 async def _get_discovered_devices(hass: HomeAssistant) -> list[bluetooth.BluetoothServiceInfoBleak]:
-    """Return list of connectable BLE devices, preferring Fluval lights."""
+    """Return only devices that look like Fluval lights (by service UUID or name)."""
     try:
         all_devices = bluetooth.async_discovered_service_info(hass, connectable=True)
     except Exception:  # noqa: BLE001
         return []
-    # Prefer devices that advertise the Fluval service or have "Fluval" in the name
-    fluval_devices: list[bluetooth.BluetoothServiceInfoBleak] = []
-    other_devices: list[bluetooth.BluetoothServiceInfoBleak] = []
-    for info in all_devices:
-        name = (info.advertisement.local_name or info.name or "").lower()
-        uuids = list(info.advertisement.service_uuids) if info.advertisement.service_uuids else []
-        if FLUVAL_SERVICE_UUID.lower() in [u.lower() for u in uuids] or "fluval" in name:
-            fluval_devices.append(info)
-        else:
-            other_devices.append(info)
-    # Fluval first, then others (so user sees likely candidates at top)
-    return fluval_devices + other_devices
+    # Only show devices that advertise the Fluval service or have "Fluval" in the name,
+    # so the list isn't full of random BLE devices that are hard to identify.
+    return [info for info in all_devices if _is_likely_fluval(info)]
 
 
 class PlaceholderHub:
@@ -153,7 +159,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             mac = normalize_mac(info.address)
             if mac in configured_normalized:
                 continue
-            options[mac] = _device_display_name(info)
+            options[mac] = _device_display_name(info, is_fluval=True)
         options[MANUAL_ENTRY] = "My device isn't in the list — enter MAC address manually"
         return options
 

@@ -73,10 +73,10 @@ Your light must be controllable via the Fluval (e.g. FluvalSmart / FluvalConnect
 
 1. Go to **Settings** → **Devices & services** → **Add integration**.
 2. Search for **Fluval Aquarium LED** (or **Fluval BLE**).
-3. Enter the **MAC address** of your Fluval light.
-   - You can find it in your phone’s Bluetooth settings while the light is on and in pairing/discoverable mode, or from the Fluval app if it shows the device address.
-   - Format: `AA:BB:CC:DD:EE:FF` (colons optional in some setups).
-4. Submit. The integration will create one device with all entities.
+3. **Select your light** from the dropdown. The list shows only devices that look like Fluval lights (by Bluetooth service or name), so your aquarium light is easy to find. Ensure the light is **on** and in range before adding.
+   - If your light appears: choose it and submit. The integration creates one device with the switch, channels, mode select, and connection sensor.
+   - If it’s not in the list: choose **“My device isn’t in the list — enter MAC address manually”**, then enter the MAC (e.g. `AA:BB:CC:DD:EE:FF`). You can find the MAC in your phone’s Bluetooth settings or the Fluval app.
+4. After setup, the switch and other entities appear on the device. If you only see the integration card (e.g. “Update” / “Pre-release”) and no switch, see [Troubleshooting](#troubleshooting) below.
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 
@@ -165,7 +165,9 @@ Replace `fluval_xxxx` and `person.you` / `notify.mobile` with your actual entity
 | Issue | What to try |
 |-------|---------------------|
 | **Integration not found** | Restart HA after installation. Ensure the `fluvalble` folder is directly under `custom_components`. |
+| **Only see “Update” / “Pre-release”, no switch or entities** | The device wasn’t in the Bluetooth cache when the integration loaded. Remove the integration (delete the config entry), ensure the light is **on** and in range, then add the integration again and select your light from the dropdown. Restart HA after updating the integration. |
 | **Cannot connect / no entities** | Confirm the light is on and in BLE range. Check that HA has Bluetooth enabled and that the adapter can see other BLE devices. Verify the MAC address (no typos, correct format). |
+| **My light isn’t in the dropdown** | Ensure the light is on and advertising. Use “My device isn’t in the list” and enter the MAC manually (from phone Bluetooth settings or the Fluval app). |
 | **Switch doesn’t turn light on/off** | Ensure the light model uses the same BLE command set (e.g. CMD_SWITCH). Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
 | **Entities show “unavailable”** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
 | **Channels or mode don’t update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn’t report mode, the dropdown may not reflect external changes. |
@@ -189,3 +191,5 @@ The integration uses Home Assistant’s Bluetooth support to connect to the Fluv
 ---
 
 **Enjoy your smarter aquarium lighting.**
+
+*This README is the integration’s main documentation and is kept up to date with each release in this repo.*
