@@ -28,8 +28,14 @@ class FluvalSwitch(FluvalEntity, SwitchEntity):
         if self.hass:
             self._async_write_ha_state()
 
-    async def async_turn_off(self, **kwargs):
-        """Turn the entity off."""
+    async def async_turn_off(self, **kwargs) -> None:
+        """Turn the LED off."""
+        self.device.set_led_power(False)
+        self._attr_is_on = False
+        self._async_write_ha_state()
 
-    async def async_turn_on(self, **kwargs):
-        """Turn the entity on."""
+    async def async_turn_on(self, **kwargs) -> None:
+        """Turn the LED on."""
+        self.device.set_led_power(True)
+        self._attr_is_on = True
+        self._async_write_ha_state()

@@ -37,7 +37,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         logging.info("XXX Service Device: " + str(service_info.device))
         logging.info("XXX Service Advertisement: " + str(service_info.advertisement))
         if device := devices.get(entry.entry_id):
-            device.update_ble(service_info)
+            device.update_ble(service_info.advertisement)
             return
 
         devices[entry.entry_id] = Device(

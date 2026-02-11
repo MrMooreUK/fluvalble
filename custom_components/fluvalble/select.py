@@ -18,7 +18,8 @@ async def async_setup_entry(
 class FluvalSelect(FluvalEntity, SelectEntity):
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
-
+        if not attribute:
+            return
         self._attr_current_option = attribute.get("default")
         self._attr_options = attribute.get("options", [])
         self._attr_available = "default" in attribute

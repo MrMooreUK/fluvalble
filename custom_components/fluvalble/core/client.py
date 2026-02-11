@@ -104,8 +104,8 @@ class Client:
                 self.client = await establish_connection(
                     BleakClient, self.device, self.device.address
                 )
-                if self.callback:
-                    self.callback(True)
+                if self.status_callback:
+                    self.status_callback(True)
 
                 # heartbeat loop
                 while time.time() < self.ping_time or True:

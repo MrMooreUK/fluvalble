@@ -18,6 +18,8 @@ async def async_setup_entry(
 class FluvalNumber(FluvalEntity, NumberEntity):
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
+        if not attribute:
+            return
         self._attr_available = "value" in attribute
         self._attr_native_min_value = attribute.get("min")
         self._attr_native_max_value = attribute.get("max")

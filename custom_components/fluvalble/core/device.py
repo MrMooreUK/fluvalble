@@ -35,7 +35,7 @@ class Device:
     """Fluval BLE LED device class."""
 
     def __init__(
-        self, name: str, device: BLEDevice, advertisment: AdvertisementData
+        self, name: str, device: BLEDevice, advertisement: AdvertisementData
     ) -> None:
         """Initialize the device."""
         self.name = name
@@ -45,7 +45,7 @@ class Device:
         self.updates_connect: list = []
         self.updates_component: list = []
         self.values = {}
-        self.update_ble(advertisment)
+        self.update_ble(advertisement)
         self.values["channel_1"] = 0
         self.values["channel_2"] = 0
         self.values["channel_3"] = 0
@@ -59,10 +59,10 @@ class Device:
         """Expose the MAC address of the device."""
         return self.client.device.address
 
-    def update_ble(self, advertisment: AdvertisementData):
+    def update_ble(self, advertisement: AdvertisementData) -> None:
         """Update BLE metadata."""
         self.conn_info["last_seen"] = datetime.now(UTC)
-        self.conn_info["rssi"] = advertisment.rssi
+        self.conn_info["rssi"] = advertisement.rssi
 
         for handler in self.updates_connect:
             handler()
@@ -101,10 +101,29 @@ class Device:
         else:
             self.updates_component.append(handler)
 
-    def set_value(self, attr: str, value: int):
+    def set_value(self, attr: str, value: int) -> None:
         """Set values received by entities such as numbers and switches."""
         _LOGGER.debug("Value %s changed to %s ", attr, str(value))
         self.values[attr] = value
+
+    def select_option(self, attr: str, option: str) -> None:
+        """Set option for select entities (e.g. mode)."""
+        _LOGGER.debug("Option %s changed to %s", attr, option)
+        self.values[attr] = option
+        # TODO: send BLE command to set mode when protocol is known
+        if attr == "mode" and option in MODES:
+            mode_byte = MODES.index(option)
+            # Build and send mode-change packet via self.client when format is known
+            _LOGGER.debug("Mode byte would be %s", mode_byte)
+
+    def set_led_power(self, on: bool) -> None:
+        """Send BLE command to turn the LED on or off (CMD_SWITCH 0x03)."""
+        # Protocol: 0x68 header, 0x03 = CMD_SWITCH, 0x00 off / 0x01 on; CRC added by client
+        cmd = bytearray([0x68, 0x03, 0x01 if on else 0x00])
+        self.client.send(cmd)
+        self.values["led_on_off"] = on
+        for handler in self.updates_component:
+            handler()
 
     def decode_update_packet(self, data: bytearray):
         """Decode the received Fluval packet and sort into values."""
