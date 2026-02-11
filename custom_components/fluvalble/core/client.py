@@ -135,10 +135,10 @@ class Client:
                 data=encrypt([0x68, 0x05]),
                 response=False,
             )
-            _LOGGER.info("Connected to Fluval %s", self.device.address)
+            _LOGGER.warning("[fluvalble] Connected to Fluval %s", self.device.address)
         except (BleakError, TimeoutError, OSError) as err:
             _LOGGER.warning(
-                "Initial connection to %s failed: %s — will retry via ping loop",
+                "[fluvalble] Initial connection to %s failed: %s — will retry via ping loop",
                 self.device.address,
                 err,
             )
@@ -170,7 +170,7 @@ class Client:
                         data=encrypt([0x68, 0x05]),
                         response=False,
                     )
-                    _LOGGER.info("Reconnected to Fluval %s", self.device.address)
+                    _LOGGER.warning("[fluvalble] Reconnected to Fluval %s", self.device.address)
 
                 # Keep-alive read
                 await self.client.read_gatt_char(CHAR_KEEPALIVE)
@@ -195,20 +195,20 @@ class Client:
                 break
             except TimeoutError:
                 _LOGGER.warning(
-                    "Timeout communicating with %s — will reconnect",
+                    "[fluvalble] Timeout communicating with %s — will reconnect",
                     self.device.address,
                 )
                 await self._safe_disconnect()
             except BleakError as err:
                 _LOGGER.warning(
-                    "BLE error with %s: %s — will reconnect",
+                    "[fluvalble] BLE error with %s: %s — will reconnect",
                     self.device.address,
                     err,
                 )
                 await self._safe_disconnect()
             except Exception:
                 _LOGGER.exception(
-                    "Unexpected error in ping loop for %s", self.device.address
+                    "[fluvalble] Unexpected error in ping loop for %s", self.device.address
                 )
                 await self._safe_disconnect()
 

@@ -6,6 +6,7 @@
   ],
   "config_flow": true,
   "dependencies": [
+    "bluetooth",
     "bluetooth_adapters"
   ],
   "integration_type": "device",
@@ -15,6 +16,6 @@
   "requirements": [],
   "ssdp": [],
   "zeroconf": [],
-  "version": "0.0.1",
+  "version": "0.0.2",
   "issue_tracker": "https://github.com/MrMooreUK/fluvalble/issues"
 }

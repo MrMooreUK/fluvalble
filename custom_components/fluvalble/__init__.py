@@ -24,8 +24,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Fluval Aquarium LED from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     mac = entry.data.get(CONF_MAC)
+
+    _LOGGER.warning(
+        "[fluvalble] async_setup_entry called — mac=%s, entry_id=%s",
+        mac,
+        entry.entry_id,
+    )
+
     if not mac:
-        _LOGGER.warning("Config entry %s missing MAC", entry.entry_id)
+        _LOGGER.error("[fluvalble] Config entry %s has no MAC address", entry.entry_id)
         return False
 
     # Shared dict for this entry — platforms read from here.
@@ -42,6 +49,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         service_info: bluetooth.BluetoothServiceInfoBleak,
     ) -> Device:
         """Instantiate Device and add entities for any platforms that are already loaded."""
+        _LOGGER.warning(
+            "[fluvalble] Creating device for %s (name=%s)",
+            mac,
+            service_info.device.address,
+        )
         device = Device(
             entry.title, service_info.device, service_info.advertisement
         )
@@ -61,13 +73,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             Platform.SELECT: select_entities,
         }
 
+        pending_count = len(entry_data["pending_add_entities"])
+        _LOGGER.warning(
+            "[fluvalble] %d platform(s) pending entity creation", pending_count
+        )
+
         for platform, add_fn in entry_data["pending_add_entities"].items():
             factory = factories.get(platform)
             if factory:
-                add_fn(factory(device))
+                entities = factory(device)
+                _LOGGER.warning(
+                    "[fluvalble] Adding %d entities for platform %s",
+                    len(entities),
+                    platform,
+                )
+                add_fn(entities)
         entry_data["pending_add_entities"].clear()
 
-        _LOGGER.info("Fluval device %s ready", mac)
+        _LOGGER.warning("[fluvalble] Device %s ready", mac)
         return device
 
     # Try Bluetooth cache first — instant entity setup if the light was just discovered.
@@ -76,14 +99,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if get_last:
             service_info = get_last(hass, mac, connectable=True)
             if service_info:
+                _LOGGER.warning("[fluvalble] Found %s in BLE cache, creating device now", mac)
                 _create_device(service_info)
+            else:
+                _LOGGER.warning("[fluvalble] %s NOT in BLE cache, will wait for advertisement", mac)
+        else:
+            _LOGGER.warning("[fluvalble] async_last_service_info not available in this HA version")
     except Exception:  # noqa: BLE001
-        _LOGGER.debug("Could not create device from cache, will wait for BLE callback", exc_info=True)
+        _LOGGER.warning(
+            "[fluvalble] Error checking BLE cache for %s, will wait for advertisement",
+            mac,
+            exc_info=True,
+        )
 
     # Always forward platform setup — platforms will either create entities
     # immediately (device exists) or stash their add_entities callback
     # (device pending) so _create_device can populate them later.
+    _LOGGER.warning("[fluvalble] Forwarding platform setup for %s", mac)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _LOGGER.warning("[fluvalble] Platform setup complete for %s", mac)
 
     @callback
     def update_ble(
@@ -95,6 +129,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             return
 
         # First time seeing the device via BLE advertisement
+        _LOGGER.warning(
+            "[fluvalble] BLE advertisement received for %s — creating device",
+            mac,
+        )
         _create_device(service_info)
 
     entry.async_on_unload(
@@ -106,11 +144,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
 
+    _LOGGER.warning("[fluvalble] Setup complete for %s — waiting for BLE", mac)
     return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
+    _LOGGER.warning("[fluvalble] Unloading entry %s", entry.entry_id)
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
         if entry_data and entry_data.get("device"):
