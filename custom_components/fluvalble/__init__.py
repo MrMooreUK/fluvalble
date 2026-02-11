@@ -28,6 +28,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.warning("Config entry %s missing MAC", entry.entry_id)
         return False
 
+    # If the device is already in the Bluetooth cache (e.g. just discovered in config flow),
+    # create the device and entities immediately so the user gets the switch/controls right away.
+    service_info = bluetooth.async_last_service_info(hass, mac, connectable=True)
+    if service_info:
+        devices[entry.entry_id] = Device(
+            entry.title, service_info.device, service_info.advertisement
+        )
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
     @callback
     def update_ble(
         service_info: bluetooth.BluetoothServiceInfoBleak,
