@@ -1,3 +1,7 @@
+# Project docs (internal review / feedback tracking)
+BUILD_REVIEW.md
+MRZOTTEL_FEEDBACK.md
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
