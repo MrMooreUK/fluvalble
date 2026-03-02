@@ -168,6 +168,7 @@ Replace `fluval_xxxx` and `person.you` / `notify.mobile` with your actual entity
 | **Only see “Update” / “Pre-release”, no switch or entities** | The device wasn’t in the Bluetooth cache when the integration loaded. Remove the integration (delete the config entry), ensure the light is **on** and in range, then add the integration again and select your light from the dropdown. Restart HA after updating the integration. |
 | **Cannot connect / no entities** | Confirm the light is on and in BLE range. Check that HA has Bluetooth enabled and that the adapter can see other BLE devices. Verify the MAC address (no typos, correct format). |
 | **My light isn’t in the dropdown** | Ensure the light is on and advertising. Use “My device isn’t in the list” and enter the MAC manually (from phone Bluetooth settings or the Fluval app). |
+| **Lamp connected but doesn’t respond to actions** | Some devices use different encryption. See [MRZOTTEL_FEEDBACK.md](MRZOTTEL_FEEDBACK.md). Try the Fluval app first to confirm the light works. |
 | **Switch doesn’t turn light on/off** | Ensure the light model uses the same BLE command set (e.g. CMD_SWITCH). Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
 | **Entities show “unavailable”** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
 | **Channels or mode don’t update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn’t report mode, the dropdown may not reflect external changes. |
@@ -187,6 +188,8 @@ The integration uses Home Assistant’s Bluetooth support to connect to the Fluv
 - Original integration structure and BLE work by [@mrzottel](https://github.com/mrzottel).
 - Community reverse‑engineering of the Fluval BLE protocol (e.g. Planted Tank Forum, ESPHome/fluval projects).
 - Licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) in this repo.
+
+For feedback from the original owner on encryption, channel counts, and BLE packet handling, see [MRZOTTEL_FEEDBACK.md](MRZOTTEL_FEEDBACK.md).
 
 ---
 

@@ -1,4 +1,8 @@
-"""Encrypts/decrypts BLE packets for the fluval LED controller."""
+"""Encrypts/decrypts BLE packets for the Fluval LED controller.
+
+This implementation uses a fixed XOR scheme. Some devices (e.g. Plant 3.0) may use
+a per-message random key; see Planted Tank forum and MRZOTTEL_FEEDBACK.md.
+"""
 
 
 def encrypt(source: bytearray) -> bytearray:

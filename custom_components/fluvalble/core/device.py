@@ -12,7 +12,9 @@ from .client import Client
 
 _LOGGER = logging.getLogger(__name__)
 
-NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
+# All possible channels; device.numbers() returns a subset based on lamp type
+# (Aquasky 2.0 = 4 channels, Plant 3.0 / Reef 3.0 = 5 channels)
+ALL_CHANNELS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 SELECTS = ["mode"]
 MODES = ["manual", "automatic", "professional"]
 
@@ -46,12 +48,11 @@ class Device:
         self.updates_connect: list = []
         self.updates_component: list = []
         self.values = {}
+        # Channel count: 4 for Aquasky 2.0, 5 for Plant/Reef 3.0; detected from first packet
+        self._channel_count = 4
         self.update_ble(advertisement)
-        self.values["channel_1"] = 0
-        self.values["channel_2"] = 0
-        self.values["channel_3"] = 0
-        self.values["channel_4"] = 0
-        self.values["channel_5"] = 0
+        for ch in ALL_CHANNELS:
+            self.values[ch] = 0
         self.values["mode"] = "manual"
         self.values["led_on_off"] = False
 
@@ -96,18 +97,20 @@ class Device:
             handler()
 
     def numbers(self) -> list[str]:
-        """List of numbers provided by the device."""
-        return list(NUMBERS)
+        """List of channel numbers to expose as entities. Always 5 max; channel_5 is unavailable for 4-channel lamps."""
+        return list(ALL_CHANNELS)
 
     def selects(self) -> list[str]:
         """List of select boxes provided by the device."""
         return list(SELECTS)
 
-    def attribute(self, attr: str) -> Attribute:
+    def attribute(self, attr: str) -> Attribute | None:
         """Provide attributes to the entities like switches, numbers etc."""
         if attr == "connection":
             return Attribute(is_on=self.connected, extra=self.conn_info)
         if attr.startswith("channel_"):
+            if attr == "channel_5" and self._channel_count < 5:
+                return None  # 4-channel lamp (Aquasky 2.0): channel_5 not supported
             return Attribute(min=0, max=1000, step=50, value=self.values[attr])
         if attr == "mode":
             return Attribute(options=MODES, default=self.values[attr])
@@ -127,9 +130,10 @@ class Device:
         self.values[attr] = value
 
         # Build and send channel-brightness packet
-        # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then 5 channels as 16-bit LE
+        # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then channels as 16-bit LE
+        # Only send the channels this lamp supports (4 for Aquasky 2.0, 5 for Plant/Reef 3.0)
         cmd = bytearray([0x68, 0x04])
-        for ch in NUMBERS:
+        for ch in ALL_CHANNELS[: self._channel_count]:
             v = self.values.get(ch, 0)
             cmd.append(v & 0xFF)
             cmd.append((v >> 8) & 0xFF)
@@ -157,6 +161,11 @@ class Device:
         if not data or len(data) < 13:
             _LOGGER.warning("Received incomplete packet (%d bytes)", len(data) if data else 0)
             return
+
+        # Detect channel count from packet: 4 channels = bytes 5-12, 5 channels = bytes 5-14
+        if len(data) >= 15 and self._channel_count < 5:
+            self._channel_count = 5
+            _LOGGER.debug("Detected 5-channel lamp (Plant/Reef 3.0)")
 
         if data[2] == 0x00:
             self.values["mode"] = MODES[0]
