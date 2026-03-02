@@ -23,7 +23,12 @@ MAX_INITIAL_RETRIES = 30  # ~5 minutes of retrying at 10s intervals
 CHAR_NOTIFY = "00001002-0000-1000-8000-00805F9B34FB"
 CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805F9B34FB"
 CHAR_COMMAND_OUT = "00001001-0000-1000-8000-00805F9B34FB"
+# CHAR_COMMAND_IO intentionally shares UUID with CHAR_NOTIFY — the device uses
+# a single bidirectional characteristic for both outbound writes and notifications.
 CHAR_COMMAND_IO = "00001002-0000-1000-8000-00805F9B34FB"
+
+# Fluval packets come in two fragments; the first is always 17 decrypted bytes.
+PARTIAL_PACKET_SIZE = 17
 
 
 class Client:
@@ -106,7 +111,7 @@ class Client:
     def notify_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
         """Handle packets sent by the Fluval."""
         decrypted = decrypt(data)
-        if len(decrypted) == 17:
+        if len(decrypted) == PARTIAL_PACKET_SIZE:
             # Partial packet — accumulate
             self.receive_buffer += decrypted
         else:
@@ -192,7 +197,7 @@ class Client:
 
     async def _ping_loop(self):
         """Ping the Fluval to keep connection alive, reconnect on drop."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         while not self._stopped and time.time() < self.ping_time:
             try:
@@ -227,6 +232,9 @@ class Client:
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.ping_future
 
+                # Normal path complete — loop immediately without reconnect delay.
+                continue
+
             except asyncio.CancelledError:
                 break
             except TimeoutError:
@@ -249,7 +257,7 @@ class Client:
                 )
                 await self._safe_disconnect()
 
-            # Brief pause before reconnect attempt (unless we're shutting down)
+            # Pause before reconnect attempt after an error (unless we're shutting down)
             if not self._stopped:
                 await asyncio.sleep(RECONNECT_DELAY)
 

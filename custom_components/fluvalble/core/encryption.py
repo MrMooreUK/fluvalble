@@ -11,7 +11,7 @@ def encrypt(source: bytearray) -> bytearray:
     return encoded
 
 
-def decrypt(source: bytearray | bytearray) -> bytes:
+def decrypt(source: bytes | bytearray) -> bytes:
     """Decrypt a BLE packet from the Fluval LED controller."""
     key = source[0] ^ source[2]
     length = len(source)
