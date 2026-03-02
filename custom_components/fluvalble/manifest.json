@@ -1,6 +1,7 @@
 {
   "domain": "fluvalble",
   "name": "Fluval Aquarium LED",
+  "icon": "mdi:led-strip",
   "codeowners": [
     "@MrMooreUK"
   ],

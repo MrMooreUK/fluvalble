@@ -75,8 +75,8 @@ Your light must be controllable via the Fluval (e.g. FluvalSmart / FluvalConnect
 2. Search for **Fluval Aquarium LED** (or **Fluval BLE**).
 3. **Select your light** from the dropdown. The list shows only devices that look like Fluval lights (by Bluetooth service or name), so your aquarium light is easy to find. Ensure the light is **on** and in range before adding.
    - If your light appears: choose it and submit. The integration creates one device with the switch, channels, mode select, and connection sensor.
-   - If it’s not in the list: choose **“My device isn’t in the list — enter MAC address manually”**, then enter the MAC (e.g. `AA:BB:CC:DD:EE:FF`). You can find the MAC in your phone’s Bluetooth settings or the Fluval app.
-4. After setup, the switch and other entities appear on the device. If you only see the integration card (e.g. “Update” / “Pre-release”) and no switch, see [Troubleshooting](#troubleshooting) below.
+   - If it's not in the list: choose **"My device isn't in the list — enter MAC address manually"**, then enter the MAC (e.g. `AA:BB:CC:DD:EE:FF`). You can find the MAC in your phone's Bluetooth settings or the Fluval app.
+4. After setup, the switch and other entities appear on the device. If you only see the integration card (e.g. "Update" / "Pre-release") and no switch, see [Troubleshooting](#troubleshooting) below.
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 
@@ -84,16 +84,16 @@ No cloud account or app login is needed; the integration talks directly to the l
 
 ## Entities
 
-After setup you’ll see one device with entities like:
+After setup you'll see one device with entities like:
 
 | Entity type | Purpose |
-|-------------|--------|
+|-------------|---------|
 | **Switch** | `switch.fluval_xxxx_led_on_off` — Turn the light on or off. |
 | **Numbers** | `number.fluval_xxxx_channel_1` … `channel_5` — Brightness 0–1000 per channel (manual mode). |
 | **Select** | `select.fluval_xxxx_mode` — Manual / Automatic / Professional. |
 | **Binary sensor** | `binary_sensor.fluval_xxxx_connection` — Connection status (diagnostic). |
 
-Replace `fluval_xxxx` with your device’s unique ID (derived from MAC). Add them to dashboards, use in automations, or expose to Google Home / Apple Home via the HA bridges.
+Replace `fluval_xxxx` with your device's unique ID (derived from MAC). Add them to dashboards, use in automations, or expose to Google Home / Apple Home via the HA bridges.
 
 ---
 
@@ -123,7 +123,7 @@ Replace `fluval_xxxx` with your device’s unique ID (derived from MAC). Add the
         entity_id: switch.fluval_xxxx_led_on_off
 ```
 
-**Dim the light when you’re away**
+**Dim the light when you're away**
 
 ```yaml
 - id: fluval_away_dim
@@ -165,21 +165,48 @@ Replace `fluval_xxxx` and `person.you` / `notify.mobile` with your actual entity
 | Issue | What to try |
 |-------|---------------------|
 | **Integration not found** | Restart HA after installation. Ensure the `fluvalble` folder is directly under `custom_components`. |
-| **Only see “Update” / “Pre-release”, no switch or entities** | The device wasn’t in the Bluetooth cache when the integration loaded. Remove the integration (delete the config entry), ensure the light is **on** and in range, then add the integration again and select your light from the dropdown. Restart HA after updating the integration. |
+| **Only see "Update" / "Pre-release", no switch or entities** | The device wasn't in the Bluetooth cache when the integration loaded. Remove the integration (delete the config entry), ensure the light is **on** and in range, then add the integration again and select your light from the dropdown. Restart HA after updating the integration. |
 | **Cannot connect / no entities** | Confirm the light is on and in BLE range. Check that HA has Bluetooth enabled and that the adapter can see other BLE devices. Verify the MAC address (no typos, correct format). |
-| **My light isn’t in the dropdown** | Ensure the light is on and advertising. Use “My device isn’t in the list” and enter the MAC manually (from phone Bluetooth settings or the Fluval app). |
-| **Lamp connected but doesn’t respond to actions** | Some devices use different encryption. See [MRZOTTEL_FEEDBACK.md](MRZOTTEL_FEEDBACK.md). Try the Fluval app first to confirm the light works. |
-| **Switch doesn’t turn light on/off** | Ensure the light model uses the same BLE command set (e.g. CMD_SWITCH). Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
-| **Entities show “unavailable”** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
-| **Channels or mode don’t update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn’t report mode, the dropdown may not reflect external changes. |
+| **My light isn't in the dropdown** | Ensure the light is on and advertising. Use "My device isn't in the list" and enter the MAC manually (from phone Bluetooth settings or the Fluval app). |
+| **Lamp connected but doesn't respond to actions** | Some devices use different encryption. See [MRZOTTEL_FEEDBACK.md](MRZOTTEL_FEEDBACK.md). Try the Fluval app first to confirm the light works. |
+| **Switch doesn't turn light on/off** | Ensure the light model uses the same BLE command set (e.g. CMD_SWITCH). Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
+| **Entities show "unavailable"** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
+| **Channels or mode don't update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn't report mode, the dropdown may not reflect external changes. |
+| **Channel sliders don't change the light** | See [Channel sliders troubleshooting](#channel-sliders-dont-change-the-light) below. |
 
-If you have a different Fluval BLE model and the switch or other controls don’t behave as expected, open an issue with your model name and (if possible) a note on what works in the official app.
+### Channel sliders don't change the light
+
+If the switch and mode work but brightness sliders have no effect:
+
+1. **Enable debug logging** to see what's being sent. Add to `configuration.yaml`:
+   ```yaml
+   logger:
+     default: info
+     logs:
+       custom_components.fluvalble: debug
+   ```
+   Restart HA, move a slider, then check **Settings → System → Logs** (or the full log file). Look for lines like:
+   ```text
+   Sending to XX:XX:XX:XX:XX:XX — raw: 68 04 03 e8 00 00 00 00 ... | encrypted: 54 ...
+   ```
+   - `raw` = command before encryption (e.g. `68 04` = brightness, then channel bytes)
+   - `encrypted` = what goes over BLE
+
+2. **Verify the Fluval app works** — If the app can change brightness, the hardware is fine; the protocol may differ for your model.
+
+3. **Try mode first** — Switch to **Manual** mode via the select entity (or the app), then adjust sliders. Some devices only accept channel changes in Manual.
+
+4. **Check your model** — Different Fluval models (Plant 3.0, Reef 3.0, Aquasky 2.0, etc.) may use slightly different command formats or encryption. Open an issue with your model name, MAC (if you're comfortable), and a log snippet showing the `raw` and `encrypted` bytes when you move a slider.
+
+5. **Packet capture (advanced)** — Use an ESP32 or nRF Sniffer to capture BLE traffic while changing brightness in the Fluval app, then compare with what this integration sends. See [MRZOTTEL_FEEDBACK.md](MRZOTTEL_FEEDBACK.md) for protocol notes.
+
+If you have a different Fluval BLE model and the switch or other controls don't behave as expected, open an issue with your model name and (if possible) a note on what works in the official app.
 
 ---
 
 ## How it works
 
-The integration uses Home Assistant’s Bluetooth support to connect to the Fluval light. Commands (on/off, brightness, mode) are sent as small encrypted BLE packets; the encryption scheme is based on reverse‑engineered protocols used by Fluval’s own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3-0-ble-protocol.1325539/)). No data is sent to Fluval or any third party—everything stays between your HA instance and the fixture.
+The integration uses Home Assistant's Bluetooth support to connect to the Fluval light. Commands (on/off, brightness, mode) are sent as small encrypted BLE packets; the encryption scheme is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). No data is sent to Fluval or any third party—everything stays between your HA instance and the fixture.
 
 ---
 
@@ -195,4 +222,4 @@ For feedback from the original owner on encryption, channel counts, and BLE pack
 
 **Enjoy your smarter aquarium lighting.**
 
-*This README is the integration’s main documentation and is kept up to date with each release in this repo.*
+*This README is the integration's main documentation and is kept up to date with each release in this repo.*

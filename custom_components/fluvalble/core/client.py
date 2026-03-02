@@ -218,12 +218,18 @@ class Client:
                 # Send queued commands if within the time window (small delay between each)
                 while self.send_queue and time.time() < self.send_time:
                     cmd = self.send_queue.pop(0)
+                    encrypted = encrypt(cmd)
+                    _LOGGER.debug(
+                        "Sending to %s — raw: %s | encrypted: %s",
+                        self.device.address,
+                        to_hex(cmd),
+                        to_hex(encrypted),
+                    )
                     await self.client.write_gatt_char(
                         CHAR_COMMAND_IO,
-                        data=encrypt(cmd),
+                        data=encrypted,
                         response=True,
                     )
-                    _LOGGER.debug("Sent command to %s", self.device.address)
                     if self.send_queue:
                         await asyncio.sleep(0.2)  # Let device process before next command
 
