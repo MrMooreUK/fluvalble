@@ -139,13 +139,14 @@ class Device:
                 handler()
 
         # Build and send channel-brightness packet
-        # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then channels as 16-bit LE
+        # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then channels as 16-bit BIG-ENDIAN
+        # (Planted Tank / Fluval app format; 0xFFFF = no change, we send actual values)
         # Only send the channels this lamp supports (4 for Aquasky 2.0, 5 for Plant/Reef 3.0)
         cmd = bytearray([0x68, 0x04])
         for ch in ALL_CHANNELS[: self._channel_count]:
-            v = self.values.get(ch, 0)
+            v = min(1000, max(0, self.values.get(ch, 0)))
+            cmd.append((v >> 8) & 0xFF)  # high byte first (big-endian)
             cmd.append(v & 0xFF)
-            cmd.append((v >> 8) & 0xFF)
         commands.append(cmd)
         self.client.send(commands)
 
@@ -187,13 +188,13 @@ class Device:
         self.values["led_on_off"] = data[3] > 0x00
 
         if self.values["mode"] == "manual":
-            self.values["channel_1"] = (data[6] << 8) | (data[5] & 0xFF)
-            self.values["channel_2"] = (data[8] << 8) | (data[7] & 0xFF)
-            self.values["channel_3"] = (data[10] << 8) | (data[9] & 0xFF)
-            self.values["channel_4"] = (data[12] << 8) | (data[11] & 0xFF)
-            # channel_5 occupies bytes 13–14 when present
+            # Channel bytes: layout may vary by device; use same order as we send (big-endian)
+            self.values["channel_1"] = (data[5] << 8) | (data[6] & 0xFF)
+            self.values["channel_2"] = (data[7] << 8) | (data[8] & 0xFF)
+            self.values["channel_3"] = (data[9] << 8) | (data[10] & 0xFF)
+            self.values["channel_4"] = (data[11] << 8) | (data[12] & 0xFF)
             if len(data) >= 15:
-                self.values["channel_5"] = (data[14] << 8) | (data[13] & 0xFF)
+                self.values["channel_5"] = (data[13] << 8) | (data[14] & 0xFF)
         else:
             self.values["channel_1"] = 0
             self.values["channel_2"] = 0

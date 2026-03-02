@@ -215,7 +215,7 @@ class Client:
                 # Keep-alive read
                 await self.client.read_gatt_char(CHAR_KEEPALIVE)
 
-                # Send queued commands if within the time window
+                # Send queued commands if within the time window (small delay between each)
                 while self.send_queue and time.time() < self.send_time:
                     cmd = self.send_queue.pop(0)
                     await self.client.write_gatt_char(
@@ -224,6 +224,8 @@ class Client:
                         response=True,
                     )
                     _LOGGER.debug("Sent command to %s", self.device.address)
+                    if self.send_queue:
+                        await asyncio.sleep(0.2)  # Let device process before next command
 
                 # Interruptible sleep (cancelled early when send() is called)
                 self.ping_future = loop.create_future()
