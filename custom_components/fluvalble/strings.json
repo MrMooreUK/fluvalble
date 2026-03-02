@@ -16,6 +16,7 @@
     },
     "error": {
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
+      "invalid_format": "Invalid MAC address format. Use AA:BB:CC:DD:EE:FF.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {

@@ -132,8 +132,8 @@ class Client:
             if self._stopped:
                 return
 
-            _LOGGER.warning(
-                "[fluvalble] Connection attempt %d/%d to %s",
+            _LOGGER.debug(
+                "Connection attempt %d/%d to %s",
                 attempt,
                 MAX_INITIAL_RETRIES,
                 self.device.address,
@@ -145,8 +145,8 @@ class Client:
             if self._stopped:
                 return
 
-            _LOGGER.warning(
-                "[fluvalble] Attempt %d failed for %s — retrying in %ds",
+            _LOGGER.debug(
+                "Attempt %d failed for %s — retrying in %ds",
                 attempt,
                 self.device.address,
                 INITIAL_RETRY_DELAY,
@@ -154,8 +154,7 @@ class Client:
             await asyncio.sleep(INITIAL_RETRY_DELAY)
 
         _LOGGER.warning(
-            "[fluvalble] Gave up connecting to %s after %d attempts. "
-            "Will retry when a command is sent.",
+            "Gave up connecting to %s after %d attempts.",
             self.device.address,
             MAX_INITIAL_RETRIES,
         )
@@ -180,11 +179,11 @@ class Client:
                 data=encrypt([0x68, 0x05]),
                 response=False,
             )
-            _LOGGER.warning("[fluvalble] Connected to Fluval %s", self.device.address)
+            _LOGGER.info("Connected to Fluval %s", self.device.address)
             return True
         except (BleakError, TimeoutError, OSError) as err:
             _LOGGER.warning(
-                "[fluvalble] Connection to %s failed: %s",
+                "Connection to %s failed: %s",
                 self.device.address,
                 err,
             )
@@ -203,9 +202,7 @@ class Client:
             try:
                 # (Re-)establish connection if needed
                 if not self.client or not self.client.is_connected:
-                    _LOGGER.warning(
-                        "[fluvalble] Reconnecting to %s", self.device.address
-                    )
+                    _LOGGER.debug("Reconnecting to %s", self.device.address)
                     if not await self._do_connect():
                         # Connection failed — wait and retry
                         await asyncio.sleep(RECONNECT_DELAY)
@@ -221,9 +218,7 @@ class Client:
                         data=encrypt(self.send_data),
                         response=True,
                     )
-                    _LOGGER.warning(
-                        "[fluvalble] Sent command to %s", self.device.address
-                    )
+                    _LOGGER.debug("Sent command to %s", self.device.address)
                 self.send_data = None
 
                 # Interruptible sleep (cancelled early when send() is called)
@@ -239,20 +234,20 @@ class Client:
                 break
             except TimeoutError:
                 _LOGGER.warning(
-                    "[fluvalble] Timeout communicating with %s — will reconnect",
+                    "Timeout communicating with %s — will reconnect",
                     self.device.address,
                 )
                 await self._safe_disconnect()
             except BleakError as err:
                 _LOGGER.warning(
-                    "[fluvalble] BLE error with %s: %s — will reconnect",
+                    "BLE error with %s: %s — will reconnect",
                     self.device.address,
                     err,
                 )
                 await self._safe_disconnect()
             except Exception:
                 _LOGGER.exception(
-                    "[fluvalble] Unexpected error in ping loop for %s",
+                    "Unexpected error in ping loop for %s",
                     self.device.address,
                 )
                 await self._safe_disconnect()
@@ -264,9 +259,7 @@ class Client:
         # Cleanly disconnect when the active window expires
         await self._safe_disconnect()
         self.ping_task = None
-        _LOGGER.warning(
-            "[fluvalble] Ping loop ended for %s", self.device.address
-        )
+        _LOGGER.debug("Ping loop ended for %s", self.device.address)
 
     # ------------------------------------------------------------------
     # Helpers

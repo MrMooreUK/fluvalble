@@ -5,6 +5,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect",
+      "invalid_format": "Invalid MAC address format. Use AA:BB:CC:DD:EE:FF.",
       "unknown": "Unexpected error"
     },
     "step": {

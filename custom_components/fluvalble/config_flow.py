@@ -9,9 +9,9 @@ import voluptuous as vol
 
 from homeassistant.components import bluetooth
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
 from .core import DOMAIN
@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 # Fluval LED GATT service UUID (advertised by the light)
 FLUVAL_SERVICE_UUID = "00001002-0000-1000-8000-00805F9B34FB"
 
-# Bluetooth address filter expects lowercase with colons (e.g. aa:bb:cc:dd:ee:ff)
+# Bluetooth address filter expects uppercase with colons (e.g. AA:BB:CC:DD:EE:FF)
 MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})$")
 
 MANUAL_ENTRY = "__manual__"
@@ -120,7 +120,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle the initial step: pick from discovered devices or enter MAC manually."""
         configured = {
             entry.data.get(CONF_MAC)
@@ -180,23 +180,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_manual(
         self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    ) -> ConfigFlowResult:
         """Handle manual MAC address entry."""
         errors: dict[str, str] = {}
         if user_input is not None:
             mac = normalize_mac(user_input[CONF_MAC])
-            if MAC_REGEX.match(mac):
+            if not MAC_REGEX.match(mac):
+                errors["base"] = "invalid_format"
+            else:
                 await self.async_set_unique_id(mac)
                 self._abort_if_unique_id_configured()
-            try:
-                info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
-            else:
-                return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
+                try:
+                    info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
+                except CannotConnect:
+                    errors["base"] = "cannot_connect"
+                except Exception:  # pylint: disable=broad-except
+                    _LOGGER.exception("Unexpected exception")
+                    errors["base"] = "unknown"
+                else:
+                    return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
 
         return self.async_show_form(
             step_id="manual",

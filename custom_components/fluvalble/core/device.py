@@ -172,20 +172,25 @@ class Device:
             self.values["channel_2"] = (data[8] << 8) | (data[7] & 0xFF)
             self.values["channel_3"] = (data[10] << 8) | (data[9] & 0xFF)
             self.values["channel_4"] = (data[12] << 8) | (data[11] & 0xFF)
+            # channel_5 occupies bytes 13–14 when present
+            if len(data) >= 15:
+                self.values["channel_5"] = (data[14] << 8) | (data[13] & 0xFF)
         else:
             self.values["channel_1"] = 0
             self.values["channel_2"] = 0
             self.values["channel_3"] = 0
             self.values["channel_4"] = 0
+            self.values["channel_5"] = 0
 
         _LOGGER.debug(
-            "State update — led:%s mode:%s ch:[%s/%s/%s/%s]",
+            "State update — led:%s mode:%s ch:[%s/%s/%s/%s/%s]",
             self.values["led_on_off"],
             self.values["mode"],
             self.values["channel_1"],
             self.values["channel_2"],
             self.values["channel_3"],
             self.values["channel_4"],
+            self.values["channel_5"],
         )
 
         for handler in self.updates_component:
