@@ -54,6 +54,7 @@ class Client:
 
         self.send_data = None
         self.send_time = 0
+        self.send_queue: list[bytes] = []
         self.connect_task = asyncio.create_task(self._connect_with_retry())
 
         self.receive_buffer = b""
@@ -73,10 +74,13 @@ class Client:
         if not self.ping_task or self.ping_task.done():
             self.ping_task = asyncio.create_task(self._ping_loop())
 
-    def send(self, data: bytes):
-        """Queue a packet to send to the Fluval on the next ping cycle."""
+    def send(self, data: bytes | list[bytes]):
+        """Queue one or more packets to send to the Fluval on the next ping cycle."""
         self.send_time = time.time() + COMMAND_TIME
-        self.send_data = data
+        if isinstance(data, list):
+            self.send_queue.extend(data)
+        else:
+            self.send_queue.append(data)
         self.ping()
 
         if self.ping_future and not self.ping_future.done():
@@ -211,15 +215,15 @@ class Client:
                 # Keep-alive read
                 await self.client.read_gatt_char(CHAR_KEEPALIVE)
 
-                # Send queued command if within the time window
-                if self.send_data and time.time() < self.send_time:
+                # Send queued commands if within the time window
+                while self.send_queue and time.time() < self.send_time:
+                    cmd = self.send_queue.pop(0)
                     await self.client.write_gatt_char(
                         CHAR_COMMAND_IO,
-                        data=encrypt(self.send_data),
+                        data=encrypt(cmd),
                         response=True,
                     )
                     _LOGGER.debug("Sent command to %s", self.device.address)
-                self.send_data = None
 
                 # Interruptible sleep (cancelled early when send() is called)
                 self.ping_future = loop.create_future()

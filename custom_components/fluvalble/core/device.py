@@ -129,6 +129,15 @@ class Device:
         _LOGGER.debug("Value %s changed to %s", attr, value)
         self.values[attr] = value
 
+        # Channel commands only work in manual mode. If we're in automatic/professional,
+        # switch to manual first so the brightness change takes effect.
+        commands: list[bytearray] = []
+        if self.values.get("mode") != "manual":
+            commands.append(bytearray([0x68, 0x02, 0x00]))  # CMD_MODE = manual
+            self.values["mode"] = "manual"
+            for handler in self.updates_component:
+                handler()
+
         # Build and send channel-brightness packet
         # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then channels as 16-bit LE
         # Only send the channels this lamp supports (4 for Aquasky 2.0, 5 for Plant/Reef 3.0)
@@ -137,7 +146,8 @@ class Device:
             v = self.values.get(ch, 0)
             cmd.append(v & 0xFF)
             cmd.append((v >> 8) & 0xFF)
-        self.client.send(cmd)
+        commands.append(cmd)
+        self.client.send(commands)
 
     def select_option(self, attr: str, option: str) -> None:
         """Set option for select entities (e.g. mode)."""
