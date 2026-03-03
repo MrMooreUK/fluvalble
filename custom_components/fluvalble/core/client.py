@@ -114,6 +114,13 @@ class Client:
 
     def notify_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
         """Handle packets sent by the Fluval."""
+        if not data or len(data) < 3:
+            _LOGGER.warning(
+                "Received short/empty BLE notification (%d bytes) from %s — ignoring",
+                len(data) if data else 0,
+                self.device.address,
+            )
+            return
         decrypted = decrypt(data)
         if len(decrypted) == PARTIAL_PACKET_SIZE:
             # Partial packet — accumulate
@@ -180,7 +187,7 @@ class Client:
             # Handshake step 1 — request current state
             await self.client.write_gatt_char(
                 CHAR_COMMAND_OUT,
-                data=encrypt([0x68, 0x05]),
+                data=encrypt(bytearray([0x68, 0x05])),
                 response=False,
             )
             _LOGGER.info("Connected to Fluval %s", self.device.address)

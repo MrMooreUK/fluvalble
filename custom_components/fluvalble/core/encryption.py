@@ -25,7 +25,7 @@ def decrypt(source: bytes | bytearray) -> bytes:
     return decrypted
 
 
-def add_crc(source: bytearray) -> bytes:
+def add_crc(source: bytearray) -> bytearray:
     """Calculate CRC for the packet."""
     crc = 0x0
     for b in source:

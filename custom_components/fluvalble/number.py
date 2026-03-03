@@ -30,6 +30,9 @@ class FluvalNumber(FluvalEntity, NumberEntity):
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
         if not attribute:
+            self._attr_available = False
+            if self.hass:
+                self._async_write_ha_state()
             return
         self._attr_available = "value" in attribute
         self._attr_native_min_value = attribute.get("min")
