@@ -88,24 +88,11 @@ async def _get_discovered_devices(hass: HomeAssistant) -> list[bluetooth.Bluetoo
     return [info for info in all_devices if _is_likely_fluval(info)]
 
 
-class PlaceholderHub:
-    """Placeholder for validation (TODO: replace with real BLE connect test)."""
-
-    def __init__(self, mac: str) -> None:
-        self.mac = mac
-
-    async def connect_test(self) -> bool:
-        return True
-
-
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input allows us to connect."""
+    """Validate the user input and return cleaned config data."""
     mac = normalize_mac(data[CONF_MAC])
     if not MAC_REGEX.match(mac):
-        raise CannotConnect
-    hub = PlaceholderHub(mac)
-    if not await hub.connect_test():
-        raise CannotConnect
+        raise InvalidFormat
     return {"title": f"Fluval {mac}", CONF_MAC: mac}
 
 
@@ -117,6 +104,44 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         super().__init__()
         self._discovered_devices: list[bluetooth.BluetoothServiceInfoBleak] = []
+        self._bluetooth_discovery_info: bluetooth.BluetoothServiceInfoBleak | None = None
+
+    # ------------------------------------------------------------------
+    # Bluetooth auto-discovery (triggered by manifest.json bluetooth key)
+    # ------------------------------------------------------------------
+
+    async def async_step_bluetooth(
+        self, discovery_info: bluetooth.BluetoothServiceInfoBleak
+    ) -> ConfigFlowResult:
+        """Handle Bluetooth auto-discovery when a Fluval light is seen."""
+        mac = normalize_mac(discovery_info.address)
+        await self.async_set_unique_id(mac)
+        self._abort_if_unique_id_configured()
+
+        self._bluetooth_discovery_info = discovery_info
+        name = _device_display_name(discovery_info, is_fluval=True)
+        self.context["title_placeholders"] = {"name": name}
+        return await self.async_step_confirm()
+
+    async def async_step_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Confirm adding a device found via Bluetooth auto-discovery."""
+        if user_input is not None and self._bluetooth_discovery_info is not None:
+            mac = normalize_mac(self._bluetooth_discovery_info.address)
+            info = await validate_input(self.hass, {CONF_MAC: mac})
+            return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
+
+        return self.async_show_form(
+            step_id="confirm",
+            description_placeholders={
+                "name": self.context.get("title_placeholders", {}).get("name", "Fluval LED")
+            },
+        )
+
+    # ------------------------------------------------------------------
+    # Manual config flow (initiated by user from Integrations page)
+    # ------------------------------------------------------------------
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -129,6 +154,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         }
         configured_normalized = {normalize_mac(m) for m in configured if m}
 
+        errors: dict[str, str] = {}
         if user_input is not None:
             selected = user_input.get(CONF_MAC)
             if selected == MANUAL_ENTRY:
@@ -139,20 +165,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 try:
                     info = await validate_input(self.hass, {CONF_MAC: mac})
-                except CannotConnect:
-                    return self.async_show_form(
-                        step_id="user",
-                        data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(self._device_options(configured_normalized))}),
-                        errors={"base": "cannot_connect"},
-                    )
+                except InvalidFormat:
+                    errors["base"] = "invalid_format"
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Unexpected exception")
-                    return self.async_show_form(
-                        step_id="user",
-                        data_schema=vol.Schema({vol.Required(CONF_MAC): vol.In(self._device_options(configured_normalized))}),
-                        errors={"base": "unknown"},
-                    )
-                return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
+                    errors["base"] = "unknown"
+                else:
+                    return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
 
         self._discovered_devices = await _get_discovered_devices(self.hass)
         options = self._device_options(configured_normalized)
@@ -164,6 +183,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=schema,
+            errors=errors,
             description_placeholders={"count": str(len([o for o in options if o != MANUAL_ENTRY]))},
         )
 
@@ -192,8 +212,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._abort_if_unique_id_configured()
                 try:
                     info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
-                except CannotConnect:
-                    errors["base"] = "cannot_connect"
+                except InvalidFormat:
+                    errors["base"] = "invalid_format"
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Unexpected exception")
                     errors["base"] = "unknown"
@@ -210,3 +230,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
 class CannotConnect(HomeAssistantError):
     """Error to indicate we cannot connect."""
+
+
+class InvalidFormat(HomeAssistantError):
+    """Error to indicate the MAC address format is invalid."""

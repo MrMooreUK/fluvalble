@@ -30,6 +30,9 @@ class FluvalSelect(FluvalEntity, SelectEntity):
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
         if not attribute:
+            self._attr_available = False
+            if self.hass:
+                self._async_write_ha_state()
             return
         self._attr_current_option = attribute.get("default")
         self._attr_options = attribute.get("options", [])

@@ -25,12 +25,17 @@ class FluvalEntity(Entity):
             model="Aquarium LED",
             name=device.name or "Fluval",
         )
-        self._attr_name = attr.replace("_", " ").title()
+        self._attr_translation_key = attr
         self._attr_unique_id = device.mac.replace(":", "") + "_" + attr
 
-        self.internal_update()
+        # Store the bound method so deregistration uses the exact same object.
+        self._update_handler = self.internal_update
+        self._update_handler()
+        device.register_update(attr, self._update_handler)
 
-        device.register_update(attr, self.internal_update)
+    async def async_will_remove_from_hass(self) -> None:
+        """Clean up update-handler registration when the entity is removed."""
+        self.device.deregister_update(self.attr, self._update_handler)
 
     def internal_update(self):
         """Provide a function for internal updates."""

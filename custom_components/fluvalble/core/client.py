@@ -292,6 +292,8 @@ class Client:
     async def _safe_disconnect(self):
         """Disconnect the BLE client without raising."""
         self._set_status(False)
+        # Discard any partially-assembled packet so the next connection starts clean.
+        self.receive_buffer = b""
         if self.client:
             try:
                 await self.client.disconnect()

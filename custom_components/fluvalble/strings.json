@@ -12,6 +12,9 @@
           "mac": "[%key:common::config_flow::data::mac%]"
         },
         "description": "Enter the Bluetooth MAC address of your Fluval light (e.g. {mac_example}). You can find it in your phone's Bluetooth settings or the Fluval app."
+      },
+      "confirm": {
+        "description": "Do you want to set up **{name}**?"
       }
     },
     "error": {
@@ -21,6 +24,45 @@
     },
     "abort": {
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+    }
+  },
+  "entity": {
+    "binary_sensor": {
+      "connection": {
+        "name": "Connection"
+      }
+    },
+    "number": {
+      "channel_1": {
+        "name": "Channel 1"
+      },
+      "channel_2": {
+        "name": "Channel 2"
+      },
+      "channel_3": {
+        "name": "Channel 3"
+      },
+      "channel_4": {
+        "name": "Channel 4"
+      },
+      "channel_5": {
+        "name": "Channel 5"
+      }
+    },
+    "select": {
+      "mode": {
+        "name": "Mode",
+        "state": {
+          "manual": "Manual",
+          "automatic": "Automatic",
+          "professional": "Professional"
+        }
+      }
+    },
+    "switch": {
+      "led_on_off": {
+        "name": "LED"
+      }
     }
   }
 }

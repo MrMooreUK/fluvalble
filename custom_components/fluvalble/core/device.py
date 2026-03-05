@@ -2,6 +2,7 @@
 
 import asyncio
 from collections.abc import Callable
+import contextlib
 from datetime import UTC, datetime
 import logging
 from typing import TypedDict
@@ -123,6 +124,12 @@ class Device:
             self.updates_connect.append(handler)
         else:
             self.updates_component.append(handler)
+
+    def deregister_update(self, attr: str, handler: Callable):
+        """Remove a previously registered update handler (e.g. on entity removal)."""
+        target = self.updates_connect if attr == "connection" else self.updates_component
+        with contextlib.suppress(ValueError):
+            target.remove(handler)
 
     def set_value(self, attr: str, value: int) -> None:
         """Set values received by entities such as numbers and switches."""
