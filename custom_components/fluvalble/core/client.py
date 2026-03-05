@@ -191,7 +191,7 @@ class Client:
             await self.client.write_gatt_char(
                 CHAR_COMMAND_OUT,
                 data=encrypt(bytearray([0x68, 0x05])),
-                response=False,
+                response=True,
             )
             _LOGGER.info("Connected to Fluval %s", self.device.address)
             return True
@@ -238,7 +238,7 @@ class Client:
                     await self.client.write_gatt_char(
                         CHAR_COMMAND_OUT,
                         data=encrypted,
-                        response=False,
+                        response=True,
                     )
                     if self.send_queue:
                         await asyncio.sleep(0.2)  # Let device process before next command
