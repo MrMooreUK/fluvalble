@@ -7,7 +7,13 @@ from homeassistant.components import bluetooth
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_MAC, Platform
 from homeassistant.core import HomeAssistant, callback
-from .core import DOMAIN
+from .core import (
+    CONF_ACTIVE_TIME,
+    CONF_PING_INTERVAL,
+    DEFAULT_ACTIVE_TIME,
+    DEFAULT_PING_INTERVAL,
+    DOMAIN,
+)
 from .core.device import Device
 
 _LOGGER = logging.getLogger(__name__)
@@ -48,8 +54,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ) -> Device:
         """Instantiate Device and add entities for any platforms that are already loaded."""
         _LOGGER.debug("Creating device for %s", mac)
+        ping_interval = entry.options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
+        active_time = entry.options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME)
         device = Device(
-            entry.title, service_info.device, service_info.advertisement
+            entry.title,
+            service_info.device,
+            service_info.advertisement,
+            ping_interval=ping_interval,
+            active_time=active_time,
         )
         entry_data["device"] = device
 

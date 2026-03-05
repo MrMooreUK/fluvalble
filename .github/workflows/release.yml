@@ -1,0 +1,71 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history so we can read the full CHANGELOG
+
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify manifest version matches tag
+        run: |
+          manifest_version=$(python -c "import json; print(json.load(open('custom_components/fluvalble/manifest.json'))['version'])")
+          tag_version="${{ steps.version.outputs.version }}"
+          if [ "$manifest_version" != "$tag_version" ]; then
+            echo "::error::manifest.json version ($manifest_version) does not match tag ($tag_version)"
+            exit 1
+          fi
+          echo "Version check passed: $manifest_version"
+
+      - name: Extract changelog for this release
+        id: changelog
+        run: |
+          python - <<'EOF'
+          import re, sys
+
+          tag = "${{ steps.version.outputs.version }}"
+          text = open("CHANGELOG.md").read()
+
+          # Extract the section for this version
+          pattern = rf"## \[{re.escape(tag)}\].*?(?=\n## \[|\Z)"
+          match = re.search(pattern, text, re.DOTALL)
+          if not match:
+              print(f"No CHANGELOG section found for version {tag}", file=sys.stderr)
+              sys.exit(1)
+
+          section = match.group(0).strip()
+          # Write to file for use in next step (avoids quoting issues)
+          open("/tmp/release_notes.md", "w").write(section)
+          print(f"Extracted release notes for {tag}")
+          EOF
+
+      - name: Package integration
+        run: |
+          zip -r fluvalble-${{ steps.version.outputs.version }}.zip \
+            custom_components/fluvalble/ \
+            --exclude "**/__pycache__/*" \
+            --exclude "**/*.pyc"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "v${{ steps.version.outputs.version }}"
+          body_path: /tmp/release_notes.md
+          files: |
+            fluvalble-${{ steps.version.outputs.version }}.zip
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}

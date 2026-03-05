@@ -22,7 +22,7 @@ class FluvalEntity(Entity):
             connections={(CONNECTION_BLUETOOTH, device.mac)},
             identifiers={(DOMAIN, device.mac)},
             manufacturer="Fluval",
-            model="Aquarium LED",
+            model=device.model_name,
             name=device.name or "Fluval",
         )
         self._attr_translation_key = attr

@@ -1,4 +1,4 @@
-from homeassistant.components.number import NumberEntity
+from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -7,6 +7,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .core import DOMAIN
 from .core.device import Device
 from .core.entity import FluvalEntity
+
+PARALLEL_UPDATES = 0
 
 
 def create_entities(device: Device) -> list:
@@ -27,6 +29,9 @@ async def async_setup_entry(
 
 
 class FluvalNumber(FluvalEntity, NumberEntity):
+    _attr_icon = "mdi:brightness-6"
+    _attr_mode = NumberMode.SLIDER
+
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
         if not attribute:
@@ -34,7 +39,7 @@ class FluvalNumber(FluvalEntity, NumberEntity):
             if self.hass:
                 self._async_write_ha_state()
             return
-        self._attr_available = "value" in attribute
+        self._attr_available = "value" in attribute and self.device.connected
         self._attr_native_min_value = attribute.get("min")
         self._attr_native_max_value = attribute.get("max")
         self._attr_native_step = attribute.get("step")

@@ -14,7 +14,13 @@ from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 
-from .core import DOMAIN
+from .core import (
+    CONF_ACTIVE_TIME,
+    CONF_PING_INTERVAL,
+    DEFAULT_ACTIVE_TIME,
+    DEFAULT_PING_INTERVAL,
+    DOMAIN,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -88,12 +94,15 @@ async def _get_discovered_devices(hass: HomeAssistant) -> list[bluetooth.Bluetoo
     return [info for info in all_devices if _is_likely_fluval(info)]
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+async def validate_input(
+    hass: HomeAssistant, data: dict[str, Any], ble_name: str = ""
+) -> dict[str, Any]:
     """Validate the user input and return cleaned config data."""
     mac = normalize_mac(data[CONF_MAC])
     if not MAC_REGEX.match(mac):
         raise InvalidFormat
-    return {"title": f"Fluval {mac}", CONF_MAC: mac}
+    title = ble_name.strip() or f"Fluval {mac}"
+    return {"title": title, CONF_MAC: mac}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -128,8 +137,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Confirm adding a device found via Bluetooth auto-discovery."""
         if user_input is not None and self._bluetooth_discovery_info is not None:
-            mac = normalize_mac(self._bluetooth_discovery_info.address)
-            info = await validate_input(self.hass, {CONF_MAC: mac})
+            discovery = self._bluetooth_discovery_info
+            mac = normalize_mac(discovery.address)
+            ble_name = (
+                (discovery.advertisement.local_name if discovery.advertisement else None)
+                or getattr(discovery, "name", None)
+                or ""
+            )
+            info = await validate_input(self.hass, {CONF_MAC: mac}, ble_name=ble_name)
             return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
 
         return self.async_show_form(
@@ -226,6 +241,42 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors=errors,
             description_placeholders={"mac_example": "AA:BB:CC:DD:EE:FF"},
         )
+
+    @staticmethod
+    def async_get_options_flow(
+        config_entry: config_entries.ConfigEntry,
+    ) -> config_entries.OptionsFlow:
+        """Return the options flow handler."""
+        return OptionsFlowHandler()
+
+
+class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
+    """Handle options for Fluval Aquarium LED."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show and handle the options form."""
+        if user_input is not None:
+            return self.async_create_entry(data=user_input)
+
+        schema = vol.Schema(
+            {
+                vol.Optional(
+                    CONF_PING_INTERVAL,
+                    default=self.config_entry.options.get(
+                        CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL
+                    ),
+                ): vol.All(int, vol.Range(min=5, max=60)),
+                vol.Optional(
+                    CONF_ACTIVE_TIME,
+                    default=self.config_entry.options.get(
+                        CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME
+                    ),
+                ): vol.All(int, vol.Range(min=30, max=600)),
+            }
+        )
+        return self.async_show_form(step_id="init", data_schema=schema)
 
 
 class CannotConnect(HomeAssistantError):

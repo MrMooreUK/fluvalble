@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, "claude/**"]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  # -----------------------------------------------------------------------
+  # Lint
+  # -----------------------------------------------------------------------
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install lint tools
+        run: pip install ruff
+
+      - name: Run Ruff (linter + formatter check)
+        run: |
+          ruff check custom_components/ tests/
+          ruff format --check custom_components/ tests/
+
+  # -----------------------------------------------------------------------
+  # Validate manifest.json
+  # -----------------------------------------------------------------------
+  validate-manifest:
+    name: Validate manifest.json
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check manifest.json is valid JSON
+        run: python -c "import json; json.load(open('custom_components/fluvalble/manifest.json'))"
+
+      - name: Check required manifest fields
+        run: |
+          python - <<'EOF'
+          import json, sys
+          manifest = json.load(open("custom_components/fluvalble/manifest.json"))
+          required = ["domain", "name", "version", "codeowners", "documentation",
+                      "issue_tracker", "iot_class", "requirements", "loggers"]
+          missing = [f for f in required if f not in manifest]
+          if missing:
+              print(f"Missing manifest fields: {missing}", file=sys.stderr)
+              sys.exit(1)
+          print(f"manifest.json OK — version {manifest['version']}")
+          EOF
+
+  # -----------------------------------------------------------------------
+  # Validate strings / translations
+  # -----------------------------------------------------------------------
+  validate-translations:
+    name: Validate translations
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check strings.json is valid JSON
+        run: python -c "import json; json.load(open('custom_components/fluvalble/strings.json'))"
+
+      - name: Check translations/en.json is valid JSON
+        run: python -c "import json; json.load(open('custom_components/fluvalble/translations/en.json'))"
+
+      - name: Check en.json keys match strings.json top-level sections
+        run: |
+          python - <<'EOF'
+          import json, sys
+          strings = json.load(open("custom_components/fluvalble/strings.json"))
+          en = json.load(open("custom_components/fluvalble/translations/en.json"))
+          missing = set(strings.keys()) - set(en.keys())
+          if missing:
+              print(f"Sections in strings.json missing from en.json: {missing}", file=sys.stderr)
+              sys.exit(1)
+          print("Translation keys OK")
+          EOF
+
+  # -----------------------------------------------------------------------
+  # Unit tests
+  # -----------------------------------------------------------------------
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install test dependencies
+        run: pip install pytest voluptuous
+
+      - name: Run tests
+        run: python -m pytest tests/ -v --tb=short
+
+  # -----------------------------------------------------------------------
+  # HACS validation
+  # -----------------------------------------------------------------------
+  hacs:
+    name: HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration

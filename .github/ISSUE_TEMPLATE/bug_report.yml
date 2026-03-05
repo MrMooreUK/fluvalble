@@ -1,0 +1,146 @@
+name: Bug Report
+description: Something isn't working as expected with the Fluval Aquarium LED integration.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to fill this out! The more detail you provide, the faster we can diagnose the problem.
+
+        **Before filing:** please check the [existing issues](../../issues) and the [README troubleshooting section](../../blob/master/README.md) first.
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      description: Found in Settings → About.
+      placeholder: "e.g. 2024.6.0"
+    validations:
+      required: true
+
+  - type: input
+    id: integration_version
+    attributes:
+      label: Integration version
+      description: Found in Settings → Devices & Services → Fluval Aquarium LED → ⋮ → Integration info.
+      placeholder: "e.g. 0.0.4"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: ha_install_type
+    attributes:
+      label: Home Assistant installation type
+      options:
+        - Home Assistant OS (HAOS)
+        - Home Assistant Supervised
+        - Home Assistant Container (Docker)
+        - Home Assistant Core (venv/pip)
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: device_model
+    attributes:
+      label: Fluval device model
+      options:
+        - Fluval Plant 3.0
+        - Fluval Reef 3.0
+        - Fluval Aquasky 2.0
+        - Other / Unknown
+    validations:
+      required: true
+
+  - type: input
+    id: ble_adapter
+    attributes:
+      label: Bluetooth adapter
+      description: The model of your Bluetooth adapter or the name of the BLE proxy you are using (e.g. "Intel AX210", "ESP32 BLE proxy", "built-in RPi").
+      placeholder: "e.g. Raspberry Pi 4 built-in"
+
+  - type: dropdown
+    id: setup_method
+    attributes:
+      label: How was the integration set up?
+      options:
+        - Auto-discovery (HA prompted me)
+        - Manual MAC address entry
+    validations:
+      required: true
+
+  - type: input
+    id: distance
+    attributes:
+      label: Approximate BLE range
+      description: How far is the light from the Bluetooth adapter? This is useful for diagnosing connection problems.
+      placeholder: "e.g. 3 m / 10 ft"
+
+  - type: textarea
+    id: describe_bug
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what is wrong. Include entity names/states if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps_to_reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Step-by-step instructions so we can reliably reproduce the problem.
+      placeholder: |
+        1. Open HA dashboard
+        2. Toggle the LED switch
+        3. See error / observe unexpected behaviour
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: What actually happened? Include any error messages shown in the HA UI.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log output
+      description: |
+        **Required for connection / BLE issues.** Enable debug logging before reproducing:
+        1. Settings → System → Logs
+        2. Click **Set custom logger level**
+        3. Enter `custom_components.fluvalble`, set level to **debug**
+        4. Reproduce the problem
+        5. Copy the relevant lines (look for `fluvalble` and `bleak`) and paste below.
+      render: text
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics download (optional but very helpful)
+      description: |
+        In Settings → Devices & Services → Fluval Aquarium LED → your device → ⋮ → Download diagnostics.
+        Paste the JSON content here (it contains no personal data).
+      render: json
+
+  - type: textarea
+    id: additional
+    attributes:
+      label: Additional context
+      description: |
+        Anything else that might be relevant:
+        - Other BLE devices configured in HA (they can interfere)
+        - Whether the problem is intermittent or consistent
+        - Any recent HA or HACS updates
+        - Screenshots of the entity states or error messages

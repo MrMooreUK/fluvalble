@@ -26,6 +26,21 @@
       }
     }
   },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Connection options",
+        "data": {
+          "ping_interval": "Keep-alive interval (seconds)",
+          "active_time": "Active connection window (seconds)"
+        },
+        "data_description": {
+          "ping_interval": "How often Home Assistant reads from the light to keep the BLE connection alive. Lower values improve reliability at the cost of slightly more radio traffic. Default: 10 s.",
+          "active_time": "How long to maintain the BLE connection after the last command. Reducing this saves Bluetooth adapter bandwidth when the light is idle. Default: 120 s."
+        }
+      }
+    }
+  },
   "entity": {
     "binary_sensor": {
       "connection": {

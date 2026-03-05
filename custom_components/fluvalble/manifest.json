@@ -13,7 +13,8 @@
   "documentation": "https://github.com/MrMooreUK/fluvalble",
   "iot_class": "local_push",
   "requirements": [],
-  "version": "0.0.3",
+  "version": "0.0.4",
+  "loggers": ["custom_components.fluvalble"],
   "issue_tracker": "https://github.com/MrMooreUK/fluvalble/issues",
   "bluetooth": [
     {

@@ -8,6 +8,8 @@ from .core import DOMAIN
 from .core.device import Device
 from .core.entity import FluvalEntity
 
+PARALLEL_UPDATES = 0
+
 
 def create_entities(device: Device) -> list:
     """Build the entity list for this platform."""
@@ -27,6 +29,8 @@ async def async_setup_entry(
 
 
 class FluvalSelect(FluvalEntity, SelectEntity):
+    _attr_icon = "mdi:tune"
+
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
         if not attribute:
@@ -36,7 +40,7 @@ class FluvalSelect(FluvalEntity, SelectEntity):
             return
         self._attr_current_option = attribute.get("default")
         self._attr_options = attribute.get("options", [])
-        self._attr_available = "default" in attribute
+        self._attr_available = "default" in attribute and self.device.connected
 
         if self.hass:
             self._async_write_ha_state()

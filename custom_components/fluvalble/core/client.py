@@ -39,11 +39,15 @@ class Client:
         device: BLEDevice,
         status_callback: Callable = None,
         update_callback: Callable = None,
+        ping_interval: int = PING_INTERVAL,
+        active_time: int = ACTIVE_TIME,
     ) -> None:
         """Initialize the client."""
         self.device = device
         self.status_callback = status_callback
         self.update_callback = update_callback
+        self._ping_interval = ping_interval
+        self._active_time = active_time
 
         self.client: BleakClient | None = None
         self._stopped = False
@@ -69,7 +73,7 @@ class Client:
 
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
-        self.ping_time = time.time() + ACTIVE_TIME
+        self.ping_time = time.time() + self._active_time
 
         if not self.ping_task or self.ping_task.done():
             self.ping_task = asyncio.create_task(self._ping_loop())
@@ -242,7 +246,7 @@ class Client:
 
                 # Interruptible sleep (cancelled early when send() is called)
                 self.ping_future = loop.create_future()
-                loop.call_later(PING_INTERVAL, self.ping_future.cancel)
+                loop.call_later(self._ping_interval, self.ping_future.cancel)
                 with contextlib.suppress(asyncio.CancelledError):
                     await self.ping_future
 

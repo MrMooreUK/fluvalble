@@ -11,6 +11,8 @@ from .core import DOMAIN
 from .core.device import Device
 from .core.entity import FluvalEntity
 
+PARALLEL_UPDATES = 0
+
 
 def create_entities(device: Device) -> list:
     """Build the entity list for this platform."""

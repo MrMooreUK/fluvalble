@@ -39,11 +39,22 @@ class Device:
     """Fluval BLE LED device class."""
 
     def __init__(
-        self, name: str, device: BLEDevice, advertisement: AdvertisementData
+        self,
+        name: str,
+        device: BLEDevice,
+        advertisement: AdvertisementData,
+        ping_interval: int = 10,
+        active_time: int = 120,
     ) -> None:
         """Initialize the device."""
         self.name = name
-        self.client = Client(device, self.set_connected, self.decode_update_packet)
+        self.client = Client(
+            device,
+            self.set_connected,
+            self.decode_update_packet,
+            ping_interval=ping_interval,
+            active_time=active_time,
+        )
         self.connected = False
         self.conn_info = {"mac": device.address}
         self.updates_connect: list = []
@@ -61,6 +72,11 @@ class Device:
     def mac(self) -> str:
         """Expose the MAC address of the device."""
         return self.client.device.address
+
+    @property
+    def model_name(self) -> str:
+        """Return a human-readable model string based on detected channel count."""
+        return "Aquasky 2.0" if self._channel_count < 5 else "Aquarium LED 3.0"
 
     def update_ble(
         self,
@@ -95,6 +111,10 @@ class Device:
 
     def _fire_connect_handlers(self):
         for handler in self.updates_connect:
+            handler()
+        # Also notify component entities so they can reflect the new connection state
+        # (e.g. mark themselves unavailable when the device disconnects).
+        for handler in self.updates_component:
             handler()
 
     def numbers(self) -> list[str]:

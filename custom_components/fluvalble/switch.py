@@ -1,4 +1,4 @@
-from homeassistant.components.switch import SwitchEntity, SwitchDeviceClass
+from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -7,6 +7,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .core import DOMAIN
 from .core.device import Device
 from .core.entity import FluvalEntity
+
+PARALLEL_UPDATES = 0
 
 
 def create_entities(device: Device) -> list:
@@ -28,11 +30,14 @@ async def async_setup_entry(
 
 
 class FluvalSwitch(FluvalEntity, SwitchEntity):
-    _attr_device_class = SwitchDeviceClass.SWITCH
+    _attr_icon = "mdi:led-strip-variant"
 
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
+        self._attr_available = bool(attribute) and self.device.connected
         if not attribute:
+            if self.hass:
+                self._async_write_ha_state()
             return
 
         self._attr_is_on = attribute.get("is_on")
