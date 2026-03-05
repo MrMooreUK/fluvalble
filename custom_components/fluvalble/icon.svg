@@ -1,8 +1,68 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <!-- Aquarium LED light bar -->
-  <rect x="4" y="8" width="40" height="12" rx="2" fill="#4FC3F7" opacity="0.9"/>
-  <rect x="4" y="8" width="40" height="4" rx="1" fill="#81D4FA"/>
-  <!-- Wave / water element -->
-  <path d="M4 32 Q12 28 20 32 T36 32 T44 32 V36 H4 Z" fill="#26C6DA" opacity="0.7"/>
-  <path d="M4 36 Q12 32 20 36 T36 36 T44 36 V40 H4 Z" fill="#00ACC1" opacity="0.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <!-- Fixture body gradient (top-lit) -->
+    <linearGradient id="g-fix" x1="50" y1="10" x2="50" y2="30" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#005EA3"/>
+      <stop offset="100%" stop-color="#0072BB"/>
+    </linearGradient>
+    <!-- Light-beam cone fades to transparent -->
+    <linearGradient id="g-beam" x1="50" y1="30" x2="50" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#00AEEF" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#00AEEF" stop-opacity="0"/>
+    </linearGradient>
+    <!-- Water shimmer -->
+    <linearGradient id="g-water" x1="0" y1="60" x2="100" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#005FA3"/>
+      <stop offset="45%"  stop-color="#0097DC"/>
+      <stop offset="100%" stop-color="#005FA3"/>
+    </linearGradient>
+  </defs>
+
+  <!-- ── LED fixture bar ── -->
+  <rect x="8" y="10" width="84" height="20" rx="5" fill="url(#g-fix)"/>
+  <!-- Sheen stripe across top -->
+  <rect x="10" y="11" width="80" height="5" rx="2.5" fill="white" opacity="0.14"/>
+  <!-- Bottom edge shadow -->
+  <rect x="8" y="27" width="84" height="3" rx="0" fill="#003F7E" opacity="0.35"/>
+
+  <!-- ── LED lenses (5 channels, Fluval palette) ── -->
+  <!-- Ch1 cool-white -->
+  <circle cx="21" cy="20" r="5.5" fill="#DCF0FF" opacity="0.95"/>
+  <!-- Ch2 royal blue -->
+  <circle cx="35" cy="20" r="5.5" fill="#1E90D4" opacity="0.95"/>
+  <!-- Ch3 cyan -->
+  <circle cx="50" cy="20" r="5.5" fill="#00AEEF" opacity="0.95"/>
+  <!-- Ch4 deeper blue -->
+  <circle cx="65" cy="20" r="5.5" fill="#1565C0" opacity="0.95"/>
+  <!-- Ch5 cool-white -->
+  <circle cx="79" cy="20" r="5.5" fill="#DCF0FF" opacity="0.95"/>
+
+  <!-- Specular glare dot on each lens -->
+  <circle cx="19.2" cy="18.2" r="2.2" fill="white" opacity="0.75"/>
+  <circle cx="33.2" cy="18.2" r="2.2" fill="white" opacity="0.65"/>
+  <circle cx="48.2" cy="18.2" r="2.2" fill="white" opacity="0.70"/>
+  <circle cx="63.2" cy="18.2" r="2.2" fill="white" opacity="0.65"/>
+  <circle cx="77.2" cy="18.2" r="2.2" fill="white" opacity="0.75"/>
+
+  <!-- ── Light-beam cone ── -->
+  <path d="M13 30 L87 30 L93 60 L7 60 Z" fill="url(#g-beam)"/>
+
+  <!-- ── Water surface — three layered waves ── -->
+  <!-- Wave 1 — brightest, mid blue -->
+  <path d="M0 66
+           C10 60  18 66  30 63
+           C42 60  50 66  62 63
+           C74 60  84 66  100 63
+           L100 100 L0 100 Z"
+        fill="url(#g-water)" opacity="0.85"/>
+  <!-- Wave 2 — mid-depth, darker blue -->
+  <path d="M0 74
+           C12 68  20 75  34 71
+           C48 67  58 74  72 71
+           C84 68  92 74  100 71
+           L100 100 L0 100 Z"
+        fill="#00579B" opacity="0.70"/>
+  <!-- Wave 3 — deep, navy -->
+  <path d="M0 83 L100 83 L100 100 L0 100 Z"
+        fill="#003366" opacity="0.55"/>
 </svg>

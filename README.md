@@ -1,4 +1,6 @@
-# Fluval BLE
+<p align="center">
+  <img src="images/logo.svg" alt="Fluval BLE — Home Assistant Integration" width="560"/>
+</p>
 
 **Control your Fluval aquarium LED lights from Home Assistant—no cloud, no app, just local Bluetooth.**
 
