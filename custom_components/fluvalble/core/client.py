@@ -22,10 +22,9 @@ MAX_INITIAL_RETRIES = 30  # ~5 minutes of retrying at 10s intervals
 
 CHAR_NOTIFY = "00001002-0000-1000-8000-00805F9B34FB"
 CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805F9B34FB"
+# Write-without-response characteristic: all outbound commands go here (state request + all other commands).
+# Notifications (device → HA) arrive on CHAR_NOTIFY (0x1002).
 CHAR_COMMAND_OUT = "00001001-0000-1000-8000-00805F9B34FB"
-# CHAR_COMMAND_IO intentionally shares UUID with CHAR_NOTIFY — the device uses
-# a single bidirectional characteristic for both outbound writes and notifications.
-CHAR_COMMAND_IO = "00001002-0000-1000-8000-00805F9B34FB"
 
 # Fluval packets come in two fragments; the first is always 17 decrypted bytes.
 PARTIAL_PACKET_SIZE = 17
@@ -237,9 +236,9 @@ class Client:
                         to_hex(encrypted),
                     )
                     await self.client.write_gatt_char(
-                        CHAR_COMMAND_IO,
+                        CHAR_COMMAND_OUT,
                         data=encrypted,
-                        response=True,
+                        response=False,
                     )
                     if self.send_queue:
                         await asyncio.sleep(0.2)  # Let device process before next command
