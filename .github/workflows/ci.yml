@@ -2,9 +2,12 @@ name: CI
 
 on:
   push:
-    branches: [master, main, "claude/**"]
+    # CI runs on the stable branch, the dev integration branch, and all
+    # feature / review branches so problems are caught before merging.
+    branches: [master, main, dev, "claude/**", "feature/**", "fix/**"]
   pull_request:
-    branches: [master, main]
+    # All PRs must pass CI regardless of their target branch.
+    branches: [master, main, dev]
 
 jobs:
   # -----------------------------------------------------------------------
@@ -123,3 +126,31 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
+
+  # -----------------------------------------------------------------------
+  # Branch guard — prevent direct PRs to master/main
+  # All changes must flow through dev first.
+  # -----------------------------------------------------------------------
+  branch-guard:
+    name: Branch guard (PR targets dev, not master)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Enforce dev-first workflow
+        run: |
+          TARGET="${{ github.base_ref }}"
+          SOURCE="${{ github.head_ref }}"
+          echo "PR: $SOURCE → $TARGET"
+
+          # Allow: dev → master/main (release promotion)
+          if [[ "$TARGET" == "master" || "$TARGET" == "main" ]]; then
+            if [[ "$SOURCE" == "dev" ]]; then
+              echo "Release promotion PR (dev → $TARGET) — allowed."
+              exit 0
+            fi
+            echo "::error::Direct PRs to $TARGET are not allowed."
+            echo "::error::Please target 'dev' instead. Only 'dev → master' PRs are permitted."
+            exit 1
+          fi
+
+          echo "PR targets '$TARGET' — OK."

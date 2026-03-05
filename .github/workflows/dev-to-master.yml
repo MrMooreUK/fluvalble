@@ -1,0 +1,47 @@
+name: Dev → Master promotion check
+
+# Extra validation that only runs when dev is being merged into master/main.
+# Checks that the manifest version is a clean semver and that a CHANGELOG
+# entry exists for it, so a release can be created immediately after merge.
+
+on:
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  promotion-checks:
+    name: Promotion readiness
+    runs-on: ubuntu-latest
+    if: github.head_ref == 'dev'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate manifest version is semver
+        run: |
+          python - <<'EOF'
+          import json, re, sys
+          manifest = json.load(open("custom_components/fluvalble/manifest.json"))
+          version = manifest.get("version", "")
+          if not re.match(r"^\d+\.\d+\.\d+$", version):
+              print(f"::error::manifest.json version '{version}' is not valid semver (X.Y.Z)", file=sys.stderr)
+              sys.exit(1)
+          print(f"Version OK: {version}")
+          EOF
+
+      - name: Check CHANGELOG has entry for this version
+        run: |
+          python - <<'EOF'
+          import json, sys
+          version = json.load(open("custom_components/fluvalble/manifest.json"))["version"]
+          changelog = open("CHANGELOG.md").read()
+          if f"[{version}]" not in changelog:
+              print(f"::error::No CHANGELOG.md entry found for version {version}", file=sys.stderr)
+              print("::error::Add a section '## [{version}] — YYYY-MM-DD' before merging.", file=sys.stderr)
+              sys.exit(1)
+          print(f"CHANGELOG entry found for {version}")
+          EOF
+
+      - name: Run full test suite one more time
+        run: |
+          pip install pytest voluptuous --quiet
+          python -m pytest tests/ -v --tb=short
