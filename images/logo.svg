@@ -1,99 +1,104 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 130">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1120 360" role="img" aria-labelledby="title desc">
+  <title id="title">Fluval BLE</title>
+  <desc id="desc">Premium dark aquarium lighting brand mark for the Fluval BLE Home Assistant integration.</desc>
   <defs>
-    <!-- Banner background gradient -->
-    <linearGradient id="bg" x1="0" y1="0" x2="560" y2="130" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#002D5B"/>
-      <stop offset="100%" stop-color="#003F7E"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="1120" y2="360" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#05070b"/>
+      <stop offset="0.46" stop-color="#081522"/>
+      <stop offset="1" stop-color="#031b2c"/>
     </linearGradient>
-    <!-- Fixture body gradient -->
-    <linearGradient id="fix" x1="20" y1="28" x2="20" y2="52" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#005EA3"/>
-      <stop offset="100%" stop-color="#0072BB"/>
-    </linearGradient>
-    <!-- Beam fade -->
-    <linearGradient id="beam" x1="68" y1="52" x2="68" y2="88" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#00AEEF" stop-opacity="0.5"/>
-      <stop offset="100%" stop-color="#00AEEF" stop-opacity="0"/>
-    </linearGradient>
-    <!-- Water shimmer -->
-    <linearGradient id="wtr" x1="10" y1="0" x2="130" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#00579B"/>
-      <stop offset="50%"  stop-color="#0097DC"/>
-      <stop offset="100%" stop-color="#00579B"/>
-    </linearGradient>
-    <!-- Subtle ambient glow behind icon -->
-    <radialGradient id="glow" cx="68" cy="60" r="60" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#00AEEF" stop-opacity="0.10"/>
-      <stop offset="100%" stop-color="#00AEEF" stop-opacity="0"/>
+    <radialGradient id="aqua-glow" cx="32%" cy="20%" r="72%">
+      <stop offset="0" stop-color="#74f7ff" stop-opacity="0.32"/>
+      <stop offset="0.42" stop-color="#00b7ff" stop-opacity="0.12"/>
+      <stop offset="1" stop-color="#00b7ff" stop-opacity="0"/>
     </radialGradient>
+    <radialGradient id="violet-glow" cx="83%" cy="34%" r="58%">
+      <stop offset="0" stop-color="#7c6dff" stop-opacity="0.22"/>
+      <stop offset="0.46" stop-color="#5e6ad2" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#5e6ad2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="beam" x1="246" y1="110" x2="246" y2="292" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#8ffaff" stop-opacity="0.62"/>
+      <stop offset="0.55" stop-color="#00c8ff" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#00c8ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fixture" x1="126" y1="64" x2="366" y2="118" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#111827"/>
+      <stop offset="0.5" stop-color="#253b54"/>
+      <stop offset="1" stop-color="#0d1723"/>
+    </linearGradient>
+    <linearGradient id="fixture-edge" x1="126" y1="112" x2="366" y2="112" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00e5ff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#a7fbff" stop-opacity="0.72"/>
+      <stop offset="1" stop-color="#5e6ad2" stop-opacity="0.18"/>
+    </linearGradient>
+    <linearGradient id="wave1" x1="60" y1="260" x2="430" y2="260" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0177ff"/>
+      <stop offset="0.5" stop-color="#00f0ff"/>
+      <stop offset="1" stop-color="#54ffcf"/>
+    </linearGradient>
+    <linearGradient id="word" x1="462" y1="132" x2="1040" y2="132" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.62" stop-color="#e8fbff"/>
+      <stop offset="1" stop-color="#92f6ff"/>
+    </linearGradient>
+    <filter id="soft-shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="20" stdDeviation="24" flood-color="#000000" flood-opacity="0.38"/>
+    </filter>
+    <filter id="cyan-glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="7" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="card-clip">
+      <rect x="20" y="20" width="1080" height="320" rx="34"/>
+    </clipPath>
   </defs>
 
-  <!-- ── Background ── -->
-  <rect width="560" height="130" rx="12" fill="url(#bg)"/>
-  <!-- Ambient glow pool behind icon area -->
-  <ellipse cx="68" cy="70" rx="65" ry="60" fill="url(#glow)"/>
-  <!-- Subtle horizontal rule at bottom third -->
-  <rect x="0" y="88" width="560" height="42" rx="0" fill="#001F45" opacity="0.30"/>
+  <rect x="20" y="20" width="1080" height="320" rx="34" fill="url(#bg)"/>
+  <g clip-path="url(#card-clip)">
+    <rect x="20" y="20" width="1080" height="320" fill="url(#aqua-glow)"/>
+    <rect x="20" y="20" width="1080" height="320" fill="url(#violet-glow)"/>
+    <path d="M20 286 C144 246 230 331 363 277 C502 221 610 278 747 242 C897 203 1008 238 1100 206 L1100 340 L20 340 Z" fill="#06111d" opacity="0.78"/>
+    <path d="M-40 285 C104 225 225 332 372 274 C507 220 624 282 756 244 C908 201 1002 230 1160 174" fill="none" stroke="#54f7ff" stroke-opacity="0.20" stroke-width="1.4"/>
+    <path d="M-60 306 C88 252 226 330 384 292 C528 258 650 314 800 264 C948 215 1020 256 1168 214" fill="none" stroke="#7c6dff" stroke-opacity="0.18" stroke-width="1.2"/>
+    <g opacity="0.42">
+      <path d="M646 52 h258" stroke="#ffffff" stroke-opacity="0.08"/>
+      <path d="M686 88 h354" stroke="#ffffff" stroke-opacity="0.045"/>
+      <path d="M578 302 h424" stroke="#ffffff" stroke-opacity="0.05"/>
+    </g>
+  </g>
+  <rect x="20.75" y="20.75" width="1078.5" height="318.5" rx="33.25" fill="none" stroke="#ffffff" stroke-opacity="0.10" stroke-width="1.5"/>
 
-  <!-- ══ Icon panel (left 136 px) ══ -->
+  <g filter="url(#soft-shadow)">
+    <path d="M144 112 L346 112 L408 294 L82 294 Z" fill="url(#beam)"/>
+    <rect x="120" y="60" width="252" height="58" rx="18" fill="url(#fixture)" stroke="#ffffff" stroke-opacity="0.10"/>
+    <path d="M139 68 H353" stroke="#ffffff" stroke-opacity="0.16" stroke-width="3" stroke-linecap="round"/>
+    <rect x="136" y="109" width="220" height="4" rx="2" fill="url(#fixture-edge)"/>
+    <g filter="url(#cyan-glow)">
+      <circle cx="158" cy="89" r="12" fill="#ecfeff"/>
+      <circle cx="202" cy="89" r="12" fill="#00b7ff"/>
+      <circle cx="246" cy="89" r="12" fill="#67fff0"/>
+      <circle cx="290" cy="89" r="12" fill="#5077ff"/>
+      <circle cx="334" cy="89" r="12" fill="#ecfeff"/>
+    </g>
+    <circle cx="154" cy="85" r="4" fill="#ffffff" opacity="0.75"/>
+    <circle cx="198" cy="85" r="4" fill="#ffffff" opacity="0.52"/>
+    <circle cx="242" cy="85" r="4" fill="#ffffff" opacity="0.65"/>
+    <circle cx="286" cy="85" r="4" fill="#ffffff" opacity="0.48"/>
+    <circle cx="330" cy="85" r="4" fill="#ffffff" opacity="0.75"/>
+    <path d="M74 259 C111 232 145 277 188 251 C229 226 264 275 308 250 C350 226 382 263 420 246 L420 314 L74 314 Z" fill="url(#wave1)" opacity="0.62"/>
+    <path d="M72 286 C120 248 164 301 211 276 C254 252 290 302 335 276 C369 257 396 279 426 265 L426 314 L72 314 Z" fill="#062f57" opacity="0.76"/>
+  </g>
 
-  <!-- LED fixture bar -->
-  <rect x="16" y="28" width="104" height="24" rx="5" fill="url(#fix)"/>
-  <!-- Top sheen -->
-  <rect x="18" y="29" width="100" height="6" rx="3" fill="white" opacity="0.13"/>
-  <!-- Bottom shadow -->
-  <rect x="16" y="47" width="104" height="5" rx="0" fill="#002D5B" opacity="0.40"/>
-
-  <!-- LED lenses -->
-  <circle cx="30"  cy="40" r="6" fill="#DCF0FF" opacity="0.95"/>
-  <circle cx="48"  cy="40" r="6" fill="#1E90D4" opacity="0.95"/>
-  <circle cx="68"  cy="40" r="6" fill="#00AEEF" opacity="0.95"/>
-  <circle cx="88"  cy="40" r="6" fill="#1565C0" opacity="0.95"/>
-  <circle cx="106" cy="40" r="6" fill="#DCF0FF" opacity="0.95"/>
-
-  <!-- Lens glare dots -->
-  <circle cx="28"  cy="37.5" r="2.5" fill="white" opacity="0.75"/>
-  <circle cx="46"  cy="37.5" r="2.5" fill="white" opacity="0.65"/>
-  <circle cx="66"  cy="37.5" r="2.5" fill="white" opacity="0.72"/>
-  <circle cx="86"  cy="37.5" r="2.5" fill="white" opacity="0.65"/>
-  <circle cx="104" cy="37.5" r="2.5" fill="white" opacity="0.75"/>
-
-  <!-- Light beam cone -->
-  <path d="M20 52 L116 52 L122 86 L14 86 Z" fill="url(#beam)"/>
-
-  <!-- Water waves -->
-  <path d="M10 90
-           C20 85  30 91  44 88
-           C58 85  66 91  80 88
-           C94 85  108 91  126 88
-           L126 116 L10 116 Z"
-        fill="url(#wtr)" opacity="0.80"/>
-  <path d="M10 100
-           C22 95  34 102  50 98
-           C66 94  78 101  96 98
-           C108 95  118 100  126 100
-           L126 116 L10 116 Z"
-        fill="#003F7E" opacity="0.70"/>
-
-  <!-- ── Vertical divider ── -->
-  <line x1="148" y1="18" x2="148" y2="112"
-        stroke="#00AEEF" stroke-width="1" opacity="0.25"/>
-
-  <!-- ══ Brand text (right of divider) ══ -->
-
-  <!-- Primary wordmark -->
-  <text x="168" y="72"
-        font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
-        font-size="46" font-weight="700" fill="white" letter-spacing="-1">Fluval BLE</text>
-
-  <!-- Subtitle -->
-  <text x="170" y="97"
-        font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
-        font-size="16" font-weight="400" fill="#00AEEF" letter-spacing="1.5">HOME ASSISTANT INTEGRATION</text>
-
-  <!-- Version badge -->
-  <rect x="170" y="22" width="68" height="20" rx="10" fill="#00AEEF" opacity="0.18"/>
-  <text x="204" y="36"
-        font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif"
-        font-size="11" font-weight="600" fill="#00AEEF" text-anchor="middle" letter-spacing="0.5">v0.0.3</text>
+  <g>
+    <rect x="464" y="74" width="228" height="32" rx="16" fill="#ffffff" fill-opacity="0.045" stroke="#ffffff" stroke-opacity="0.08"/>
+    <circle cx="484" cy="90" r="5" fill="#54ffcf"/>
+    <text x="498" y="95" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="14" font-weight="600" letter-spacing="1.7" fill="#bafcff">LOCAL BLE CONTROL</text>
+    <text x="460" y="173" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="76" font-weight="800" letter-spacing="-4.2" fill="url(#word)">Fluval BLE</text>
+    <text x="466" y="218" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="24" font-weight="500" letter-spacing="-0.55" fill="#b6c6d8">Aquarium LED lighting for Home Assistant</text>
+    <text x="466" y="259" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="17" font-weight="500" letter-spacing="0.35" fill="#6df8ff">NO CLOUD · NO APP · JUST YOUR TANK</text>
+  </g>
 </svg>
