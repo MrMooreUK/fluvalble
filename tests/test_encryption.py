@@ -4,7 +4,7 @@ Unit tests for the Fluval BLE encryption module.
 The encryption module is pure Python with no external deps so it is imported
 directly from its file path to avoid loading the full HA package hierarchy.
 """
-import importlib.util
+
 import os
 import sys
 
@@ -77,6 +77,12 @@ class TestDecrypt:
         packet = bytearray([0x54, 0x01 ^ 0x54, 0x54])
         result = encryption.decrypt(packet)
         assert result == bytearray()
+
+    def test_malformed_packets_shorter_than_header_are_ignored(self):
+        """Short/corrupt notifications should not crash callback handling."""
+        assert encryption.decrypt(bytearray()) == bytearray()
+        assert encryption.decrypt(bytearray([0x54])) == bytearray()
+        assert encryption.decrypt(bytearray([0x54, 0x55])) == bytearray()
 
     def test_key_derivation(self):
         """Key = source[0] XOR source[2]; payload bytes XOR that key."""

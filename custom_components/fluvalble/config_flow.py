@@ -1,4 +1,5 @@
 """Config flow for Fluval Aquarium LED integration."""
+
 from __future__ import annotations
 
 import logging
@@ -28,7 +29,9 @@ _LOGGER = logging.getLogger(__name__)
 FLUVAL_SERVICE_UUID = "00001002-0000-1000-8000-00805F9B34FB"
 
 # Bluetooth address filter expects uppercase with colons (e.g. AA:BB:CC:DD:EE:FF)
-MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})$")
+MAC_REGEX = re.compile(
+    r"^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})$"
+)
 
 MANUAL_ENTRY = "__manual__"
 
@@ -51,7 +54,9 @@ def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
     """True if this device advertises the Fluval service UUID or has Fluval in the name."""
     try:
         adv = info.advertisement if info else None
-        name = ((adv.local_name if adv else None) or getattr(info, "name", None) or "").lower()
+        name = (
+            (adv.local_name if adv else None) or getattr(info, "name", None) or ""
+        ).lower()
         uuids = list(adv.service_uuids) if (adv and adv.service_uuids) else []
     except Exception:  # noqa: BLE001
         return False
@@ -70,7 +75,9 @@ def _device_display_name(
     try:
         adv = service_info.advertisement if service_info else None
         name = (
-            (adv.local_name if adv else None) or getattr(service_info, "name", None) or ""
+            (adv.local_name if adv else None)
+            or getattr(service_info, "name", None)
+            or ""
         ).strip()
         address = getattr(service_info, "address", "") or ""
     except Exception:  # noqa: BLE001
@@ -80,7 +87,9 @@ def _device_display_name(
     return f"{name} ({address})"
 
 
-async def _get_discovered_devices(hass: HomeAssistant) -> list[bluetooth.BluetoothServiceInfoBleak]:
+async def _get_discovered_devices(
+    hass: HomeAssistant,
+) -> list[bluetooth.BluetoothServiceInfoBleak]:
     """Return only devices that look like Fluval lights (by service UUID or name)."""
     try:
         get_discovered = getattr(bluetooth, "async_discovered_service_info", None)
@@ -113,7 +122,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         super().__init__()
         self._discovered_devices: list[bluetooth.BluetoothServiceInfoBleak] = []
-        self._bluetooth_discovery_info: bluetooth.BluetoothServiceInfoBleak | None = None
+        self._bluetooth_discovery_info: bluetooth.BluetoothServiceInfoBleak | None = (
+            None
+        )
 
     # ------------------------------------------------------------------
     # Bluetooth auto-discovery (triggered by manifest.json bluetooth key)
@@ -140,17 +151,25 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             discovery = self._bluetooth_discovery_info
             mac = normalize_mac(discovery.address)
             ble_name = (
-                (discovery.advertisement.local_name if discovery.advertisement else None)
+                (
+                    discovery.advertisement.local_name
+                    if discovery.advertisement
+                    else None
+                )
                 or getattr(discovery, "name", None)
                 or ""
             )
             info = await validate_input(self.hass, {CONF_MAC: mac}, ble_name=ble_name)
-            return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
+            return self.async_create_entry(
+                title=info["title"], data={CONF_MAC: info[CONF_MAC]}
+            )
 
         return self.async_show_form(
             step_id="confirm",
             description_placeholders={
-                "name": self.context.get("title_placeholders", {}).get("name", "Fluval LED")
+                "name": self.context.get("title_placeholders", {}).get(
+                    "name", "Fluval LED"
+                )
             },
         )
 
@@ -186,7 +205,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.exception("Unexpected exception")
                     errors["base"] = "unknown"
                 else:
-                    return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
+                    return self.async_create_entry(
+                        title=info["title"], data={CONF_MAC: info[CONF_MAC]}
+                    )
 
         self._discovered_devices = await _get_discovered_devices(self.hass)
         options = self._device_options(configured_normalized)
@@ -199,7 +220,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             errors=errors,
-            description_placeholders={"count": str(len([o for o in options if o != MANUAL_ENTRY]))},
+            description_placeholders={
+                "count": str(len([o for o in options if o != MANUAL_ENTRY]))
+            },
         )
 
     def _device_options(self, configured_normalized: set[str]) -> dict[str, str]:
@@ -210,7 +233,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if mac in configured_normalized:
                 continue
             options[mac] = _device_display_name(info, is_fluval=True)
-        options[MANUAL_ENTRY] = "My device isn't in the list — enter MAC address manually"
+        options[MANUAL_ENTRY] = (
+            "My device isn't in the list — enter MAC address manually"
+        )
         return options
 
     async def async_step_manual(
@@ -226,14 +251,18 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(mac)
                 self._abort_if_unique_id_configured()
                 try:
-                    info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
+                    info = await validate_input(
+                        self.hass, {**user_input, CONF_MAC: mac}
+                    )
                 except InvalidFormat:
                     errors["base"] = "invalid_format"
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Unexpected exception")
                     errors["base"] = "unknown"
                 else:
-                    return self.async_create_entry(title=info["title"], data={CONF_MAC: info[CONF_MAC]})
+                    return self.async_create_entry(
+                        title=info["title"], data={CONF_MAC: info[CONF_MAC]}
+                    )
 
         return self.async_show_form(
             step_id="manual",

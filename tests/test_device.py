@@ -3,6 +3,7 @@ Tests for the Device class — state decoding, availability and handler dispatch
 
 All HA and BLE stubs are registered by conftest.py before this module loads.
 """
+
 import sys
 import os
 from unittest.mock import MagicMock, patch

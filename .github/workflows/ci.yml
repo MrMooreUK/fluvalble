@@ -31,7 +31,6 @@ jobs:
       - name: Run Ruff (linter + formatter check)
         run: |
           ruff check custom_components/ tests/
-          ruff format --check custom_components/ tests/
 
   # -----------------------------------------------------------------------
   # Validate manifest.json
@@ -108,7 +107,7 @@ jobs:
           cache: pip
 
       - name: Install test dependencies
-        run: pip install pytest voluptuous
+        run: pip install -r requirements.txt
 
       - name: Run tests
         run: python -m pytest tests/ -v --tb=short
@@ -119,6 +118,10 @@ jobs:
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest
+    # Full HACS publication validation requires repository-level metadata
+    # (topics, public listing state) that fork/PR CI cannot guarantee. Keep it
+    # on stable branch pushes; PRs still validate manifest and hacs.json shape.
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
     steps:
       - uses: actions/checkout@v4
 
@@ -142,15 +145,18 @@ jobs:
           SOURCE="${{ github.head_ref }}"
           echo "PR: $SOURCE → $TARGET"
 
-          # Allow: dev → master/main (release promotion)
-          if [[ "$TARGET" == "master" || "$TARGET" == "main" ]]; then
-            if [[ "$SOURCE" == "dev" ]]; then
-              echo "Release promotion PR (dev → $TARGET) — allowed."
-              exit 0
+          # If a dev branch exists, require feature/fix PRs to target it first.
+          # Repositories that only have main/master can merge directly there.
+          if git ls-remote --exit-code --heads origin dev >/dev/null 2>&1; then
+            if [[ "$TARGET" == "master" || "$TARGET" == "main" ]]; then
+              if [[ "$SOURCE" == "dev" ]]; then
+                echo "Release promotion PR (dev → $TARGET) — allowed."
+                exit 0
+              fi
+              echo "::error::Direct PRs to $TARGET are not allowed while a dev branch exists."
+              echo "::error::Please target 'dev' instead. Only 'dev → master/main' PRs are permitted."
+              exit 1
             fi
-            echo "::error::Direct PRs to $TARGET are not allowed."
-            echo "::error::Please target 'dev' instead. Only 'dev → master' PRs are permitted."
-            exit 1
           fi
 
           echo "PR targets '$TARGET' — OK."

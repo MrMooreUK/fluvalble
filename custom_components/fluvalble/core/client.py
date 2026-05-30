@@ -72,6 +72,9 @@ class Client:
 
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
+        if self._stopped:
+            return
+
         self.ping_time = time.time() + self._active_time
 
         if not self.ping_task or self.ping_task.done():
@@ -241,7 +244,9 @@ class Client:
                         response=True,
                     )
                     if self.send_queue:
-                        await asyncio.sleep(0.2)  # Let device process before next command
+                        await asyncio.sleep(
+                            0.2
+                        )  # Let device process before next command
 
                 # Interruptible sleep (cancelled early when send() is called)
                 self.ping_future = loop.create_future()
@@ -278,8 +283,11 @@ class Client:
             if not self._stopped:
                 await asyncio.sleep(RECONNECT_DELAY)
 
-        # Cleanly disconnect when the active window expires
-        await self._safe_disconnect()
+        # Leave the BLE connection available for a future command. Earlier versions
+        # disconnected here when the active window expired; on some HA Bluetooth
+        # proxy paths that left the device unavailable until the config entry was
+        # reloaded. A later send() wakes this loop again and reconnects if HA/bleak
+        # has dropped the connection meanwhile.
         self.ping_task = None
         _LOGGER.debug("Ping loop ended for %s", self.device.address)
 

@@ -3,6 +3,7 @@ Tests for config flow helpers — MAC normalisation, validation, and title gener
 
 All HA stubs are registered by conftest.py before this module loads.
 """
+
 import sys
 import os
 import pytest
@@ -13,7 +14,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from custom_components.fluvalble.config_flow import (
     normalize_mac,
     MAC_REGEX,
-    InvalidFormat,
 )
 
 
@@ -38,21 +38,27 @@ class TestNormalizeMac:
 
 
 class TestMacRegex:
-    @pytest.mark.parametrize("mac", [
-        "AA:BB:CC:DD:EE:FF",
-        "00:11:22:33:44:55",
-        "AB:CD:EF:01:23:45",
-    ])
+    @pytest.mark.parametrize(
+        "mac",
+        [
+            "AA:BB:CC:DD:EE:FF",
+            "00:11:22:33:44:55",
+            "AB:CD:EF:01:23:45",
+        ],
+    )
     def test_valid_macs(self, mac):
         assert MAC_REGEX.match(mac)
 
-    @pytest.mark.parametrize("mac", [
-        "AA:BB:CC:DD:EE",          # too short
-        "AA:BB:CC:DD:EE:FF:00",    # too long
-        "AABBCCDDEEFF",            # no colons
-        "ZZ:BB:CC:DD:EE:FF",       # invalid hex
-        "",                         # empty
-    ])
+    @pytest.mark.parametrize(
+        "mac",
+        [
+            "AA:BB:CC:DD:EE",  # too short
+            "AA:BB:CC:DD:EE:FF:00",  # too long
+            "AABBCCDDEEFF",  # no colons
+            "ZZ:BB:CC:DD:EE:FF",  # invalid hex
+            "",  # empty
+        ],
+    )
     def test_invalid_macs(self, mac):
         assert not MAC_REGEX.match(mac)
 
@@ -61,7 +67,6 @@ class TestValidateInput:
     """validate_input is async so we test normalize + regex path inline."""
 
     def test_invalid_mac_raises_invalid_format(self):
-        from custom_components.fluvalble.config_flow import normalize_mac, MAC_REGEX, InvalidFormat
         mac = normalize_mac("not-a-mac")
         assert not MAC_REGEX.match(mac)  # would trigger InvalidFormat in validate_input
 
