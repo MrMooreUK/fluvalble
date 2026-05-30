@@ -13,7 +13,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from custom_components.fluvalble.config_flow import (
     normalize_mac,
     MAC_REGEX,
-    InvalidFormat,
 )
 
 
@@ -61,7 +60,6 @@ class TestValidateInput:
     """validate_input is async so we test normalize + regex path inline."""
 
     def test_invalid_mac_raises_invalid_format(self):
-        from custom_components.fluvalble.config_flow import normalize_mac, MAC_REGEX, InvalidFormat
         mac = normalize_mac("not-a-mac")
         assert not MAC_REGEX.match(mac)  # would trigger InvalidFormat in validate_input
 
