@@ -1,6 +1,5 @@
 {
   "name": "Fluval Aquarium LED",
   "render_readme": true,
-  "homeassistant": "2024.1.0",
-  "domains": ["fluvalble"]
+  "homeassistant": "2024.1.0"
 }

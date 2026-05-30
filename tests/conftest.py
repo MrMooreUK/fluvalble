@@ -6,6 +6,7 @@ are installed in the lightweight CI environment — this module registers minima
 stubs for both before any test module is collected.  All stubs live here so
 there is a single place to update if HA changes its API.
 """
+
 import enum
 import sys
 import types
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock
 # ---------------------------------------------------------------------------
 # BLE stubs (bleak / bleak_retry_connector)
 # ---------------------------------------------------------------------------
+
 
 def _stub_bleak():
     mod = types.ModuleType("bleak")
@@ -34,6 +36,7 @@ def _stub_bleak():
 # ---------------------------------------------------------------------------
 # Home Assistant stubs
 # ---------------------------------------------------------------------------
+
 
 def _stub_homeassistant():
     """Register minimal HA stubs so integration modules can be imported."""
@@ -223,6 +226,7 @@ _stub_homeassistant()
 # ---------------------------------------------------------------------------
 # Shared fixtures
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def ble_device():

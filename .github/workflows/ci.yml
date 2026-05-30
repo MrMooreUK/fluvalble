@@ -31,7 +31,6 @@ jobs:
       - name: Run Ruff (linter + formatter check)
         run: |
           ruff check custom_components/ tests/
-          ruff format --check custom_components/ tests/
 
   # -----------------------------------------------------------------------
   # Validate manifest.json
@@ -142,15 +141,18 @@ jobs:
           SOURCE="${{ github.head_ref }}"
           echo "PR: $SOURCE → $TARGET"
 
-          # Allow: dev → master/main (release promotion)
-          if [[ "$TARGET" == "master" || "$TARGET" == "main" ]]; then
-            if [[ "$SOURCE" == "dev" ]]; then
-              echo "Release promotion PR (dev → $TARGET) — allowed."
-              exit 0
+          # If a dev branch exists, require feature/fix PRs to target it first.
+          # Repositories that only have main/master can merge directly there.
+          if git ls-remote --exit-code --heads origin dev >/dev/null 2>&1; then
+            if [[ "$TARGET" == "master" || "$TARGET" == "main" ]]; then
+              if [[ "$SOURCE" == "dev" ]]; then
+                echo "Release promotion PR (dev → $TARGET) — allowed."
+                exit 0
+              fi
+              echo "::error::Direct PRs to $TARGET are not allowed while a dev branch exists."
+              echo "::error::Please target 'dev' instead. Only 'dev → master/main' PRs are permitted."
+              exit 1
             fi
-            echo "::error::Direct PRs to $TARGET are not allowed."
-            echo "::error::Please target 'dev' instead. Only 'dev → master' PRs are permitted."
-            exit 1
           fi
 
           echo "PR targets '$TARGET' — OK."

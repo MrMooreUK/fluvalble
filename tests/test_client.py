@@ -49,7 +49,9 @@ async def test_send_restarts_ping_loop_after_idle_disconnect():
     client = _make_client()
     client.ping_task = None
 
-    with patch("asyncio.create_task", side_effect=lambda coro: _FakeTask(coro)) as create_task:
+    with patch(
+        "asyncio.create_task", side_effect=lambda coro: _FakeTask(coro)
+    ) as create_task:
         client.send(bytes([0x68, 0x03, 0x01]))
 
     assert client.send_queue == [bytes([0x68, 0x03, 0x01])]

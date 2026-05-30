@@ -4,6 +4,7 @@ Unit tests for the Fluval BLE encryption module.
 The encryption module is pure Python with no external deps so it is imported
 directly from its file path to avoid loading the full HA package hierarchy.
 """
+
 import os
 import sys
 

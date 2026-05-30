@@ -244,7 +244,9 @@ class Client:
                         response=True,
                     )
                     if self.send_queue:
-                        await asyncio.sleep(0.2)  # Let device process before next command
+                        await asyncio.sleep(
+                            0.2
+                        )  # Let device process before next command
 
                 # Interruptible sleep (cancelled early when send() is called)
                 self.ping_future = loop.create_future()

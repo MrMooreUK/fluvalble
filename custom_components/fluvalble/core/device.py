@@ -147,7 +147,9 @@ class Device:
 
     def deregister_update(self, attr: str, handler: Callable):
         """Remove a previously registered update handler (e.g. on entity removal)."""
-        target = self.updates_connect if attr == "connection" else self.updates_component
+        target = (
+            self.updates_connect if attr == "connection" else self.updates_component
+        )
         with contextlib.suppress(ValueError):
             target.remove(handler)
 
@@ -197,7 +199,9 @@ class Device:
     def decode_update_packet(self, data: bytearray):
         """Decode the received Fluval packet and sort into values."""
         if not data or len(data) < 13:
-            _LOGGER.warning("Received incomplete packet (%d bytes)", len(data) if data else 0)
+            _LOGGER.warning(
+                "Received incomplete packet (%d bytes)", len(data) if data else 0
+            )
             return
 
         # Detect channel count from packet: 4 channels = bytes 5-12, 5 channels = bytes 5-14

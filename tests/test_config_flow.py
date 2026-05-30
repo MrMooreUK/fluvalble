@@ -3,6 +3,7 @@ Tests for config flow helpers — MAC normalisation, validation, and title gener
 
 All HA stubs are registered by conftest.py before this module loads.
 """
+
 import sys
 import os
 import pytest
@@ -37,21 +38,27 @@ class TestNormalizeMac:
 
 
 class TestMacRegex:
-    @pytest.mark.parametrize("mac", [
-        "AA:BB:CC:DD:EE:FF",
-        "00:11:22:33:44:55",
-        "AB:CD:EF:01:23:45",
-    ])
+    @pytest.mark.parametrize(
+        "mac",
+        [
+            "AA:BB:CC:DD:EE:FF",
+            "00:11:22:33:44:55",
+            "AB:CD:EF:01:23:45",
+        ],
+    )
     def test_valid_macs(self, mac):
         assert MAC_REGEX.match(mac)
 
-    @pytest.mark.parametrize("mac", [
-        "AA:BB:CC:DD:EE",          # too short
-        "AA:BB:CC:DD:EE:FF:00",    # too long
-        "AABBCCDDEEFF",            # no colons
-        "ZZ:BB:CC:DD:EE:FF",       # invalid hex
-        "",                         # empty
-    ])
+    @pytest.mark.parametrize(
+        "mac",
+        [
+            "AA:BB:CC:DD:EE",  # too short
+            "AA:BB:CC:DD:EE:FF:00",  # too long
+            "AABBCCDDEEFF",  # no colons
+            "ZZ:BB:CC:DD:EE:FF",  # invalid hex
+            "",  # empty
+        ],
+    )
     def test_invalid_macs(self, mac):
         assert not MAC_REGEX.match(mac)
 
