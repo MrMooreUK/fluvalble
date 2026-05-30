@@ -118,6 +118,10 @@ jobs:
   hacs:
     name: HACS validation
     runs-on: ubuntu-latest
+    # Full HACS publication validation requires repository-level metadata
+    # (topics, public listing state) that fork/PR CI cannot guarantee. Keep it
+    # on stable branch pushes; PRs still validate manifest and hacs.json shape.
+    if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
     steps:
       - uses: actions/checkout@v4
 
