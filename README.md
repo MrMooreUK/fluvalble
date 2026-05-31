@@ -1,10 +1,23 @@
 <p align="center">
-  <img src="images/logo.png" alt="Fluval BLE — Home Assistant Integration" width="560"/>
+  <img src="images/logo.png" alt="Fluval BLE — Aquarium LED lighting for Home Assistant" width="760"/>
 </p>
 
-**Control your Fluval aquarium LED lights from Home Assistant—no cloud, no app, just local Bluetooth.**
+<p align="center">
+  <a href="https://github.com/MrMooreUK/fluvalble/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/MrMooreUK/fluvalble/ci.yml?branch=main&style=for-the-badge&label=CI"></a>
+  <a href="https://github.com/MrMooreUK/fluvalble/releases"><img alt="Release" src="https://img.shields.io/github/v/release/MrMooreUK/fluvalble?style=for-the-badge&label=release"></a>
+  <a href="https://github.com/MrMooreUK/fluvalble/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/MrMooreUK/fluvalble?style=for-the-badge"></a>
+</p>
 
-Turn lights on and off, adjust channel brightness, switch modes (Manual / Automatic / Professional), and monitor connection status. All communication is over BLE between your Home Assistant host and the light; no internet or vendor apps required.
+<p align="center">
+  <strong>Premium local control for Fluval aquarium LED lights in Home Assistant.</strong><br/>
+  No cloud. No vendor app dependency. Just Bluetooth, your tank, and automations that behave.
+</p>
+
+---
+
+## Why Fluval BLE?
+
+Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assistant devices. Control power, colour channels, lighting modes, and connection health directly from your dashboard while keeping every command local over Bluetooth Low Energy.
 
 ---
 
@@ -12,11 +25,12 @@ Turn lights on and off, adjust channel brightness, switch modes (Manual / Automa
 
 | Feature | Description |
 |--------|-------------|
+| **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Power** | Turn the LED fixture on or off via a switch entity. |
 | **Channels** | Up to five brightness sliders (0–1000) for manual control per channel. 4-channel lamps (e.g. Aquasky 2.0) show channels 1–4 only; Channel 5 is marked unavailable. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Adjusting a brightness slider while in Automatic or Professional mode automatically switches to Manual first. |
-| **Connection** | Binary sensor shows when the light is connected over BLE (RSSI and last seen in attributes). |
-| **Auto-discovery** | HA automatically detects nearby Fluval lights and prompts you to add them—no manual searching required. |
+| **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
+| **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
 
 Entities are created per device: one switch, one connection sensor, one mode select, and up to five number entities for the channels. Everything updates from the device when it sends state, so the UI stays in sync.
 

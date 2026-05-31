@@ -1,68 +1,72 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Fluval BLE icon</title>
+  <desc id="desc">A bold aquarium LED fixture casting cyan light onto water.</desc>
   <defs>
-    <!-- Fixture body gradient (top-lit) -->
-    <linearGradient id="g-fix" x1="50" y1="10" x2="50" y2="30" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#005EA3"/>
-      <stop offset="100%" stop-color="#0072BB"/>
+    <linearGradient id="bg" x1="64" y1="40" x2="448" y2="472" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#06101d"/>
+      <stop offset="0.52" stop-color="#071a2c"/>
+      <stop offset="1" stop-color="#03354b"/>
     </linearGradient>
-    <!-- Light-beam cone fades to transparent -->
-    <linearGradient id="g-beam" x1="50" y1="30" x2="50" y2="60" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#00AEEF" stop-opacity="0.55"/>
-      <stop offset="100%" stop-color="#00AEEF" stop-opacity="0"/>
+    <radialGradient id="glow" cx="50%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#83fbff" stop-opacity="0.40"/>
+      <stop offset="0.42" stop-color="#00c8ff" stop-opacity="0.15"/>
+      <stop offset="1" stop-color="#00c8ff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fixture" x1="88" y1="112" x2="424" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#101827"/>
+      <stop offset="0.5" stop-color="#29435d"/>
+      <stop offset="1" stop-color="#0a1320"/>
     </linearGradient>
-    <!-- Water shimmer -->
-    <linearGradient id="g-water" x1="0" y1="60" x2="100" y2="60" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#005FA3"/>
-      <stop offset="45%"  stop-color="#0097DC"/>
-      <stop offset="100%" stop-color="#005FA3"/>
+    <linearGradient id="edge" x1="112" y1="198" x2="400" y2="198" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#00e5ff" stop-opacity="0.25"/>
+      <stop offset="0.5" stop-color="#c4fdff" stop-opacity="0.88"/>
+      <stop offset="1" stop-color="#6372ff" stop-opacity="0.28"/>
     </linearGradient>
+    <linearGradient id="beam" x1="256" y1="198" x2="256" y2="418" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9dffff" stop-opacity="0.76"/>
+      <stop offset="0.58" stop-color="#00c8ff" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#00c8ff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="water" x1="72" y1="372" x2="440" y2="372" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#027cff"/>
+      <stop offset="0.50" stop-color="#00efff"/>
+      <stop offset="1" stop-color="#54ffcf"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.44"/>
+    </filter>
+    <filter id="led-glow" x="-120%" y="-120%" width="340%" height="340%">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
   </defs>
 
-  <!-- ── LED fixture bar ── -->
-  <rect x="8" y="10" width="84" height="20" rx="5" fill="url(#g-fix)"/>
-  <!-- Sheen stripe across top -->
-  <rect x="10" y="11" width="80" height="5" rx="2.5" fill="white" opacity="0.14"/>
-  <!-- Bottom edge shadow -->
-  <rect x="8" y="27" width="84" height="3" rx="0" fill="#003F7E" opacity="0.35"/>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)"/>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#glow)"/>
+  <rect x="27" y="27" width="458" height="458" rx="109" fill="none" stroke="#ffffff" stroke-opacity="0.11" stroke-width="6"/>
 
-  <!-- ── LED lenses (5 channels, Fluval palette) ── -->
-  <!-- Ch1 cool-white -->
-  <circle cx="21" cy="20" r="5.5" fill="#DCF0FF" opacity="0.95"/>
-  <!-- Ch2 royal blue -->
-  <circle cx="35" cy="20" r="5.5" fill="#1E90D4" opacity="0.95"/>
-  <!-- Ch3 cyan -->
-  <circle cx="50" cy="20" r="5.5" fill="#00AEEF" opacity="0.95"/>
-  <!-- Ch4 deeper blue -->
-  <circle cx="65" cy="20" r="5.5" fill="#1565C0" opacity="0.95"/>
-  <!-- Ch5 cool-white -->
-  <circle cx="79" cy="20" r="5.5" fill="#DCF0FF" opacity="0.95"/>
+  <g filter="url(#shadow)">
+    <path d="M112 198 L400 198 L454 414 Q256 448 58 414 Z" fill="url(#beam)"/>
 
-  <!-- Specular glare dot on each lens -->
-  <circle cx="19.2" cy="18.2" r="2.2" fill="white" opacity="0.75"/>
-  <circle cx="33.2" cy="18.2" r="2.2" fill="white" opacity="0.65"/>
-  <circle cx="48.2" cy="18.2" r="2.2" fill="white" opacity="0.70"/>
-  <circle cx="63.2" cy="18.2" r="2.2" fill="white" opacity="0.65"/>
-  <circle cx="77.2" cy="18.2" r="2.2" fill="white" opacity="0.75"/>
+    <rect x="80" y="102" width="352" height="104" rx="32" fill="url(#fixture)" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
+    <path d="M112 120 H400" stroke="#ffffff" stroke-opacity="0.18" stroke-width="8" stroke-linecap="round"/>
+    <rect x="112" y="195" width="288" height="9" rx="4.5" fill="url(#edge)"/>
 
-  <!-- ── Light-beam cone ── -->
-  <path d="M13 30 L87 30 L93 60 L7 60 Z" fill="url(#g-beam)"/>
+    <g filter="url(#led-glow)">
+      <circle cx="150" cy="154" r="24" fill="#ecfeff"/>
+      <circle cx="220" cy="154" r="24" fill="#00b7ff"/>
+      <circle cx="292" cy="154" r="24" fill="#67fff0"/>
+      <circle cx="362" cy="154" r="24" fill="#ecfeff"/>
+    </g>
+    <circle cx="142" cy="145" r="7" fill="#ffffff" opacity="0.80"/>
+    <circle cx="212" cy="145" r="7" fill="#ffffff" opacity="0.55"/>
+    <circle cx="284" cy="145" r="7" fill="#ffffff" opacity="0.68"/>
+    <circle cx="354" cy="145" r="7" fill="#ffffff" opacity="0.80"/>
 
-  <!-- ── Water surface — three layered waves ── -->
-  <!-- Wave 1 — brightest, mid blue -->
-  <path d="M0 66
-           C10 60  18 66  30 63
-           C42 60  50 66  62 63
-           C74 60  84 66  100 63
-           L100 100 L0 100 Z"
-        fill="url(#g-water)" opacity="0.85"/>
-  <!-- Wave 2 — mid-depth, darker blue -->
-  <path d="M0 74
-           C12 68  20 75  34 71
-           C48 67  58 74  72 71
-           C84 68  92 74  100 71
-           L100 100 L0 100 Z"
-        fill="#00579B" opacity="0.70"/>
-  <!-- Wave 3 — deep, navy -->
-  <path d="M0 83 L100 83 L100 100 L0 100 Z"
-        fill="#003366" opacity="0.55"/>
+    <path d="M64 372 C108 334 156 410 210 374 C262 340 312 410 366 374 C394 355 420 356 448 372 L448 488 L64 488 Z" fill="url(#water)" opacity="0.76"/>
+    <path d="M64 421 C126 378 176 452 240 410 C294 374 342 444 404 404 C420 394 434 392 448 398 L448 488 L64 488 Z" fill="#062f57" opacity="0.88"/>
+  </g>
 </svg>
