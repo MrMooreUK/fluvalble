@@ -111,6 +111,7 @@ After setup you'll see one device with entities like:
 
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
+| **Light** | Light | Master dimmer — on/off plus overall brightness, scaling all channels together while preserving their ratios. |
 | **Switch** | LED | Turn the light on or off. |
 | **Number** | Channel 1 … Channel 5 | Brightness 0–1000 per channel (manual mode). Channel 5 is unavailable on 4-channel lamps. |
 | **Select** | Mode | Manual / Automatic / Professional. |

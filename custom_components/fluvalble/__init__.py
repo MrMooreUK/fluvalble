@@ -24,6 +24,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SELECT,
     Platform.SWITCH,
+    Platform.LIGHT,
 ]
 
 
@@ -72,12 +73,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from .number import create_entities as number_entities  # noqa: PLC0415
         from .binary_sensor import create_entities as sensor_entities  # noqa: PLC0415
         from .select import create_entities as select_entities  # noqa: PLC0415
+        from .light import create_entities as light_entities  # noqa: PLC0415
 
         factories = {
             Platform.SWITCH: switch_entities,
             Platform.NUMBER: number_entities,
             Platform.BINARY_SENSOR: sensor_entities,
             Platform.SELECT: select_entities,
+            Platform.LIGHT: light_entities,
         }
 
         for platform, add_fn in entry_data["pending_add_entities"].items():

@@ -165,3 +165,55 @@ class TestConnectionHandlers:
         assert handler in device.updates_component
         device.deregister_update("channel_1", handler)
         assert handler not in device.updates_component
+
+
+class TestMasterBrightness:
+    def test_master_brightness_is_brightest_channel(self):
+        device = _make_device()
+        device._channel_count = 4
+        device.values["channel_1"] = 100
+        device.values["channel_2"] = 600
+        device.values["channel_3"] = 250
+        device.values["channel_4"] = 0
+        assert device.master_brightness() == 600
+
+    def test_master_brightness_ignores_unsupported_channels(self):
+        # On a 4-channel lamp, channel_5 should not affect the master level.
+        device = _make_device()
+        device._channel_count = 4
+        device.values["channel_1"] = 200
+        device.values["channel_5"] = 1000
+        assert device.master_brightness() == 200
+
+    def test_set_master_brightness_preserves_ratios(self):
+        device = _make_device()
+        device._channel_count = 4
+        device.values["channel_1"] = 1000
+        device.values["channel_2"] = 500
+        device.values["channel_3"] = 0
+        device.values["channel_4"] = 250
+        device.set_master_brightness(500)  # halve the brightest channel
+        assert device.values["channel_1"] == 500
+        assert device.values["channel_2"] == 250
+        assert device.values["channel_3"] == 0
+        assert device.values["channel_4"] == 125
+
+    def test_set_master_brightness_uniform_when_all_zero(self):
+        # No ratio to preserve → all supported channels set uniformly.
+        device = _make_device()
+        device._channel_count = 4
+        for ch in ALL_CHANNELS:
+            device.values[ch] = 0
+        device.set_master_brightness(300)
+        assert device.values["channel_1"] == 300
+        assert device.values["channel_4"] == 300
+        # Unsupported channel untouched.
+        assert device.values["channel_5"] == 0
+
+    def test_set_master_brightness_clamps_and_sends(self):
+        device = _make_device()
+        device._channel_count = 4
+        device.values["channel_1"] = 1000
+        device.set_master_brightness(99999)  # clamped to 1000
+        assert device.values["channel_1"] == 1000
+        device.client.send.assert_called()

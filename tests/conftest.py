@@ -54,6 +54,7 @@ def _stub_homeassistant():
         BINARY_SENSOR = "binary_sensor"
         SELECT = "select"
         SWITCH = "switch"
+        LIGHT = "light"
 
     class EntityCategory(str, enum.Enum):
         DIAGNOSTIC = "diagnostic"
@@ -193,6 +194,21 @@ def _stub_homeassistant():
     ha_bs.BinarySensorDeviceClass = BinarySensorDeviceClass
     ha_bs.BinarySensorEntity = _FakeBinarySensorEntity
 
+    # ---- homeassistant.components.light ----
+    class ColorMode(str, enum.Enum):
+        BRIGHTNESS = "brightness"
+
+    class _FakeLightEntity(_FakeEntity):
+        _attr_is_on = None
+        _attr_brightness = None
+        _attr_color_mode = None
+        _attr_supported_color_modes = None
+
+    ha_light = types.ModuleType("homeassistant.components.light")
+    ha_light.LightEntity = _FakeLightEntity
+    ha_light.ColorMode = ColorMode
+    ha_light.ATTR_BRIGHTNESS = "brightness"
+
     # ---- register everything in sys.modules ----
     modules = {
         "homeassistant": types.ModuleType("homeassistant"),
@@ -206,6 +222,7 @@ def _stub_homeassistant():
         "homeassistant.components.select": ha_select,
         "homeassistant.components.switch": ha_switch,
         "homeassistant.components.binary_sensor": ha_bs,
+        "homeassistant.components.light": ha_light,
         "homeassistant.helpers": ha_helpers,
         "homeassistant.helpers.device_registry": ha_dr,
         "homeassistant.helpers.entity": ha_entity,

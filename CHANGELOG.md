@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Light entity** — a master dimmer (`light.fluval_xxxx_light`) that turns the fixture
+  on/off and sets overall brightness, scaling all channels together while preserving
+  their relative ratios. Works with HA light cards, voice assistants and light
+  automations. The per-channel number sliders remain for fine control.
+
+### Changed
+- **Protocol constants** — command bytes (`CMD_HEADER`, `CMD_MODE`, `CMD_SWITCH`,
+  `CMD_BRIGHTNESS`, `CMD_STATUS`) are now named constants in `core/__init__.py`
+  instead of inline magic numbers, making the BLE command set self-documenting.
+
+---
+
 ## [0.0.4] — 2026-03-05
 
 ### Fixed

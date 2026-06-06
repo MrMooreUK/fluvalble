@@ -78,6 +78,11 @@
       "led_on_off": {
         "name": "LED"
       }
+    },
+    "light": {
+      "light": {
+        "name": "Light"
+      }
     }
   }
 }

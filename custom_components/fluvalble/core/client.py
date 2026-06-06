@@ -9,7 +9,7 @@ import time
 from bleak import BleakClient, BleakError, BleakGATTCharacteristic, BLEDevice
 from bleak_retry_connector import establish_connection
 
-from . import encryption
+from . import CMD_HEADER, CMD_STATUS, encryption
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -193,7 +193,7 @@ class Client:
             # Handshake step 1 — request current state
             await self.client.write_gatt_char(
                 CHAR_COMMAND_OUT,
-                data=encrypt(bytearray([0x68, 0x05])),
+                data=encrypt(bytearray([CMD_HEADER, CMD_STATUS])),
                 response=True,
             )
             _LOGGER.info("Connected to Fluval %s", self.device.address)

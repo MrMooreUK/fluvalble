@@ -9,6 +9,7 @@ from typing import TypedDict
 
 from bleak import AdvertisementData, BLEDevice
 
+from . import CMD_BRIGHTNESS, CMD_HEADER, CMD_MODE, CMD_SWITCH
 from .client import Client
 
 _LOGGER = logging.getLogger(__name__)
@@ -154,24 +155,50 @@ class Device:
             target.remove(handler)
 
     def set_value(self, attr: str, value: int) -> None:
-        """Set values received by entities such as numbers and switches."""
+        """Set a single channel value and push the brightness packet to the lamp."""
         _LOGGER.debug("Value %s changed to %s", attr, value)
         self.values[attr] = value
+        self._apply_brightness()
 
+    def master_brightness(self) -> int:
+        """Overall brightness (0–1000): the brightest supported channel."""
+        chans = ALL_CHANNELS[: self._channel_count]
+        return max((self.values.get(ch, 0) for ch in chans), default=0)
+
+    def set_master_brightness(self, level: int) -> None:
+        """Scale all supported channels to ``level`` (0–1000), preserving ratios.
+
+        When every channel is currently 0 there is no ratio to preserve, so the
+        channels are set uniformly to ``level`` instead.
+        """
+        level = min(1000, max(0, level))
+        chans = ALL_CHANNELS[: self._channel_count]
+        current_max = max((self.values.get(ch, 0) for ch in chans), default=0)
+        if current_max <= 0:
+            for ch in chans:
+                self.values[ch] = level
+        else:
+            factor = level / current_max
+            for ch in chans:
+                self.values[ch] = min(
+                    1000, max(0, round(self.values.get(ch, 0) * factor))
+                )
+        self._apply_brightness()
+
+    def _apply_brightness(self) -> None:
+        """Switch to manual if needed, send current channel values, refresh entities."""
         # Channel commands only work in manual mode. If we're in automatic/professional,
         # switch to manual first so the brightness change takes effect.
         commands: list[bytearray] = []
         if self.values.get("mode") != "manual":
-            commands.append(bytearray([0x68, 0x02, 0x00]))  # CMD_MODE = manual
+            commands.append(bytearray([CMD_HEADER, CMD_MODE, 0x00]))  # switch to manual
             self.values["mode"] = "manual"
-            for handler in self.updates_component:
-                handler()
 
-        # Build and send channel-brightness packet
+        # Build channel-brightness packet
         # Protocol: 0x68 header, 0x04 = CMD_BRIGHTNESS, then channels as 16-bit BIG-ENDIAN
         # (Planted Tank / Fluval app format; 0xFFFF = no change, we send actual values)
         # Only send the channels this lamp supports (4 for Aquasky 2.0, 5 for Plant/Reef 3.0)
-        cmd = bytearray([0x68, 0x04])
+        cmd = bytearray([CMD_HEADER, CMD_BRIGHTNESS])
         for ch in ALL_CHANNELS[: self._channel_count]:
             v = min(1000, max(0, self.values.get(ch, 0)))
             cmd.append((v >> 8) & 0xFF)  # high byte first (big-endian)
@@ -179,18 +206,22 @@ class Device:
         commands.append(cmd)
         self.client.send(commands)
 
+        # Refresh sliders, the master light, and the mode select.
+        for handler in self.updates_component:
+            handler()
+
     def select_option(self, attr: str, option: str) -> None:
         """Set option for select entities (e.g. mode)."""
         _LOGGER.debug("Option %s changed to %s", attr, option)
         self.values[attr] = option
         if attr == "mode" and option in MODES:
             mode_byte = MODES.index(option)
-            cmd = bytearray([0x68, 0x02, mode_byte])
+            cmd = bytearray([CMD_HEADER, CMD_MODE, mode_byte])
             self.client.send(cmd)
 
     def set_led_power(self, on: bool) -> None:
         """Send BLE command to turn the LED on or off (CMD_SWITCH 0x03)."""
-        cmd = bytearray([0x68, 0x03, 0x01 if on else 0x00])
+        cmd = bytearray([CMD_HEADER, CMD_SWITCH, 0x01 if on else 0x00])
         self.client.send(cmd)
         self.values["led_on_off"] = on
         for handler in self.updates_component:
