@@ -20,11 +20,11 @@ RECONNECT_DELAY = 30
 INITIAL_RETRY_DELAY = 10
 MAX_INITIAL_RETRIES = 30  # ~5 minutes of retrying at 10s intervals
 
-CHAR_NOTIFY = "00001002-0000-1000-8000-00805F9B34FB"
-CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805F9B34FB"
+CHAR_NOTIFY = "00001002-0000-1000-8000-00805f9b34fb"
+CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805f9b34fb"
 # Write-without-response characteristic: all outbound commands go here (state request + all other commands).
 # Notifications (device → HA) arrive on CHAR_NOTIFY (0x1002).
-CHAR_COMMAND_OUT = "00001001-0000-1000-8000-00805F9B34FB"
+CHAR_COMMAND_OUT = "00001001-0000-1000-8000-00805f9b34fb"
 
 # Fluval packets come in two fragments; the first is always 17 decrypted bytes.
 PARTIAL_PACKET_SIZE = 17
