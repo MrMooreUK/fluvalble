@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/MrMooreUK/fluvalble/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/MrMooreUK/fluvalble/ci.yml?branch=main&style=for-the-badge&label=CI"></a>
   <a href="https://github.com/MrMooreUK/fluvalble/releases"><img alt="Release" src="https://img.shields.io/github/v/release/MrMooreUK/fluvalble?style=for-the-badge&label=release"></a>
-  <a href="https://github.com/MrMooreUK/fluvalble/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/github/license/MrMooreUK/fluvalble?style=for-the-badge"></a>
+  <a href="https://github.com/MrMooreUK/fluvalble/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache%202.0-blue?style=for-the-badge"></a>
 </p>
 
 <p align="center">

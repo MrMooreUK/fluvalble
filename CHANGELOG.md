@@ -5,13 +5,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.0.5] — 2026-06-06
 
 ### Added
 - **Light entity** — a master dimmer (`light.fluval_xxxx_light`) that turns the fixture
   on/off and sets overall brightness, scaling all channels together while preserving
-  their relative ratios. Works with HA light cards, voice assistants and light
+  their relative ratios. Works with HA light cards, voice assistants, and light
   automations. The per-channel number sliders remain for fine control.
+
+### Fixed
+- **BLE client stays reusable after idle** — previously the client called
+  `_safe_disconnect()` when the active window expired, leaving the device unavailable
+  on some HA Bluetooth proxy setups until the config entry was reloaded. The client
+  now stays alive; a subsequent command wakes and reconnects it automatically.
+- **Ping restart guard** — `ping()` now returns immediately if the client has been
+  stopped, preventing an accidental restart after the integration is unloaded.
+- **Entity sync after channel change** — `updates_component` handlers (which push
+  state to HA) now fire on every channel change, not only when switching modes.
+  Previously, sliders in manual mode wouldn't update each other or the new light entity.
 
 ### Changed
 - **Protocol constants** — command bytes (`CMD_HEADER`, `CMD_MODE`, `CMD_SWITCH`,
