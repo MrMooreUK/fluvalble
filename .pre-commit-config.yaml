@@ -1,0 +1,21 @@
+# Pre-commit configuration for the Fluval BLE Home Assistant integration.
+#
+# Install once with:
+#   pip install pre-commit
+#   pre-commit install
+#
+# Then every `git commit` will run ruff format and ruff check against the
+# files you've changed. CI runs the same checks, so passing locally means
+# the PR will be green.
+#
+# Skip a hook on a single commit with `git commit --no-verify`.
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.7.4
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: '^(custom_components|tests)/.*\.py$'
+      - id: ruff-format
+        files: '^(custom_components|tests)/.*\.py$'
