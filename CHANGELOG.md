@@ -5,6 +5,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.0.6] — 2026-06-08
+
+### Added
+- **`docs/bug-triage.md`** — internal triage document for the two
+  currently-open bugs (#6 Aquasky 2.0 no response, #8 schedule drift
+  after power cut), with what we know, what we need from reporters,
+  and the workarounds to use in the meantime.
+- **`CONTRIBUTING.md`** — contributor guidance (dev branch workflow,
+  test expectations, local linting, release process).
+- **`AGENTS.md`** — guidance for AI coding agents working in this repo
+  (test commands, branch rules, what _not_ to change).
+- **`.pre-commit-config.yaml`** — `ruff format` + `ruff check` run on
+  every commit.
+- **`mypy` in CI** — soft, non-gating static type-checking job.
+  Reports existing type errors in the job log so progress is visible
+  as the integration gains type hints.
+- **`pytest-cov` in CI** — coverage report uploaded to Codecov when
+  the `CODECOV_TOKEN` secret is configured. The job degrades
+  gracefully without it.
+- **`pyproject.toml` config** — `[tool.mypy]` and `[tool.coverage.*]`
+  sections, with a 33% coverage floor.
+
+---
+
 ## [0.0.5] — 2026-06-06
 
 ### Added

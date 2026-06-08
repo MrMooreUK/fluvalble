@@ -113,6 +113,74 @@ jobs:
         run: python -m pytest tests/ -v --tb=short
 
   # -----------------------------------------------------------------------
+  # Static type checking (soft, non-gating)
+  # -----------------------------------------------------------------------
+  mypy:
+    name: mypy (Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install mypy
+        run: pip install mypy
+
+      - name: Run mypy
+        # HA's runtime types are not installable in CI; we type-check against
+        # the integration's own modules only. This is a soft, non-gating pass:
+        # existing type errors are reported in the job log so we can see
+        # progress as the integration gains type hints, but they don't fail
+        # the build. `|| true` makes the exit-code-0-on-failure explicit.
+        # Tighten this gradually — see `pyproject.toml` `[tool.mypy]` and
+        # `docs/bug-triage.md`.
+        run: |
+          mypy custom_components/fluvalble/ \
+            --ignore-missing-imports \
+            --no-implicit-optional \
+            --warn-unused-ignores \
+            --warn-redundant-casts \
+            || true
+
+  # -----------------------------------------------------------------------
+  # Test coverage
+  # -----------------------------------------------------------------------
+  coverage:
+    name: Test coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest-cov
+
+      - name: Run tests with coverage
+        run: |
+          python -m pytest tests/ \
+            --cov=custom_components/fluvalble \
+            --cov-report=xml \
+            --cov-report=term-missing
+
+      - name: Upload coverage to Codecov
+        # Set the repository's CODECOV_TOKEN secret to enable uploads.
+        # The job degrades gracefully if the token is missing.
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  # -----------------------------------------------------------------------
   # HACS validation
   # -----------------------------------------------------------------------
   hacs:

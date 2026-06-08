@@ -8,3 +8,42 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# Mypy runs as a soft, non-gating pass in CI (see `.github/workflows/ci.yml`).
+# Tighten this incrementally as the integration gains type hints.
+check_untyped_defs = false
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+check_untyped_defs = false
+
+[tool.coverage.run]
+source = ["custom_components/fluvalble"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Coverage floor. The realistic current level sits around 33% — most of
+# the platform/entity code is exercised via HA's own test harness rather
+# than unit tests. Raise the floor in a follow-up PR after adding tests
+# for the entity platforms (switch, number, select, binary_sensor),
+# which are currently at 0% coverage and easy to mock.
+fail_under = 33
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
