@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.0.6] — 2026-06-08
 
 ### Added
 - **`docs/bug-triage.md`** — internal triage document for the two
@@ -26,10 +26,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   gracefully without it.
 - **`pyproject.toml` config** — `[tool.mypy]` and `[tool.coverage.*]`
   sections, with a 33% coverage floor.
-
-### Notes
-- No version bump in this entry; the maintainer controls the release
-  versioning.
 
 ---
 
