@@ -38,7 +38,9 @@ body:
         - All models
         - Fluval Plant 3.0
         - Fluval Reef 3.0
+        - Fluval Marine 3.0
         - Fluval Aquasky 2.0
+        - Fluval Aquasky 3.0
         - Other / Unknown
 
   - type: textarea

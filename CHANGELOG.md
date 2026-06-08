@@ -5,6 +5,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.0.5] — 2026-06-08
+
+### Fixed
+- **BLE client re-usable after idle** — the Bluetooth client no longer
+  ends up in a stuck state after a period of inactivity, which previously
+  caused commands to silently no-op until HA was restarted
+  (PR [#4](https://github.com/MrMooreUK/fluvalble/pull/4)).
+- **Mode changes are written to the command characteristic (0x1001)**
+  rather than the notify characteristic (0x1002), which had been
+  silently dropping the command on some fixtures.
+- **Brightness writes use Write With Response** (`response=True`) to
+  guarantee delivery before the next command is sent.
+
+### Added
+- **`docs/bug-triage.md`** — internal triage document for the two
+  open bugs (#6 Aquasky 2.0 no response, #8 schedule drift after
+  power cut) so they remain solvable once we have protocol captures
+  from real hardware.
+- **`CONTRIBUTING.md`** — contributor guidance (dev branch workflow,
+  test expectations, local linting).
+- **`AGENTS.md`** — guidance for AI coding agents working in this repo
+  (test command, branch rules, what _not_ to change).
+- **`.pre-commit-config.yaml`** — `ruff format` + `ruff check` run on
+  every commit; CI now also runs `ruff format --check`.
+- **`mypy` in CI** — static type-checking job on Python 3.12.
+- **Coverage reporting** — `pytest-cov` runs in CI and uploads to
+  Codecov; a coverage badge has been added to the README.
+- **HACS validation badge** in README.
+
+### Notes
+- Two open bugs remain in this release. See `docs/bug-triage.md` for
+  the current understanding and what we need from reporters to fix
+  them. Both are _use-in-Manual-mode_ workarounds for now.
+
+---
+
 ## [0.0.4] — 2026-03-05
 
 ### Fixed

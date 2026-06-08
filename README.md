@@ -2,6 +2,14 @@
   <img src="images/logo.png" alt="Fluval BLE — Home Assistant Integration" width="560"/>
 </p>
 
+<p align="center">
+  <a href="https://github.com/MrMooreUK/fluvalble/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/MrMooreUK/fluvalble/ci.yml?branch=dev&label=CI&style=flat-square"></a>
+  <a href="https://codecov.io/gh/MrMooreUK/fluvalble"><img alt="Coverage" src="https://img.shields.io/codecov/c/github/MrMooreUK/fluvalble?style=flat-square"></a>
+  <a href="https://github.com/MrMooreUK/fluvalble/actions/workflows/hacs.yml"><img alt="HACS" src="https://img.shields.io/badge/HACS-default-orange.svg?style=flat-square"></a>
+  <a href="https://github.com/MrMooreUK/fluvalble/releases"><img alt="Release" src="https://img.shields.io/github/v/release/MrMooreUK/fluvalble?style=flat-square"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/github/license/MrMooreUK/fluvalble?style=flat-square"></a>
+</p>
+
 **Control your Fluval aquarium LED lights from Home Assistant—no cloud, no app, just local Bluetooth.**
 
 Turn lights on and off, adjust channel brightness, switch modes (Manual / Automatic / Professional), and monitor connection status. All communication is over BLE between your Home Assistant host and the light; no internet or vendor apps required.
@@ -231,6 +239,21 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 - Original integration structure and BLE work by [@mrzottel](https://github.com/mrzottel).
 - Community reverse‑engineering of the Fluval BLE protocol (e.g. Planted Tank Forum, ESPHome/fluval projects).
 - Licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) in this repo.
+
+## Contributing & development
+
+We welcome bug reports, feature requests, and pull requests.
+
+- **Bug reports / feature requests:** please use the issue templates in
+  `.github/ISSUE_TEMPLATE/`. Check [`docs/bug-triage.md`](docs/bug-triage.md)
+  first to see if your issue is already being tracked.
+- **Pull requests:** see [`CONTRIBUTING.md`](CONTRIBUTING.md) for the
+  `dev` → `main` workflow, local test commands, and the PR checklist.
+  All PRs should target the `dev` branch, not `main`.
+- **AI coding agents:** see [`AGENTS.md`](AGENTS.md) for project layout,
+  the test/lint commands, and the things agents must not change (the
+  BLE protocol implementation, in particular).
+- **Changelog:** see [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

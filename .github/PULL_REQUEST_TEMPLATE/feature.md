@@ -15,9 +15,11 @@
 - [ ] Tested with Home Assistant version: <!-- e.g. 2024.6.0 -->
 
 ## Checklist
-- [ ] Targets **`dev`** (not `master`)
+- [ ] Targets **`dev`** (not `main`/`master`)
 - [ ] `manifest.json` version bumped if behaviour changes
 - [ ] `CHANGELOG.md` updated
+- [ ] `ruff format` and `ruff check` both clean
+- [ ] `pytest tests/ -v` passes locally
 - [ ] Translation strings added/updated if new UI text was added
 - [ ] No secrets or personal data committed
 

@@ -7,7 +7,10 @@ body:
       value: |
         Thanks for taking the time to fill this out! The more detail you provide, the faster we can diagnose the problem.
 
-        **Before filing:** please check the [existing issues](../../issues) and the [README troubleshooting section](../../blob/master/README.md) first.
+        **Before filing:**
+        1. Check the [existing issues](../../issues).
+        2. Read the [README troubleshooting section](../../blob/main/README.md#troubleshooting).
+        3. Skim [`docs/bug-triage.md`](../../blob/main/docs/bug-triage.md) — your issue may already be tracked and we may be waiting on specific evidence.
 
   - type: input
     id: ha_version
@@ -47,7 +50,9 @@ body:
       options:
         - Fluval Plant 3.0
         - Fluval Reef 3.0
+        - Fluval Marine 3.0
         - Fluval Aquasky 2.0
+        - Fluval Aquasky 3.0
         - Other / Unknown
     validations:
       required: true

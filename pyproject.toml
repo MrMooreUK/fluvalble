@@ -8,3 +8,43 @@ select = ["E4", "E7", "E9", "F"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+no_implicit_optional = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+# Don't fail the build on first-party modules that aren't yet annotated.
+# Tighten this incrementally as the integration gains type hints.
+check_untyped_defs = false
+disallow_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+check_untyped_defs = false
+
+[tool.coverage.run]
+source = ["custom_components/fluvalble"]
+branch = true
+omit = [
+    "*/tests/*",
+    "*/__pycache__/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+# Coverage floor. 33% is the realistic current level (most of the
+# platform/entity/HA-bootstrap code is exercised via HA's own test harness
+# rather than unit tests). The floor is intentionally low to start; the
+# follow-up "test coverage" PR should raise it to ~70% by adding tests for
+# the entity platforms (switch, number, select, binary_sensor) which are
+# currently at 0% and easy to mock.
+fail_under = 33
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]
