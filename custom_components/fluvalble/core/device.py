@@ -9,7 +9,15 @@ from typing import TypedDict
 
 from bleak import AdvertisementData, BLEDevice
 
-from . import CMD_BRIGHTNESS, CMD_HEADER, CMD_MODE, CMD_SWITCH
+from . import (
+    CHANNEL_ICONS,
+    CHANNEL_PROFILES,
+    CMD_BRIGHTNESS,
+    CMD_HEADER,
+    CMD_MODE,
+    CMD_SWITCH,
+    default_model_for,
+)
 from .client import Client
 
 _LOGGER = logging.getLogger(__name__)
@@ -46,9 +54,13 @@ class Device:
         advertisement: AdvertisementData,
         ping_interval: int = 10,
         active_time: int = 120,
+        model: str | None = None,
     ) -> None:
         """Initialize the device."""
         self.name = name
+        # User-selected channel-colour profile (see CHANNEL_PROFILES). When None,
+        # the model is inferred from the detected channel count.
+        self._model_override = model if model in CHANNEL_PROFILES else None
         self.client = Client(
             device,
             self.set_connected,
@@ -78,6 +90,31 @@ class Device:
     def model_name(self) -> str:
         """Return a human-readable model string based on detected channel count."""
         return "Aquasky 2.0" if self._channel_count < 5 else "Aquarium LED 3.0"
+
+    @property
+    def model(self) -> str:
+        """The channel-colour profile key (user override, else inferred)."""
+        return self._model_override or default_model_for(self._channel_count)
+
+    def channel_index(self, attr: str) -> int:
+        """Zero-based index of a ``channel_N`` attribute (channel_1 -> 0)."""
+        return int(attr.rsplit("_", 1)[1]) - 1
+
+    def channel_label(self, attr: str) -> str | None:
+        """Colour name for a channel under the active profile, or None.
+
+        Returns None when the channel is outside the profile's range (e.g.
+        channel_5 on a 4-channel profile), so callers fall back to a generic
+        "Channel N" label.
+        """
+        colours = CHANNEL_PROFILES.get(self.model, [])
+        idx = self.channel_index(attr)
+        return colours[idx] if 0 <= idx < len(colours) else None
+
+    def channel_icon(self, attr: str) -> str | None:
+        """Material Design icon for a channel based on its colour, or None."""
+        label = self.channel_label(attr)
+        return CHANNEL_ICONS.get(label) if label else None
 
     def update_ble(
         self,
@@ -250,13 +287,15 @@ class Device:
         self.values["led_on_off"] = data[3] > 0x00
 
         if self.values["mode"] == "manual":
-            # Channel bytes: layout may vary by device; use same order as we send (big-endian)
-            self.values["channel_1"] = (data[5] << 8) | (data[6] & 0xFF)
-            self.values["channel_2"] = (data[7] << 8) | (data[8] & 0xFF)
-            self.values["channel_3"] = (data[9] << 8) | (data[10] & 0xFF)
-            self.values["channel_4"] = (data[11] << 8) | (data[12] & 0xFF)
+            # Status packet reports channels little-endian (low byte first), which
+            # differs from the brightness command we *send* (big-endian). This matches
+            # the proven ESPHome component (mrzottel/esphome@fluval_ble_led decode_()).
+            self.values["channel_1"] = (data[6] << 8) | (data[5] & 0xFF)
+            self.values["channel_2"] = (data[8] << 8) | (data[7] & 0xFF)
+            self.values["channel_3"] = (data[10] << 8) | (data[9] & 0xFF)
+            self.values["channel_4"] = (data[12] << 8) | (data[11] & 0xFF)
             if len(data) >= 15:
-                self.values["channel_5"] = (data[13] << 8) | (data[14] & 0xFF)
+                self.values["channel_5"] = (data[14] << 8) | (data[13] & 0xFF)
         else:
             self.values["channel_1"] = 0
             self.values["channel_2"] = 0

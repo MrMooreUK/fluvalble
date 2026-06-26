@@ -69,12 +69,13 @@ class TestDecodeUpdatePacket:
         data = bytearray(15 if five_channel else 13)
         data[2] = mode
         data[3] = led
+        # Status packet reports channels little-endian (low byte first).
         for i, val in enumerate(channels[:4]):
-            data[5 + i * 2] = (val >> 8) & 0xFF
-            data[6 + i * 2] = val & 0xFF
+            data[5 + i * 2] = val & 0xFF
+            data[6 + i * 2] = (val >> 8) & 0xFF
         if five_channel and len(channels) >= 5:
-            data[13] = (channels[4] >> 8) & 0xFF
-            data[14] = channels[4] & 0xFF
+            data[13] = channels[4] & 0xFF
+            data[14] = (channels[4] >> 8) & 0xFF
         return data
 
     def test_mode_manual_decoded(self):
@@ -165,6 +166,62 @@ class TestConnectionHandlers:
         assert handler in device.updates_component
         device.deregister_update("channel_1", handler)
         assert handler not in device.updates_component
+
+
+class TestChannelProfiles:
+    def test_default_model_four_channel_is_aquasky(self):
+        device = _make_device()
+        device._channel_count = 4
+        assert device.model == "aquasky_2"
+
+    def test_default_model_five_channel_is_plant(self):
+        device = _make_device()
+        device._channel_count = 5
+        assert device.model == "plant_3"
+
+    def test_model_override_wins(self):
+        device = _make_device()
+        device._model_override = "reef_3"
+        device._channel_count = 5
+        assert device.model == "reef_3"
+
+    def test_invalid_model_override_ignored(self):
+        # Unknown model passed to the constructor is dropped, falling back to detection.
+        ble_device = MagicMock()
+        ble_device.address = "AA:BB:CC:DD:EE:FF"
+        advertisement = MagicMock()
+        advertisement.rssi = -70
+        with patch("custom_components.fluvalble.core.device.Client"):
+            device = Device("x", ble_device, advertisement, model="not_a_model")
+        assert device._model_override is None
+
+    def test_aquasky_channel_labels(self):
+        device = _make_device()
+        device._channel_count = 4
+        assert device.channel_label("channel_1") == "Red"
+        assert device.channel_label("channel_2") == "Green"
+        assert device.channel_label("channel_3") == "Blue"
+        assert device.channel_label("channel_4") == "White"
+        # No 5th colour on a 4-channel profile.
+        assert device.channel_label("channel_5") is None
+
+    def test_plant_channel_labels(self):
+        device = _make_device()
+        device._model_override = "plant_3"
+        assert device.channel_label("channel_1") == "Pink"
+        assert device.channel_label("channel_5") == "Warm White"
+
+    def test_reef_channel_labels(self):
+        device = _make_device()
+        device._model_override = "reef_3"
+        assert device.channel_label("channel_2") == "Cyan"
+        assert device.channel_label("channel_4") == "Purple"
+
+    def test_channel_icon_for_known_colour(self):
+        device = _make_device()
+        device._channel_count = 4
+        assert device.channel_icon("channel_4")  # White -> an icon
+        assert device.channel_icon("channel_5") is None  # no colour, no icon
 
 
 class TestMasterBrightness:

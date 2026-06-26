@@ -5,6 +5,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Per-model channel colour labels** — the channel sliders are now named after the
+  physical LED colour for your light instead of "Channel 1/2/3…". Choose your **Light
+  model** in the integration's options (**Configure**):
+  - Aquasky 2.0 → Red, Green, Blue, White
+  - Plant 3.0 → Pink, Blue, Cold White, Pure White, Warm White
+  - Reef / Marine 3.0 → Pink, Cyan, Blue, Purple, Cold White
+
+  Channel colour mappings sourced from the community ESPHome component
+  (`mrzottel/esphome@fluval_ble_led`, `TheRealFalseReality/fluval-bluetooth-hub`).
+  Changing the model reloads the integration and relabels the channels.
+
+### Fixed
+- **Channel read-back byte order** — the status packet reports channel brightness
+  *little-endian* (low byte first), but the decoder was reading it big-endian, so
+  slider positions reported by the light were wrong. Now matches the proven ESPHome
+  component. (The brightness command we *send* is big-endian and was already correct.)
+
+### Notes
+- **Modes**: Automatic and Professional are *schedule* modes — the light runs a daily
+  program stored on the device (set in the Fluval app) and controls its own channels by
+  time of day. Per-channel sliders therefore only apply in **Manual** mode; this is a
+  hardware behaviour, not a limitation of the integration.
+
+---
+
 ## [0.0.5] — 2026-06-06
 
 ### Added

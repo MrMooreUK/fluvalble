@@ -27,8 +27,8 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Power** | Turn the LED fixture on or off via a switch entity. |
-| **Channels** | Up to five brightness sliders (0–1000) for manual control per channel. 4-channel lamps (e.g. Aquasky 2.0) show channels 1–4 only; Channel 5 is marked unavailable. |
-| **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Adjusting a brightness slider while in Automatic or Professional mode automatically switches to Manual first. |
+| **Colour channels** | Brightness sliders (0–1000) labelled with their real colour for your model (e.g. **Red / Green / Blue / White** on Aquasky 2.0; **Pink / Blue / Cold White / Pure White / Warm White** on Plant 3.0). Pick your model in the integration's options. 4-channel lamps show channels 1–4 only. |
+| **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Channel sliders apply in **Manual** only — Automatic and Professional run a schedule stored on the light itself (set in the Fluval app). Moving a slider automatically switches the light to Manual first. |
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
 
@@ -103,6 +103,20 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 
+### Set your light model (channel colours)
+
+The light doesn't broadcast its model over Bluetooth, so the channel sliders can't know whether channel 1 is "Red" (Aquasky) or "Pink" (Plant). Tell the integration which model you have so the channels are labelled correctly:
+
+1. **Settings → Devices & services → Fluval Aquarium LED → Configure**.
+2. Choose your **Light model** (Aquasky 2.0, Plant 3.0, or Reef/Marine 3.0).
+3. Save — the integration reloads and the channels are renamed (e.g. Red / Green / Blue / White).
+
+| Model | Channels |
+|-------|----------|
+| **Aquasky 2.0** (4) | Red · Green · Blue · White |
+| **Plant 3.0** (5) | Pink · Blue · Cold White · Pure White · Warm White |
+| **Reef / Marine 3.0** (5) | Pink · Cyan · Blue · Purple · Cold White |
+
 ---
 
 ## Entities
@@ -113,8 +127,8 @@ After setup you'll see one device with entities like:
 |--------|-------------|---------|
 | **Light** | Light | Master dimmer — on/off plus overall brightness, scaling all channels together while preserving their ratios. |
 | **Switch** | LED | Turn the light on or off. |
-| **Number** | Channel 1 … Channel 5 | Brightness 0–1000 per channel (manual mode). Channel 5 is unavailable on 4-channel lamps. |
-| **Select** | Mode | Manual / Automatic / Professional. |
+| **Number** | Colour channels (e.g. Red, Green, Blue, White) | Brightness 0–1000 per channel (manual mode). Names follow the model you select in options. Channel 5 is unavailable on 4-channel lamps. |
+| **Select** | Mode | Manual / Automatic / Professional. Channel sliders only take effect in Manual. |
 | **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `switch.fluval_aabbccddeeff_led_on_off`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
@@ -197,6 +211,8 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | **Entities show "unavailable"** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
 | **Channel 5 shows "unavailable"** | This is expected for 4-channel lamps (e.g. Aquasky 2.0). Only Plant 3.0, Reef 3.0, and Marine 3.0 use 5 channels; Channel 5 is disabled automatically based on the first state packet received. |
 | **Channels or mode don't update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn't report mode, the dropdown may not reflect external changes. |
+| **Sliders do nothing in Automatic/Professional** | Expected. Auto and Pro run a daily schedule stored on the light (configured in the Fluval app); the light controls its own channels by time of day, so per-channel sliders only apply in **Manual**. Moving a slider switches the light to Manual automatically. |
+| **Channels are labelled "Channel 1/2/3…" not colours** | Set your **Light model** in the integration's options (see [Set your light model](#set-your-light-model-channel-colours)). |
 | **Channel sliders don't change the light** | See [Channel sliders troubleshooting](#channel-sliders-dont-change-the-light) below. |
 
 ### Channel sliders don't change the light

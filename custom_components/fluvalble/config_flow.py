@@ -17,10 +17,13 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .core import (
     CONF_ACTIVE_TIME,
+    CONF_MODEL,
     CONF_PING_INTERVAL,
     DEFAULT_ACTIVE_TIME,
     DEFAULT_PING_INTERVAL,
     DOMAIN,
+    MODEL_NAMES,
+    default_model_for,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -292,6 +295,10 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
         schema = vol.Schema(
             {
                 vol.Optional(
+                    CONF_MODEL,
+                    default=self._default_model(),
+                ): vol.In(MODEL_NAMES),
+                vol.Optional(
                     CONF_PING_INTERVAL,
                     default=self.config_entry.options.get(
                         CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL
@@ -306,6 +313,18 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
+
+    def _default_model(self) -> str:
+        """Pre-select the model: saved option, else the live device's best guess."""
+        saved = self.config_entry.options.get(CONF_MODEL)
+        if saved in MODEL_NAMES:
+            return saved
+        # Fall back to the connected device's inferred model (from channel count).
+        entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id)
+        device = entry_data.get("device") if entry_data else None
+        if device is not None:
+            return device.model
+        return default_model_for(4)
 
 
 class CannotConnect(HomeAssistantError):

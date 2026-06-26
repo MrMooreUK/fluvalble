@@ -32,6 +32,18 @@ class FluvalNumber(FluvalEntity, NumberEntity):
     _attr_icon = "mdi:brightness-6"
     _attr_mode = NumberMode.SLIDER
 
+    def __init__(self, device: Device, attr: str) -> None:
+        super().__init__(device, attr)
+        # Label the channel with its physical colour for the selected model
+        # (e.g. "Red", "Cold White"). Falls back to the generic "Channel N"
+        # translation when the model profile has no colour for this channel.
+        label = device.channel_label(attr)
+        if label:
+            self._attr_translation_key = None
+            self._attr_name = label
+            if icon := device.channel_icon(attr):
+                self._attr_icon = icon
+
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
         if not attribute:

@@ -10,6 +10,7 @@ from homeassistant.const import CONF_MAC, Platform
 from homeassistant.core import HomeAssistant, callback
 from .core import (
     CONF_ACTIVE_TIME,
+    CONF_MODEL,
     CONF_PING_INTERVAL,
     DEFAULT_ACTIVE_TIME,
     DEFAULT_PING_INTERVAL,
@@ -58,12 +59,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Creating device for %s", mac)
         ping_interval = entry.options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
         active_time = entry.options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME)
+        model = entry.options.get(CONF_MODEL)
         device = Device(
             entry.title,
             service_info.device,
             service_info.advertisement,
             ping_interval=ping_interval,
             active_time=active_time,
+            model=model,
         )
         entry_data["device"] = device
 
@@ -138,8 +141,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
     )
 
+    # Reload when options change (e.g. model selection) so channel labels,
+    # timings, and other option-derived state are rebuilt.
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
     _LOGGER.debug("Setup complete for %s — waiting for BLE", mac)
     return True
+
+
+async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Reload the config entry when its options are updated."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
