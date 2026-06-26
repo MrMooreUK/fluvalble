@@ -5,7 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [Unreleased]
+## [0.0.6b1] — 2026-06-26 (beta)
 
 ### Added
 - **Per-model channel colour labels** — the channel sliders are now named after the
