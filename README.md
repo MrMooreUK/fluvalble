@@ -105,6 +105,15 @@ No cloud account or app login is needed; the integration talks directly to the l
 
 ---
 
+## Lovelace dashboard cards
+
+Optional dashboard cards are available for AquaSky 3.0 schedule editing,
+spectrum bar preview, and wavelength preview. See
+[`docs/lovelace-cards.md`](docs/lovelace-cards.md) for setup instructions,
+example YAML, usage notes, and preview safety guidance.
+
+---
+
 ## Entities
 
 After setup you'll see one device with entities like:
