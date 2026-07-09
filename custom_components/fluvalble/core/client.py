@@ -9,25 +9,68 @@ import time
 from bleak import BleakClient, BleakError, BleakGATTCharacteristic, BLEDevice
 from bleak_retry_connector import establish_connection
 
-from . import CMD_HEADER, CMD_STATUS, encryption
+from . import encryption, protocol
 
 _LOGGER = logging.getLogger(__name__)
 
 ACTIVE_TIME = 120
 COMMAND_TIME = 15
-PING_INTERVAL = 10
-RECONNECT_DELAY = 30
-INITIAL_RETRY_DELAY = 10
-MAX_INITIAL_RETRIES = 30  # ~5 minutes of retrying at 10s intervals
+CONNECT_TIMEOUT = 20
+CONNECT_RETRIES = 3
+WRITE_RETRIES = 2
+WRITE_DELAY = 0.3
+COMMAND_GAP = 0.75
+POST_WRITE_STATE_DELAY = 0.8
 
-CHAR_NOTIFY = "00001002-0000-1000-8000-00805f9b34fb"
-CHAR_KEEPALIVE = "00001004-0000-1000-8000-00805f9b34fb"
-# Write-without-response characteristic: all outbound commands go here (state request + all other commands).
-# Notifications (device → HA) arrive on CHAR_NOTIFY (0x1002).
-CHAR_COMMAND_OUT = "00001001-0000-1000-8000-00805f9b34fb"
-
-# Fluval packets come in two fragments; the first is always 17 decrypted bytes.
-PARTIAL_PACKET_SIZE = 17
+# Official FluvalConnect GATT map (BleSppGattAttributes):
+#   facebd80 = WiFi-over-BLE write + notify (raw CBOR, keys 103+)
+#   facebd01 = FACEBD BLE write path
+#   facebd02 = FACEBD BLE read/notify path
+# The working probe script and Fluval app both write WiFi CBOR to facebd80.
+# Preferring facebd02/facebd01 first for commands sends correct CBOR packets to
+# the wrong characteristic, so the light never reacts.
+WIFI_COMMAND_WRITE_UUIDS = (
+    "FACEBD80-7261-6262-6974-696F74626C65",
+    "FACEBD80-0000-1000-8000-00805F9B34FB",
+)
+BLE_COMMAND_WRITE_UUIDS = (
+    "FACEBD01-7261-6262-6974-696F74626C65",
+    "FACEBD01-0000-1000-8000-00805F9B34FB",
+    "FACEBD02-7261-6262-6974-696F74626C65",
+    "FACEBD02-0000-1000-8000-00805F9B34FB",
+    "00001001-0000-1000-8000-00805F9B34FB",
+    "0000FFF2-0000-1000-8000-00805F9B34FB",
+)
+# facebd02 is intentionally excluded: it is the BLE read/notify char, not the
+# WiFi CBOR write target used by on/off/mode/channel packets.
+COMMAND_WRITE_UUIDS = WIFI_COMMAND_WRITE_UUIDS + BLE_COMMAND_WRITE_UUIDS
+NOTIFY_UUIDS = (
+    "FACEBD80-7261-6262-6974-696F74626C65",
+    "FACEBD80-0000-1000-8000-00805F9B34FB",
+    "FACEBD02-7261-6262-6974-696F74626C65",
+    "FACEBD02-0000-1000-8000-00805F9B34FB",
+    "FACEBD03-7261-6262-6974-696F74626C65",
+    "FACEBD03-0000-1000-8000-00805F9B34FB",
+    "00001002-0000-1000-8000-00805F9B34FB",
+    "0000FFF1-0000-1000-8000-00805F9B34FB",
+)
+INIT_WRITE_UUIDS = (
+    "FACEBD01-7261-6262-6974-696F74626C65",
+    "FACEBD01-0000-1000-8000-00805F9B34FB",
+    "00001001-0000-1000-8000-00805F9B34FB",
+    "0000FFF2-0000-1000-8000-00805F9B34FB",
+)
+WAKE_READ_UUIDS = (
+    "FACEBD81-7261-6262-6974-696F74626C65",
+    "FACEBD81-0000-1000-8000-00805F9B34FB",
+    "FACEBD80-7261-6262-6974-696F74626C65",
+    "FACEBD80-0000-1000-8000-00805F9B34FB",
+    "FACEBD02-7261-6262-6974-696F74626C65",
+    "FACEBD02-0000-1000-8000-00805F9B34FB",
+    "00001004-0000-1000-8000-00805F9B34FB",
+    "0000FFF6-0000-1000-8000-00805F9B34FB",
+)
+WRITE_PROPERTIES = frozenset({"write", "write-without-response"})
 
 
 class Client:
@@ -38,7 +81,7 @@ class Client:
         device: BLEDevice,
         status_callback: Callable = None,
         update_callback: Callable = None,
-        ping_interval: int = PING_INTERVAL,
+        ping_interval: int = 10,
         active_time: int = ACTIVE_TIME,
     ) -> None:
         """Initialize the client."""
@@ -49,7 +92,6 @@ class Client:
         self._active_time = active_time
 
         self.client: BleakClient | None = None
-        self._stopped = False
 
         self.ping_future: asyncio.Future | None = None
         self.ping_task: asyncio.Task | None = None
@@ -57,266 +99,391 @@ class Client:
 
         self.send_data = None
         self.send_time = 0
-        self.send_queue: list[bytes] = []
-        self.connect_task = asyncio.create_task(self._connect_with_retry())
+        self.connect_task: asyncio.Task | None = None
 
         self.receive_buffer = b""
+        self.notify_uuid = None
+        self.notify_uuids: list[str] = []
+        self.init_write_uuid = None
+        self.command_write_uuid = None
+        self.command_write_uuids: list[str] = []
+        self.wake_read_uuid = None
+        self.state_read_uuids: list[str] = []
+        self.raw_facebd = False
+        self._command_lock = asyncio.Lock()
+        self.last_error: str | None = None
+        self.last_write_targets: list[str] = []
+        self.last_command_at = 0.0
+        self.connect_task = asyncio.create_task(self._connect())
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    def _get_characteristic(self, uuid: str) -> BleakGATTCharacteristic | None:
+        """Return a characteristic if present, without raising on missing UUIDs."""
+        try:
+            return self.client.services.get_characteristic(uuid)
+        except BleakError:
+            return None
 
-    def update_ble_device(self, ble_device: BLEDevice):
-        """Update the BLEDevice reference (e.g. from a newer advertisement)."""
-        self.device = ble_device
+    def _find_characteristic(
+        self,
+        candidates: tuple[str, ...],
+        *,
+        require_write: bool = False,
+        require_notify: bool = False,
+        required: bool = True,
+    ) -> str | None:
+        """Return the first candidate matching the requested properties."""
+        for uuid in candidates:
+            characteristic = self._get_characteristic(uuid)
+            if characteristic is None:
+                continue
+
+            properties = set(characteristic.properties)
+            if require_write and not properties.intersection(WRITE_PROPERTIES):
+                continue
+            if require_notify and "notify" not in properties and "indicate" not in properties:
+                # Some FACEBD WiFi controllers still accept start_notify on facebd80
+                # even when the advertised property list is incomplete.
+                if not characteristic.uuid.lower().startswith("facebd80"):
+                    continue
+
+            return characteristic.uuid
+
+        if required:
+            raise BleakError(f"None of the candidate UUIDs are available: {candidates}")
+        return None
+
+    def _find_characteristics(
+        self,
+        candidates: tuple[str, ...],
+        *,
+        require_write: bool = False,
+        require_notify: bool = False,
+    ) -> list[str]:
+        """Return all candidates matching the requested properties."""
+        found: list[str] = []
+        for uuid in candidates:
+            characteristic = self._get_characteristic(uuid)
+            if characteristic is None:
+                continue
+
+            properties = set(characteristic.properties)
+            if require_write and not properties.intersection(WRITE_PROPERTIES):
+                continue
+            if require_notify and "notify" not in properties and "indicate" not in properties:
+                if not characteristic.uuid.lower().startswith("facebd80"):
+                    continue
+
+            if characteristic.uuid not in found:
+                found.append(characteristic.uuid)
+        return found
+
+    async def _resolve_characteristics(self):
+        """Resolve the Fluval characteristic profile exposed by this device."""
+        self.command_write_uuids = self._find_characteristics(COMMAND_WRITE_UUIDS, require_write=True)
+        if not self.command_write_uuids:
+            raise BleakError(f"None of the command UUIDs are available: {COMMAND_WRITE_UUIDS}")
+        self.command_write_uuid = self.command_write_uuids[0]
+        self.notify_uuids = self._find_characteristics(NOTIFY_UUIDS, require_notify=True)
+        if not self.notify_uuids:
+            raise BleakError(f"None of the notify UUIDs are available: {NOTIFY_UUIDS}")
+        self.notify_uuid = self.notify_uuids[0]
+        # Init write is only needed by the older encrypted BLE protocol.
+        self.init_write_uuid = self._find_characteristic(INIT_WRITE_UUIDS, require_write=True, required=False)
+        self.wake_read_uuid = self._find_characteristic(WAKE_READ_UUIDS, required=False)
+        self.state_read_uuids = self._find_characteristics(WAKE_READ_UUIDS)
+        self.raw_facebd = self.command_write_uuid.lower().startswith("facebd")
+        _LOGGER.debug(
+            "Resolved Fluval GATT profile writes=%s notifies=%s reads=%s init=%s wake=%s raw_facebd=%s",
+            self.command_write_uuids,
+            self.notify_uuids,
+            self.state_read_uuids,
+            self.init_write_uuid,
+            self.wake_read_uuid,
+            self.raw_facebd,
+        )
+
+    async def _ensure_client(self):
+        """Connect and subscribe to notifications if needed."""
+        if self.client and self.client.is_connected:
+            return self.client
+
+        last_error: Exception | None = None
+        for attempt in range(1, CONNECT_RETRIES + 1):
+            try:
+                self.client = await establish_connection(
+                    BleakClient, self.device, self.device.address, timeout=CONNECT_TIMEOUT
+                )
+                break
+            except (TimeoutError, BleakError, EOFError) as err:
+                last_error = err
+                self.last_error = f"connect attempt {attempt} failed: {type(err).__name__}: {err}"
+                _LOGGER.debug("Fluval connect attempt %s failed", attempt, exc_info=err)
+                await self._safe_disconnect()
+                await asyncio.sleep(attempt)
+        else:
+            raise BleakError(f"Unable to connect to Fluval: {last_error}")
+
+        await self._resolve_characteristics()
+        for uuid in self.notify_uuids:
+            with contextlib.suppress(BleakError):
+                await self.client.start_notify(uuid, self.notify_callback)
+
+        if self.status_callback:
+            self.status_callback(True)
+        self.last_error = None
+
+        return self.client
+
+    async def ensure_connected(self) -> bool:
+        """Connect far enough to resolve the live GATT profile."""
+        try:
+            await self._ensure_client()
+            return True
+        except (TimeoutError, BleakError) as err:
+            _LOGGER.debug("Fluval connect for profile resolution failed", exc_info=err)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning(
+                "Unexpected Fluval connect failure during profile resolution",
+                exc_info=err,
+            )
+
+        if self.status_callback:
+            self.status_callback(False)
+        return False
 
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
-        if self._stopped:
-            return
-
         self.ping_time = time.time() + self._active_time
 
-        if not self.ping_task or self.ping_task.done():
+        if not self.ping_task:
             self.ping_task = asyncio.create_task(self._ping_loop())
-
-    def send(self, data: bytes | list[bytes]):
-        """Queue one or more packets to send to the Fluval on the next ping cycle."""
-        self.send_time = time.time() + COMMAND_TIME
-        if isinstance(data, list):
-            self.send_queue.extend(data)
-        else:
-            self.send_queue.append(data)
-        self.ping()
-
-        if self.ping_future and not self.ping_future.done():
-            self.ping_future.cancel()
-
-    async def stop(self):
-        """Disconnect and cancel all background tasks."""
-        self._stopped = True
-
-        if self.ping_future and not self.ping_future.done():
-            self.ping_future.cancel()
-
-        for task in (self.connect_task, self.ping_task):
-            if task and not task.done():
-                task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await task
-
-        if self.client:
-            try:
-                await self.client.disconnect()
-            except (BleakError, TimeoutError, OSError):
-                pass
-            self.client = None
-
-        self._set_status(False)
-
-    # ------------------------------------------------------------------
-    # BLE notification handler
-    # ------------------------------------------------------------------
 
     def notify_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
         """Handle packets sent by the Fluval."""
-        if not data or len(data) < 3:
-            _LOGGER.warning(
-                "Received short/empty BLE notification (%d bytes) from %s — ignoring",
-                len(data) if data else 0,
-                self.device.address,
-            )
+        if self.raw_facebd:
+            _LOGGER.debug("Got FACEBD data: %s", to_hex(data))
+            if self.update_callback:
+                self.update_callback(bytes(data))
             return
+
         decrypted = decrypt(data)
-        if len(decrypted) == PARTIAL_PACKET_SIZE:
-            # Partial packet — accumulate
+        if len(decrypted) == 17:
             self.receive_buffer += decrypted
         else:
-            # Final fragment (or single packet): append, deliver, reset
-            full_payload = self.receive_buffer + decrypted
-            _LOGGER.debug("Got all data: %s", to_hex(full_payload))
+            self.receive_buffer += decrypted
+            _LOGGER.debug("Got all data: %s ", to_hex(self.receive_buffer))
             if self.update_callback:
-                self.update_callback(full_payload)
+                self.update_callback(self.receive_buffer)
             self.receive_buffer = b""
 
-    # ------------------------------------------------------------------
-    # Internal: initial connection with retry
-    # ------------------------------------------------------------------
-
-    async def _connect_with_retry(self):
-        """Try to connect, retrying on failure until success or stopped."""
-        for attempt in range(1, MAX_INITIAL_RETRIES + 1):
-            if self._stopped:
-                return
-
-            _LOGGER.debug(
-                "Connection attempt %d/%d to %s",
-                attempt,
-                MAX_INITIAL_RETRIES,
-                self.device.address,
-            )
-
-            if await self._do_connect():
-                return  # Success
-
-            if self._stopped:
-                return
-
-            _LOGGER.debug(
-                "Attempt %d failed for %s — retrying in %ds",
-                attempt,
-                self.device.address,
-                INITIAL_RETRY_DELAY,
-            )
-            await asyncio.sleep(INITIAL_RETRY_DELAY)
-
-        _LOGGER.warning(
-            "Gave up connecting to %s after %d attempts.",
-            self.device.address,
-            MAX_INITIAL_RETRIES,
-        )
-
-    async def _do_connect(self) -> bool:
-        """Single connection attempt. Returns True on success."""
+    async def _connect(self):
+        """Connect to the Fluval and subscribe to notifications."""
         try:
-            self.client = await establish_connection(
-                BleakClient, self.device, self.device.address
-            )
+            client = await self._ensure_client()
 
-            await self.client.start_notify(CHAR_NOTIFY, self.notify_callback)
+            if self.wake_read_uuid:
+                with contextlib.suppress(BleakError):
+                    await client.read_gatt_char(self.wake_read_uuid)
 
-            self._set_status(True)
+            if self.raw_facebd:
+                await self.request_state()
+            elif self.init_write_uuid:
+                await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
+        except (TimeoutError, BleakError) as err:
+            _LOGGER.debug("Fluval initial connection failed", exc_info=err)
+            if self.status_callback:
+                self.status_callback(False)
+        except Exception as err:  # pylint: disable=broad-except
+            _LOGGER.warning("Unexpected Fluval initial connection error", exc_info=err)
+            if self.status_callback:
+                self.status_callback(False)
 
-            # Handshake step 0 — dummy read
-            await self.client.read_gatt_char(CHAR_KEEPALIVE)
+    def send(self, data: bytes):
+        """Send a packet to the Fluval."""
+        # if send loop active - we change sending data
+        self.send_time = time.time() + COMMAND_TIME
+        self.send_data = bytearray(data)
+        _LOGGER.debug("Queued Fluval packet: %s", to_hex(self.send_data))
 
-            # Handshake step 1 — request current state
-            await self.client.write_gatt_char(
-                CHAR_COMMAND_OUT,
-                data=encrypt(bytearray([CMD_HEADER, CMD_STATUS])),
-                response=True,
-            )
-            _LOGGER.info("Connected to Fluval %s", self.device.address)
-            return True
-        except (BleakError, TimeoutError, OSError) as err:
-            _LOGGER.warning(
-                "Connection to %s failed: %s",
-                self.device.address,
-                err,
-            )
-            self._set_status(False)
-            return False
+        self.ping()
 
-    # ------------------------------------------------------------------
-    # Internal: keep-alive / reconnect loop
-    # ------------------------------------------------------------------
+        if self.ping_future:
+            self.ping_future.cancel()
 
     async def _ping_loop(self):
-        """Ping the Fluval to keep connection alive, reconnect on drop."""
-        loop = asyncio.get_running_loop()
-
-        while not self._stopped and time.time() < self.ping_time:
+        """Ping the Fluval to keep connection."""
+        loop = asyncio.get_event_loop()
+        while time.time() < self.ping_time:
             try:
-                # (Re-)establish connection if needed
-                if not self.client or not self.client.is_connected:
-                    _LOGGER.debug("Reconnecting to %s", self.device.address)
-                    if not await self._do_connect():
-                        # Connection failed — wait and retry
-                        await asyncio.sleep(RECONNECT_DELAY)
-                        continue
+                client = await self._ensure_client()
 
-                # Keep-alive read
-                await self.client.read_gatt_char(CHAR_KEEPALIVE)
+                # heartbeat loop
+                while time.time() < self.ping_time:
+                    if self.wake_read_uuid:
+                        with contextlib.suppress(BleakError):
+                            await client.read_gatt_char(self.wake_read_uuid)
+                    if self.send_data:
+                        if time.time() < self.send_time:
+                            await self._write_packet(self.command_write_uuid, self.send_data)
+                        self.send_data = None
 
-                # Send queued commands if within the time window (small delay between each)
-                while self.send_queue and time.time() < self.send_time:
-                    cmd = self.send_queue.pop(0)
-                    encrypted = encrypt(cmd)
-                    _LOGGER.debug(
-                        "Sending to %s — raw: %s | encrypted: %s",
-                        self.device.address,
-                        to_hex(cmd),
-                        to_hex(encrypted),
-                    )
-                    await self.client.write_gatt_char(
-                        CHAR_COMMAND_OUT,
-                        data=encrypted,
-                        response=True,
-                    )
-                    if self.send_queue:
-                        await asyncio.sleep(
-                            0.2
-                        )  # Let device process before next command
+                    # asyncio.sleep(10) with cancel
+                    self.ping_future = loop.create_future()
+                    loop.call_later(self._ping_interval, self.ping_future.cancel)
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await self.ping_future
 
-                # Interruptible sleep (cancelled early when send() is called)
-                self.ping_future = loop.create_future()
-                loop.call_later(self._ping_interval, self.ping_future.cancel)
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self.ping_future
-
-                # Normal path complete — loop immediately without reconnect delay.
-                continue
-
-            except asyncio.CancelledError:
-                break
+                await client.disconnect()
             except TimeoutError:
-                _LOGGER.warning(
-                    "Timeout communicating with %s — will reconnect",
-                    self.device.address,
-                )
-                await self._safe_disconnect()
-            except BleakError as err:
-                _LOGGER.warning(
-                    "BLE error with %s: %s — will reconnect",
-                    self.device.address,
-                    err,
-                )
-                await self._safe_disconnect()
-            except Exception:
-                _LOGGER.exception(
-                    "Unexpected error in ping loop for %s",
-                    self.device.address,
-                )
-                await self._safe_disconnect()
+                pass
+            except BleakError as e:
+                _LOGGER.debug("ping error", exc_info=e)
+            except Exception as e:
+                _LOGGER.warning("ping error", exc_info=e)
+            finally:
+                self.client = None
+                if self.status_callback:
+                    self.status_callback(False)
+                await asyncio.sleep(1)
 
-            # Pause before reconnect attempt after an error (unless we're shutting down)
-            if not self._stopped:
-                await asyncio.sleep(RECONNECT_DELAY)
-
-        # Leave the BLE connection available for a future command. Earlier versions
-        # disconnected here when the active window expired; on some HA Bluetooth
-        # proxy paths that left the device unavailable until the config entry was
-        # reloaded. A later send() wakes this loop again and reconnects if HA/bleak
-        # has dropped the connection meanwhile.
         self.ping_task = None
-        _LOGGER.debug("Ping loop ended for %s", self.device.address)
 
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
+    async def _write_packet(self, uuid: str, data: bytes):
+        """Write a packet using the right wire format for the active profile."""
+        payload = data if self.raw_facebd else protocol.encrypted_old_packet(data)
+        characteristic = self._get_characteristic(uuid)
+        # Prefer write-with-response when the char supports it (matches Fluval app).
+        response = bool(characteristic is None or "write" in characteristic.properties)
+        _LOGGER.debug("Writing Fluval packet to %s: %s", uuid, to_hex(payload))
+        await self.client.write_gatt_char(uuid, data=payload, response=response)
 
-    def _set_status(self, connected: bool):
-        """Notify the device of connection status changes."""
-        if self.status_callback:
-            self.status_callback(connected)
+    async def request_state(self):
+        """Read the current controller state when the protocol supports it."""
+        client = await self._ensure_client()
+
+        if self.wake_read_uuid:
+            with contextlib.suppress(BleakError):
+                await client.read_gatt_char(self.wake_read_uuid)
+
+        if self.raw_facebd and self.notify_uuid:
+            # Read every available FACEBD state char. Some controllers return
+            # only a wake byte on facebd81 and the real CBOR map on facebd80/02.
+            for read_uuid in self.state_read_uuids or [self.notify_uuid]:
+                try:
+                    data = await client.read_gatt_char(read_uuid)
+                except BleakError as err:
+                    _LOGGER.debug("Fluval state read failed from %s", read_uuid, exc_info=err)
+                    continue
+                _LOGGER.debug("Read Fluval state from %s: %s", read_uuid, to_hex(data))
+                if self.update_callback:
+                    self.update_callback(bytes(data))
+
+    async def send_now(self, data: bytes) -> bool:
+        """Connect and write a packet before returning to Home Assistant."""
+        async with self._command_lock:
+            try:
+                client = await self._ensure_client()
+                if self.wake_read_uuid:
+                    with contextlib.suppress(BleakError):
+                        await client.read_gatt_char(self.wake_read_uuid)
+
+                wait_time = self.last_command_at + COMMAND_GAP - time.time()
+                if wait_time > 0:
+                    await asyncio.sleep(wait_time)
+
+                write_targets = self.command_write_uuids if self.raw_facebd else [self.command_write_uuid]
+                wrote_targets: list[str] = []
+                for uuid in write_targets:
+                    for attempt in range(1, WRITE_RETRIES + 1):
+                        try:
+                            await self._write_packet(uuid, data)
+                        except (TimeoutError, BleakError, EOFError) as err:
+                            self.last_error = f"write {uuid} attempt {attempt} failed: " f"{type(err).__name__}: {err}"
+                            _LOGGER.debug(
+                                "Fluval BLE write target failed: %s attempt %s",
+                                uuid,
+                                attempt,
+                                exc_info=err,
+                            )
+                            if attempt == WRITE_RETRIES:
+                                break
+                            await asyncio.sleep(WRITE_DELAY)
+                        else:
+                            wrote_targets.append(uuid)
+                            break
+                    if wrote_targets and not self.raw_facebd:
+                        break
+                    if wrote_targets and self.raw_facebd:
+                        await asyncio.sleep(WRITE_DELAY)
+
+                if not wrote_targets:
+                    raise BleakError("No Fluval BLE write target accepted the command")
+
+                self.last_write_targets = wrote_targets
+                self.last_command_at = time.time()
+                _LOGGER.debug("Fluval write completed on targets: %s", wrote_targets)
+
+                # Keep the link warm briefly so HA can continue issuing commands
+                # without reconnecting for every toggle.
+                self.ping()
+
+                if self.raw_facebd:
+                    await asyncio.sleep(POST_WRITE_STATE_DELAY)
+                    with contextlib.suppress(BleakError):
+                        await self.request_state()
+
+                self.last_error = None
+                return True
+            except (TimeoutError, BleakError, EOFError) as err:
+                self.last_error = f"{type(err).__name__}: {err}"
+                _LOGGER.warning("Fluval BLE write failed", exc_info=err)
+            except Exception as err:  # pylint: disable=broad-except
+                self.last_error = f"{type(err).__name__}: {err}"
+                _LOGGER.warning("Unexpected Fluval BLE write failure", exc_info=err)
+
+            if self.status_callback:
+                self.status_callback(False)
+            await self._safe_disconnect()
+            return False
 
     async def _safe_disconnect(self):
-        """Disconnect the BLE client without raising."""
-        self._set_status(False)
-        # Discard any partially-assembled packet so the next connection starts clean.
-        self.receive_buffer = b""
+        """Disconnect the underlying BLE client without masking the original error."""
         if self.client:
-            try:
+            with contextlib.suppress(Exception):
                 await self.client.disconnect()
-            except (BleakError, TimeoutError, OSError):
-                pass
             self.client = None
+
+    async def disconnect(self):
+        """Disconnect from the Fluval and stop background work."""
+        self.ping_time = 0
+
+        if self.ping_future:
+            self.ping_future.cancel()
+
+        if self.ping_task:
+            self.ping_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.ping_task
+            self.ping_task = None
+
+        if self.connect_task:
+            self.connect_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self.connect_task
+
+        await self._safe_disconnect()
+
+        if self.status_callback:
+            self.status_callback(False)
+
+    async def stop(self):
+        """Compatibility wrapper for the integration unload path."""
+        await self.disconnect()
 
 
 def encrypt(data: bytearray) -> bytearray:
     """Encrypt a packet for sending to Fluval."""
-    data = encryption.add_crc(data)
-    return encryption.encrypt(data)
+    return protocol.encrypted_old_packet(data)
 
 
 def decrypt(data: bytearray) -> bytearray:

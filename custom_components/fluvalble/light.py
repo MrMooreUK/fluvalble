@@ -12,8 +12,8 @@ from .core.entity import FluvalEntity
 
 PARALLEL_UPDATES = 0
 
-# Device channels run 0–1000; Home Assistant light brightness is 0–255.
-DEVICE_MAX = 1000
+# FACEBD devices use 0-100 percentages internally.
+DEVICE_MAX = 100
 HA_MAX = 255
 
 
@@ -22,9 +22,7 @@ def create_entities(device: Device) -> list:
     return [FluvalLight(device, "light")]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     device = entry_data["device"]
 
@@ -54,15 +52,22 @@ class FluvalLight(FluvalEntity, LightEntity):
         """Turn the light on, optionally setting overall brightness."""
         if ATTR_BRIGHTNESS in kwargs:
             level = round(kwargs[ATTR_BRIGHTNESS] / HA_MAX * DEVICE_MAX)
-            self.device.set_master_brightness(level)
+            if not await self.device.async_set_master_brightness(level):
+                self.internal_update()
+                return
             self._attr_brightness = kwargs[ATTR_BRIGHTNESS]
         if not self.device.values.get("led_on_off"):
-            self.device.set_led_power(True)
+            if not await self.device.async_set_switch("led_on_off", True):
+                self.internal_update()
+                return
         self._attr_is_on = True
         self._async_write_ha_state()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the light off."""
-        self.device.set_led_power(False)
+        if not await self.device.async_set_switch("led_on_off", False):
+            self.internal_update()
+            return
+
         self._attr_is_on = False
         self._async_write_ha_state()

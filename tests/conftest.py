@@ -26,6 +26,7 @@ def _stub_bleak():
     mod.BleakClient = object
     mod.BleakError = Exception
     mod.BleakGATTCharacteristic = object
+    mod.BleakScanner = MagicMock()
     sys.modules["bleak"] = mod
 
     brc = types.ModuleType("bleak_retry_connector")
@@ -41,6 +42,26 @@ def _stub_bleak():
 def _stub_homeassistant():
     """Register minimal HA stubs so integration modules can be imported."""
 
+    # ---- voluptuous ----
+    vol = types.ModuleType("voluptuous")
+
+    class _Schema:
+        def __init__(self, schema=None, *args, **kwargs):
+            self.schema = schema
+
+        def __call__(self, value):
+            return value
+
+    def _identity(*args, **kwargs):
+        return args[0] if args else None
+
+    vol.Schema = _Schema
+    vol.Optional = _identity
+    vol.Required = _identity
+    vol.All = lambda *args, **kwargs: (lambda value: value)
+    vol.Range = lambda *args, **kwargs: (lambda value: value)
+    vol.In = lambda *args, **kwargs: (lambda value: value)
+
     # ---- homeassistant.exceptions ----
     class HomeAssistantError(Exception):
         pass
@@ -52,7 +73,9 @@ def _stub_homeassistant():
     class Platform(str, enum.Enum):
         NUMBER = "number"
         BINARY_SENSOR = "binary_sensor"
+        BUTTON = "button"
         SELECT = "select"
+        SENSOR = "sensor"
         SWITCH = "switch"
         LIGHT = "light"
 
@@ -67,6 +90,7 @@ def _stub_homeassistant():
     # ---- homeassistant.core ----
     ha_core = types.ModuleType("homeassistant.core")
     ha_core.HomeAssistant = MagicMock
+    ha_core.ServiceCall = MagicMock
     ha_core.callback = lambda f: f  # passthrough decorator
 
     # ---- homeassistant.config_entries ----
@@ -118,6 +142,7 @@ def _stub_homeassistant():
     # ---- homeassistant.helpers.device_registry ----
     ha_dr = types.ModuleType("homeassistant.helpers.device_registry")
     ha_dr.CONNECTION_BLUETOOTH = "bluetooth"
+    ha_dr.format_mac = lambda mac: str(mac).strip().upper().replace("-", ":")
 
     # ---- homeassistant.helpers.entity ----
     class _FakeEntity:
@@ -167,6 +192,25 @@ def _stub_homeassistant():
     ha_number.NumberEntity = _FakeNumberEntity
     ha_number.NumberMode = NumberMode
 
+    # ---- homeassistant.components.button ----
+    class _FakeButtonEntity(_FakeEntity):
+        pass
+
+    ha_button = types.ModuleType("homeassistant.components.button")
+    ha_button.ButtonEntity = _FakeButtonEntity
+
+    # ---- homeassistant.components.sensor ----
+    class SensorDeviceClass(str, enum.Enum):
+        SIGNAL_STRENGTH = "signal_strength"
+        TIMESTAMP = "timestamp"
+
+    class _FakeSensorEntity(_FakeEntity):
+        pass
+
+    ha_sensor = types.ModuleType("homeassistant.components.sensor")
+    ha_sensor.SensorDeviceClass = SensorDeviceClass
+    ha_sensor.SensorEntity = _FakeSensorEntity
+
     # ---- homeassistant.components.select ----
     class _FakeSelectEntity(_FakeEntity):
         _attr_current_option = None
@@ -209,16 +253,44 @@ def _stub_homeassistant():
     ha_light.ColorMode = ColorMode
     ha_light.ATTR_BRIGHTNESS = "brightness"
 
+    # ---- homeassistant.components.websocket_api ----
+    ha_ws = types.ModuleType("homeassistant.components.websocket_api")
+    ha_ws.ActiveConnection = MagicMock
+    ha_ws.async_register_command = MagicMock()
+    ha_ws.websocket_command = lambda schema: (lambda func: func)
+    ha_ws.async_response = lambda func: func
+
+    # ---- homeassistant.helpers.storage ----
+    class _FakeStore:
+        def __init__(self, *args, **kwargs):
+            self.data = None
+
+        async def async_load(self):
+            return self.data
+
+        async def async_save(self, data):
+            self.data = data
+
+    ha_storage = types.ModuleType("homeassistant.helpers.storage")
+    ha_storage.Store = _FakeStore
+
+    # ---- homeassistant.helpers.event ----
+    ha_event = types.ModuleType("homeassistant.helpers.event")
+    ha_event.async_track_time_interval = MagicMock(return_value=lambda: None)
+
     # ---- register everything in sys.modules ----
     modules = {
         "homeassistant": types.ModuleType("homeassistant"),
+        "voluptuous": vol,
         "homeassistant.exceptions": ha_exc,
         "homeassistant.const": ha_const,
         "homeassistant.core": ha_core,
         "homeassistant.config_entries": ha_ce,
         "homeassistant.components": ha_comp,
         "homeassistant.components.bluetooth": ha_bt,
+        "homeassistant.components.button": ha_button,
         "homeassistant.components.number": ha_number,
+        "homeassistant.components.sensor": ha_sensor,
         "homeassistant.components.select": ha_select,
         "homeassistant.components.switch": ha_switch,
         "homeassistant.components.binary_sensor": ha_bs,
@@ -227,6 +299,9 @@ def _stub_homeassistant():
         "homeassistant.helpers.device_registry": ha_dr,
         "homeassistant.helpers.entity": ha_entity,
         "homeassistant.helpers.entity_platform": ha_ep,
+        "homeassistant.helpers.event": ha_event,
+        "homeassistant.helpers.storage": ha_storage,
+        "homeassistant.components.websocket_api": ha_ws,
     }
     for name, mod in modules.items():
         if name not in sys.modules:
