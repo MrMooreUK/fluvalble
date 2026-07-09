@@ -5,6 +5,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [Unreleased]
+
+### Added
+- AquaSky 3.0/FACEBD discovery, diagnostics, and write support.
+- Lovelace schedule, spectrum bar, and wavelength preview cards.
+- HA-managed schedule storage, auto mode, and physical preview services.
+
+### Changed
+- Renamed channel 5 to Violet.
+- Skip unchanged channel writes and throttle physical preview writes.
+
+### Fixed
+- Preview stop/restore behavior and FACEBD write target handling.
+
+### Notes
+- This preview has only been tested with AquaSky 3.0 and is not suitable
+  for aquarium use until validated and published from the main branch. Use
+  with caution and back up existing Home Assistant setups before testing.
+- For issues with other Fluval lights, please open a GitHub issue with the
+  model, Home Assistant version, diagnostics output, and relevant logs.
+
+---
+
 ## [0.0.6] — 2026-06-08
 
 ### Added

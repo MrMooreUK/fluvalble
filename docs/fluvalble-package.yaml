@@ -1,0 +1,52 @@
+automation:
+  - alias: AquaSky daily ramp schedule
+    description: Ramp Fluval AquaSky channels through the requested daytime and evening values.
+    mode: restart
+    trigger:
+      - platform: time
+        at: "10:00:00"
+        id: morning_ramp
+      - platform: time
+        at: "16:00:00"
+        id: evening_ramp
+      - platform: time
+        at: "20:00:00"
+        id: night_hold
+    condition: []
+    action:
+      - choose:
+          - conditions:
+              - condition: trigger
+                id: morning_ramp
+            sequence:
+              - service: fluvalble.set_channels
+                data:
+                  red: 10
+                  green: 10
+                  blue: 25
+                  white: 5
+                  transition: 3600
+                  step_seconds: 60
+          - conditions:
+              - condition: trigger
+                id: evening_ramp
+            sequence:
+              - service: fluvalble.set_channels
+                data:
+                  red: 3
+                  green: 0
+                  blue: 8
+                  white: 0
+                  transition: 10800
+                  step_seconds: 300
+          - conditions:
+              - condition: trigger
+                id: night_hold
+            sequence:
+              - service: fluvalble.set_channels
+                data:
+                  red: 0
+                  green: 0
+                  blue: 0
+                  white: 0
+                  transition: 0

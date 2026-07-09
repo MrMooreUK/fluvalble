@@ -16,9 +16,7 @@ def create_entities(device: Device) -> list:
     return [FluvalSelect(device, s) for s in device.selects()]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback
-):
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback):
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     device = entry_data["device"]
 
@@ -46,6 +44,9 @@ class FluvalSelect(FluvalEntity, SelectEntity):
             self._async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
-        self.device.select_option(self.attr, option)
+        if not await self.device.async_select_option(self.attr, option):
+            self.internal_update()
+            return
+
         self._attr_current_option = option
         self._async_write_ha_state()

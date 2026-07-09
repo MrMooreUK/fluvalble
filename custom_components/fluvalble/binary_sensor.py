@@ -19,9 +19,7 @@ def create_entities(device: Device) -> list:
     return [FluvalSensor(device, "connection")]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback
-):
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback):
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     device = entry_data["device"]
 

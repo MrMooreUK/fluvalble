@@ -16,9 +16,7 @@ def create_entities(device: Device) -> list:
     return [FluvalSwitch(device, "led_on_off")]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback
-):
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback):
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     device = entry_data["device"]
 
@@ -47,12 +45,18 @@ class FluvalSwitch(FluvalEntity, SwitchEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn the LED off."""
-        self.device.set_led_power(False)
+        if not await self.device.async_set_switch(self.attr, False):
+            self.internal_update()
+            return
+
         self._attr_is_on = False
         self._async_write_ha_state()
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn the LED on."""
-        self.device.set_led_power(True)
+        if not await self.device.async_set_switch(self.attr, True):
+            self.internal_update()
+            return
+
         self._attr_is_on = True
         self._async_write_ha_state()

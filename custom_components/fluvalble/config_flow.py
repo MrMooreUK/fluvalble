@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigFlowResult
 from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.device_registry import format_mac
 
 from .core import (
     CONF_ACTIVE_TIME,
@@ -22,6 +23,7 @@ from .core import (
     DEFAULT_PING_INTERVAL,
     DOMAIN,
 )
+from .core.discovery import discovery_metadata, is_likely_fluval
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,20 +52,23 @@ def normalize_mac(mac: str) -> str:
     return mac
 
 
+def _format_bluetooth_mac(mac: str) -> str:
+    """Normalize MAC with HA's helper, falling back to local normalization."""
+    try:
+        return format_mac(mac)
+    except (TypeError, ValueError):
+        return normalize_mac(mac)
+
+
 def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
     """True if this device advertises the Fluval service UUID or has Fluval in the name."""
     try:
         adv = info.advertisement if info else None
-        name = (
-            (adv.local_name if adv else None) or getattr(info, "name", None) or ""
-        ).lower()
+        name = (adv.local_name if adv else None) or getattr(info, "name", None) or ""
         uuids = list(adv.service_uuids) if (adv and adv.service_uuids) else []
     except Exception:  # noqa: BLE001
         return False
-    return (
-        FLUVAL_SERVICE_UUID.lower() in [str(u).lower() for u in uuids]
-        or "fluval" in name
-    )
+    return FLUVAL_SERVICE_UUID.lower() in [str(u).lower() for u in uuids] or is_likely_fluval(name, adv)
 
 
 def _device_display_name(
@@ -74,11 +79,7 @@ def _device_display_name(
     """Build a clear display name so Fluval lights are easy to find in the list."""
     try:
         adv = service_info.advertisement if service_info else None
-        name = (
-            (adv.local_name if adv else None)
-            or getattr(service_info, "name", None)
-            or ""
-        ).strip()
+        name = ((adv.local_name if adv else None) or getattr(service_info, "name", None) or "").strip()
         address = getattr(service_info, "address", "") or ""
     except Exception:  # noqa: BLE001
         return "Unknown device"
@@ -103,15 +104,27 @@ async def _get_discovered_devices(
     return [info for info in all_devices if _is_likely_fluval(info)]
 
 
-async def validate_input(
-    hass: HomeAssistant, data: dict[str, Any], ble_name: str = ""
-) -> dict[str, Any]:
+async def validate_input(hass: HomeAssistant, data: dict[str, Any], ble_name: str = "") -> dict[str, Any]:
     """Validate the user input and return cleaned config data."""
     mac = normalize_mac(data[CONF_MAC])
     if not MAC_REGEX.match(mac):
         raise InvalidFormat
     title = ble_name.strip() or f"Fluval {mac}"
-    return {"title": title, CONF_MAC: mac}
+    config_data = {CONF_MAC: mac}
+
+    service_info = bluetooth.async_last_service_info(hass, mac, connectable=True)
+    if service_info is None:
+        service_info = bluetooth.async_last_service_info(hass, mac)
+    if service_info is not None:
+        title = ble_name.strip() or service_info.name or title
+        config_data.update(
+            discovery_metadata(
+                service_info.name or ble_name,
+                service_info.advertisement,
+            )
+        )
+
+    return {"title": title, "data": config_data}
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -122,70 +135,51 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         super().__init__()
         self._discovered_devices: list[bluetooth.BluetoothServiceInfoBleak] = []
-        self._bluetooth_discovery_info: bluetooth.BluetoothServiceInfoBleak | None = (
-            None
-        )
+        self._bluetooth_discovery_info: bluetooth.BluetoothServiceInfoBleak | None = None
 
     # ------------------------------------------------------------------
     # Bluetooth auto-discovery (triggered by manifest.json bluetooth key)
     # ------------------------------------------------------------------
 
-    async def async_step_bluetooth(
-        self, discovery_info: bluetooth.BluetoothServiceInfoBleak
-    ) -> ConfigFlowResult:
+    async def async_step_bluetooth(self, discovery_info: bluetooth.BluetoothServiceInfoBleak) -> ConfigFlowResult:
         """Handle Bluetooth auto-discovery when a Fluval light is seen."""
-        mac = normalize_mac(discovery_info.address)
+        mac = _format_bluetooth_mac(discovery_info.address)
         await self.async_set_unique_id(mac)
         self._abort_if_unique_id_configured()
+
+        if not is_likely_fluval(discovery_info.name, discovery_info.advertisement):
+            return self.async_abort(reason="not_fluval")
 
         self._bluetooth_discovery_info = discovery_info
         name = _device_display_name(discovery_info, is_fluval=True)
         self.context["title_placeholders"] = {"name": name}
-        return await self.async_step_confirm()
+        return await self.async_step_bluetooth_confirm()
 
-    async def async_step_confirm(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_bluetooth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Confirm adding a device found via Bluetooth auto-discovery."""
         if user_input is not None and self._bluetooth_discovery_info is not None:
             discovery = self._bluetooth_discovery_info
-            mac = normalize_mac(discovery.address)
+            mac = _format_bluetooth_mac(discovery.address)
             ble_name = (
-                (
-                    discovery.advertisement.local_name
-                    if discovery.advertisement
-                    else None
-                )
+                (discovery.advertisement.local_name if discovery.advertisement else None)
                 or getattr(discovery, "name", None)
                 or ""
             )
             info = await validate_input(self.hass, {CONF_MAC: mac}, ble_name=ble_name)
-            return self.async_create_entry(
-                title=info["title"], data={CONF_MAC: info[CONF_MAC]}
-            )
+            return self.async_create_entry(title=info["title"], data=info["data"])
 
         return self.async_show_form(
-            step_id="confirm",
-            description_placeholders={
-                "name": self.context.get("title_placeholders", {}).get(
-                    "name", "Fluval LED"
-                )
-            },
+            step_id="bluetooth_confirm",
+            description_placeholders={"name": self.context.get("title_placeholders", {}).get("name", "Fluval LED")},
         )
 
     # ------------------------------------------------------------------
     # Manual config flow (initiated by user from Integrations page)
     # ------------------------------------------------------------------
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle the initial step: pick from discovered devices or enter MAC manually."""
-        configured = {
-            entry.data.get(CONF_MAC)
-            for entry in self._async_current_entries()
-            if entry.data.get(CONF_MAC)
-        }
+        configured = {entry.data.get(CONF_MAC) for entry in self._async_current_entries() if entry.data.get(CONF_MAC)}
         configured_normalized = {normalize_mac(m) for m in configured if m}
 
         errors: dict[str, str] = {}
@@ -205,9 +199,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     _LOGGER.exception("Unexpected exception")
                     errors["base"] = "unknown"
                 else:
-                    return self.async_create_entry(
-                        title=info["title"], data={CONF_MAC: info[CONF_MAC]}
-                    )
+                    return self.async_create_entry(title=info["title"], data=info["data"])
 
         self._discovered_devices = await _get_discovered_devices(self.hass)
         options = self._device_options(configured_normalized)
@@ -220,9 +212,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=schema,
             errors=errors,
-            description_placeholders={
-                "count": str(len([o for o in options if o != MANUAL_ENTRY]))
-            },
+            description_placeholders={"count": str(len([o for o in options if o != MANUAL_ENTRY]))},
         )
 
     def _device_options(self, configured_normalized: set[str]) -> dict[str, str]:
@@ -233,14 +223,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if mac in configured_normalized:
                 continue
             options[mac] = _device_display_name(info, is_fluval=True)
-        options[MANUAL_ENTRY] = (
-            "My device isn't in the list — enter MAC address manually"
-        )
+        options[MANUAL_ENTRY] = "My device isn't in the list — enter MAC address manually"
         return options
 
-    async def async_step_manual(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_manual(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle manual MAC address entry."""
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -251,18 +237,14 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(mac)
                 self._abort_if_unique_id_configured()
                 try:
-                    info = await validate_input(
-                        self.hass, {**user_input, CONF_MAC: mac}
-                    )
+                    info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
                 except InvalidFormat:
                     errors["base"] = "invalid_format"
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Unexpected exception")
                     errors["base"] = "unknown"
                 else:
-                    return self.async_create_entry(
-                        title=info["title"], data={CONF_MAC: info[CONF_MAC]}
-                    )
+                    return self.async_create_entry(title=info["title"], data=info["data"])
 
         return self.async_show_form(
             step_id="manual",
@@ -282,9 +264,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
     """Handle options for Fluval Aquarium LED."""
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> ConfigFlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and handle the options form."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
@@ -293,15 +273,11 @@ class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
             {
                 vol.Optional(
                     CONF_PING_INTERVAL,
-                    default=self.config_entry.options.get(
-                        CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL
-                    ),
+                    default=self.config_entry.options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
                 ): vol.All(int, vol.Range(min=5, max=60)),
                 vol.Optional(
                     CONF_ACTIVE_TIME,
-                    default=self.config_entry.options.get(
-                        CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME
-                    ),
+                    default=self.config_entry.options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME),
                 ): vol.All(int, vol.Range(min=30, max=600)),
             }
         )

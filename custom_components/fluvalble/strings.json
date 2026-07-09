@@ -15,6 +15,9 @@
       },
       "confirm": {
         "description": "Do you want to set up **{name}**?"
+      },
+      "bluetooth_confirm": {
+        "description": "Set up the discovered Fluval Aquarium LED controller."
       }
     },
     "error": {
@@ -23,7 +26,8 @@
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "not_fluval": "The discovered Bluetooth device does not look like a Fluval LED controller."
     }
   },
   "options": {
@@ -47,21 +51,26 @@
         "name": "Connection"
       }
     },
+    "button": {
+      "refresh_diagnostics": {
+        "name": "Refresh diagnostics"
+      }
+    },
     "number": {
       "channel_1": {
-        "name": "Channel 1"
+        "name": "Red"
       },
       "channel_2": {
-        "name": "Channel 2"
+        "name": "Green"
       },
       "channel_3": {
-        "name": "Channel 3"
+        "name": "Blue"
       },
       "channel_4": {
-        "name": "Channel 4"
+        "name": "White"
       },
       "channel_5": {
-        "name": "Channel 5"
+        "name": "Violet"
       }
     },
     "select": {
@@ -82,6 +91,17 @@
     "light": {
       "light": {
         "name": "Light"
+      }
+    },
+    "sensor": {
+      "rssi": {
+        "name": "Signal strength"
+      },
+      "last_seen": {
+        "name": "Last seen"
+      },
+      "diagnostics": {
+        "name": "Diagnostics"
       }
     }
   }

@@ -7,18 +7,48 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "bluetooth"
+    "bluetooth_adapters"
   ],
   "integration_type": "device",
   "documentation": "https://github.com/MrMooreUK/fluvalble",
   "iot_class": "local_push",
   "requirements": [],
-  "version": "0.0.6",
+  "version": "0.0.7",
   "loggers": ["custom_components.fluvalble"],
   "issue_tracker": "https://github.com/MrMooreUK/fluvalble/issues",
   "bluetooth": [
     {
+      "local_name": "Fluval*"
+    },
+    {
+      "local_name": "FLUVAL*"
+    },
+    {
+      "local_name": "AquaSky*"
+    },
+    {
+      "local_name": "AquaSky3.0*"
+    },
+    {
+      "local_name": "AquaSky3.0_*"
+    },
+    {
+      "local_name": "Plant*"
+    },
+    {
+      "local_name": "Marine*"
+    },
+    {
+      "service_uuid": "00001000-0000-1000-8000-00805f9b34fb"
+    },
+    {
       "service_uuid": "00001002-0000-1000-8000-00805f9b34fb"
+    },
+    {
+      "service_uuid": "facebd00-7261-6262-6974-696f74626c65"
+    },
+    {
+      "service_uuid": "facebd00-0000-1000-8000-00805f9b34fb"
     }
   ]
 }

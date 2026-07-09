@@ -16,9 +16,7 @@ def create_entities(device: Device) -> list:
     return [FluvalNumber(device, ch) for ch in device.numbers()]
 
 
-async def async_setup_entry(
-    hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback
-) -> None:
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
     entry_data = hass.data[DOMAIN][config_entry.entry_id]
     device = entry_data["device"]
 
@@ -49,6 +47,9 @@ class FluvalNumber(FluvalEntity, NumberEntity):
             self._async_write_ha_state()
 
     async def async_set_native_value(self, value: float) -> None:
-        self.device.set_value(self.attr, int(value))
+        if not await self.device.async_set_value(self.attr, int(value)):
+            self.internal_update()
+            return
+
         self._attr_native_value = int(value)
         self._async_write_ha_state()

@@ -1,0 +1,178 @@
+set_channels:
+  name: Set color channels
+  description: Set one or more Fluval light color channels, optionally ramping over time.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    red:
+      name: Red
+      description: Red channel intensity, 0-100%.
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    green:
+      name: Green
+      description: Green channel intensity, 0-100%.
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    blue:
+      name: Blue
+      description: Blue channel intensity, 0-100%.
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    white:
+      name: White
+      description: White channel intensity, 0-100%.
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    channel_5:
+      name: Violet
+      description: Violet channel intensity for compatible fixtures, 0-100%.
+      selector:
+        number:
+          min: 0
+          max: 100
+          unit_of_measurement: "%"
+    transition:
+      name: Transition
+      description: Ramp duration in seconds.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 86400
+          unit_of_measurement: s
+    step_seconds:
+      name: Step seconds
+      description: Seconds between writes during a ramp.
+      default: 30
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+
+preview_schedule:
+  name: Preview schedule
+  description: Physically preview a 24-hour Fluval channel schedule compressed into a short duration.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    points:
+      name: Schedule points
+      description: List of points with time plus red, green, blue, white, and optional channel_5 values.
+      required: true
+      example:
+        - time: "10:00"
+          red: 0
+          green: 0
+          blue: 0
+          white: 0
+        - time: "11:00"
+          red: 10
+          green: 10
+          blue: 25
+          white: 5
+      selector:
+        object:
+    duration:
+      name: Preview duration
+      description: Number of seconds to compress the 24-hour preview into.
+      default: 60
+      selector:
+        number:
+          min: 1
+          max: 3600
+          unit_of_measurement: s
+    step_seconds:
+      name: Step seconds
+      description: Seconds between preview writes.
+      default: 2
+      selector:
+        number:
+          min: 1
+          max: 300
+          unit_of_measurement: s
+
+stop_preview:
+  name: Stop preview
+  description: Stop a running physical schedule preview.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+
+save_schedule:
+  name: Save schedule
+  description: Save a Fluval 24-hour channel schedule and HA schedule mode for dashboard cards.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    points:
+      name: Schedule points
+      description: List of schedule points with time plus red, green, blue, white, and optional channel_5 values.
+      required: true
+      example:
+        - time: "10:00"
+          red: 0
+          green: 0
+          blue: 0
+          white: 0
+        - time: "11:00"
+          red: 10
+          green: 10
+          blue: 25
+          white: 5
+      selector:
+        object:
+    mode:
+      name: Schedule mode
+      description: Manual saves the schedule without applying it. Auto lets Home Assistant apply the saved schedule over time.
+      selector:
+        select:
+          options:
+            - manual
+            - auto
+            - professional
