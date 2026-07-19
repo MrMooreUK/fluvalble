@@ -18,10 +18,16 @@ from homeassistant.helpers.device_registry import format_mac
 
 from .core import (
     CONF_ACTIVE_TIME,
+    CONF_LAMP_PROFILE,
     CONF_PING_INTERVAL,
     DEFAULT_ACTIVE_TIME,
+    DEFAULT_LAMP_PROFILE,
     DEFAULT_PING_INTERVAL,
     DOMAIN,
+    LAMP_PROFILE_AQUASKY,
+    LAMP_PROFILE_AQUASKY3,
+    LAMP_PROFILE_AUTO,
+    LAMP_PROFILE_PLANT,
 )
 from .core.discovery import discovery_metadata, is_likely_fluval
 
@@ -157,6 +163,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_bluetooth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Confirm adding a device found via Bluetooth auto-discovery."""
+        errors: dict[str, str] = {}
         if user_input is not None and self._bluetooth_discovery_info is not None:
             discovery = self._bluetooth_discovery_info
             mac = _format_bluetooth_mac(discovery.address)
@@ -165,12 +172,22 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 or getattr(discovery, "name", None)
                 or ""
             )
-            info = await validate_input(self.hass, {CONF_MAC: mac}, ble_name=ble_name)
-            return self.async_create_entry(title=info["title"], data=info["data"])
+            try:
+                info = await validate_input(self.hass, {CONF_MAC: mac}, ble_name=ble_name)
+            except InvalidFormat:
+                errors["base"] = "invalid_format"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception during Bluetooth confirm")
+                errors["base"] = "unknown"
+            else:
+                return self.async_create_entry(title=info["title"], data=info["data"])
 
         return self.async_show_form(
             step_id="bluetooth_confirm",
-            description_placeholders={"name": self.context.get("title_placeholders", {}).get("name", "Fluval LED")},
+            description_placeholders={
+                "name": self.context.get("title_placeholders", {}).get("name", "Fluval LED"),
+            },
+            errors=errors,
         )
 
     # ------------------------------------------------------------------
@@ -223,7 +240,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if mac in configured_normalized:
                 continue
             options[mac] = _device_display_name(info, is_fluval=True)
-        options[MANUAL_ENTRY] = "My device isn't in the list — enter MAC address manually"
+        options[MANUAL_ENTRY] = "My device isn't in the list ÔÇö enter MAC address manually"
         return options
 
     async def async_step_manual(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -264,9 +281,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for Fluval Aquarium LED.
 
-    Uses OptionsFlow (not OptionsFlowWithConfigEntry) so Home Assistant injects
-    ``self.config_entry`` correctly. Returning OptionsFlowWithConfigEntry()
-    without an entry caused Configure → 500 on modern HA cores (#16).
+    Uses OptionsFlow (not OptionsFlowWithConfigEntry) so HA injects
+    ``self.config_entry`` correctly ÔÇö fixing the Configure gear 500 (#16).
     """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -277,6 +293,17 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
         options = self.config_entry.options
         schema = vol.Schema(
             {
+                vol.Optional(
+                    CONF_LAMP_PROFILE,
+                    default=options.get(CONF_LAMP_PROFILE, DEFAULT_LAMP_PROFILE),
+                ): vol.In(
+                    {
+                        LAMP_PROFILE_AUTO: "Auto-detect from BLE name / protocol",
+                        LAMP_PROFILE_PLANT: "Plant / Marine 5-channel (RoseÔÇôWarm White)",
+                        LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
+                        LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (5-channel)",
+                    }
+                ),
                 vol.Optional(
                     CONF_PING_INTERVAL,
                     default=options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),

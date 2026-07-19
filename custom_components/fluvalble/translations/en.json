@@ -26,7 +26,7 @@
         "description": "Do you want to set up **{name}**?"
       },
       "bluetooth_confirm": {
-        "description": "Set up the discovered Fluval Aquarium LED controller."
+        "description": "Set up **{name}** as a Fluval Aquarium LED controller?"
       }
     }
   },
@@ -35,10 +35,12 @@
       "init": {
         "title": "Connection options",
         "data": {
+          "lamp_profile": "Lamp type",
           "ping_interval": "Keep-alive interval (seconds)",
           "active_time": "Active connection window (seconds)"
         },
         "data_description": {
+          "lamp_profile": "Override auto-detection when the wrong model or channel count is shown. Plant uses Rose / Blue / Cold White / Pure White / Warm White labels.",
           "ping_interval": "How often Home Assistant reads from the light to keep the BLE connection alive. Lower values improve reliability at the cost of slightly more radio traffic. Default: 10 s.",
           "active_time": "How long to maintain the BLE connection after the last command. Reducing this saves Bluetooth adapter bandwidth when the light is idle. Default: 120 s."
         }
@@ -61,19 +63,19 @@
     },
     "number": {
       "channel_1": {
-        "name": "Red"
+        "name": "Channel 1"
       },
       "channel_2": {
-        "name": "Green"
+        "name": "Channel 2"
       },
       "channel_3": {
-        "name": "Blue"
+        "name": "Channel 3"
       },
       "channel_4": {
-        "name": "White"
+        "name": "Channel 4"
       },
       "channel_5": {
-        "name": "Violet"
+        "name": "Channel 5"
       }
     },
     "select": {
