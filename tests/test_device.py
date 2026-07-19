@@ -4,21 +4,22 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.fluvalble.core import protocol
+from custom_components.fluvalble.core import LAMP_PROFILE_PLANT, protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
-    CHANNEL_NAMES,
+    CHANNEL_NAMES_PLANT,
     Device,
     NUMBERS,
 )
 
 
-def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED"):
+def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config):
     return Device(
         name,
         config_data={
             "mac": "AA:BB:CC:DD:EE:FF",
             "model": model,
+            **config,
         },
     )
 
@@ -33,11 +34,64 @@ def test_initial_values_include_all_channels():
     assert device.values["led_on_off"] is False
 
 
-def test_aquasky_exposes_four_color_channels():
-    device = _make_device()
+def test_aquasky_2_exposes_four_color_channels():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
 
     assert device.numbers() == AQUASKY_NUMBERS
-    assert CHANNEL_NAMES["channel_5"] == "Violet"
+
+
+def test_aquasky_3_name_exposes_five_channels():
+    device = _make_device(name="AquaSky3.0_2F3176", model="AquaSky 3.0 Bluetooth LED")
+
+    assert device.numbers() == NUMBERS
+
+
+def test_plant_profile_exposes_five_channels_with_plant_labels():
+    device = _make_device(
+        name="Fish Tank",
+        model="Unknown Bluetooth LED",
+        lamp_profile=LAMP_PROFILE_PLANT,
+    )
+
+    assert device.numbers() == NUMBERS
+    assert device.entity_name("channel_1") == CHANNEL_NAMES_PLANT["channel_1"]
+    assert device.entity_name("channel_5") == CHANNEL_NAMES_PLANT["channel_5"]
+
+
+def test_plant_name_exposes_five_channels():
+    device = _make_device(name="Plant 3.0_AABB", model="Plant 3.0 Bluetooth LED")
+
+    assert device.numbers() == NUMBERS
+    assert device.entity_name("channel_3") == "Cold White"
+
+
+def test_status_packet_sets_channel_count_hint():
+    device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
+    packet = bytearray(
+        [
+            0x68,
+            0x18,
+            0x00,
+            0x01,
+            0x00,
+            100 & 0xFF,
+            100 >> 8,
+            200 & 0xFF,
+            200 >> 8,
+            300 & 0xFF,
+            300 >> 8,
+            400 & 0xFF,
+            400 >> 8,
+            500 & 0xFF,
+            500 >> 8,
+        ]
+    )
+
+    device.decode_update_packet(packet)
+
+    assert device._channel_count_hint == 5
+    # PR2 keeps legacy raw wire values; /10 percent scale lands in #6 follow-up.
+    assert device.values["channel_1"] == 100
 
 
 def test_schedule_points_are_normalized_from_color_names():

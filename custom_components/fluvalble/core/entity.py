@@ -25,7 +25,12 @@ class FluvalEntity(Entity):
             model=device.model_name,
             name=device.name or "Fluval",
         )
-        self._attr_translation_key = attr
+        # Channel labels vary by lamp profile (Plant Rose/Blue/CW/PW/WW vs RGBWV).
+        if attr.startswith("channel_"):
+            self._attr_name = device.entity_name(attr)
+            self._attr_translation_key = None
+        else:
+            self._attr_translation_key = attr
         self._attr_unique_id = device.mac.replace(":", "") + "_" + attr
 
         # Store the bound method so deregistration uses the exact same object.
