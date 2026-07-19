@@ -65,8 +65,9 @@ def test_plant_name_exposes_five_channels():
     assert device.entity_name("channel_3") == "Cold White"
 
 
-def test_status_packet_sets_channel_count_hint():
+def test_old_status_packet_scales_to_percent():
     device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
+    # Manual mode, on, five channels at 10/20/30/40/50% => wire 100/200/...
     packet = bytearray(
         [
             0x68,
@@ -89,9 +90,10 @@ def test_status_packet_sets_channel_count_hint():
 
     device.decode_update_packet(packet)
 
+    assert device.values["channel_1"] == 10
+    assert device.values["channel_2"] == 20
+    assert device.values["channel_5"] == 50
     assert device._channel_count_hint == 5
-    # PR2 keeps legacy raw wire values; /10 percent scale lands in #6 follow-up.
-    assert device.values["channel_1"] == 100
 
 
 def test_schedule_points_are_normalized_from_color_names():

@@ -392,9 +392,23 @@ class Client:
         """Write a packet using the right wire format for the active profile."""
         payload = data if self.raw_facebd else protocol.encrypted_old_packet(data)
         characteristic = self._get_characteristic(uuid)
-        # Prefer write-with-response when the char supports it (matches Fluval app).
-        response = bool(characteristic is None or "write" in characteristic.properties)
-        _LOGGER.debug("Writing Fluval packet to %s: %s", uuid, to_hex(payload))
+        # Prefer write-without-response when available — matches ESPHome
+        # fluval_ble_led and fixes Aquasky 2.0 lights that ignore response writes (#6).
+        properties = set(characteristic.properties) if characteristic is not None else set()
+        if "write-without-response" in properties:
+            response = False
+        elif "write" in properties:
+            response = True
+        else:
+            response = False
+
+        _LOGGER.debug(
+            "Writing Fluval packet to %s response=%s raw=%s encrypted=%s",
+            uuid,
+            response,
+            to_hex(data),
+            to_hex(payload),
+        )
         await self.client.write_gatt_char(uuid, data=payload, response=response)
 
     async def request_state(self, expected_state: dict[int, object] | None = None) -> bool:

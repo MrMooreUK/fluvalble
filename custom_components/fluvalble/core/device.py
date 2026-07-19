@@ -1089,15 +1089,18 @@ class Device:
         self.values["led_on_off"] = data[3] > 0x00
 
         if self.values["mode"] == "manual":
-            self.values["channel_1"] = (data[6] << 8) | (data[5] & 0xFF)
-            self.values["channel_2"] = (data[8] << 8) | (data[7] & 0xFF)
-            self.values["channel_3"] = (data[10] << 8) | (data[9] & 0xFF)
-            self.values["channel_4"] = (data[12] << 8) | (data[11] & 0xFF)
+            # Wire scale is 0-1000 (percent * 10); HA entities use 0-100.
+            channels = [
+                ((data[6] << 8) | (data[5] & 0xFF)),
+                ((data[8] << 8) | (data[7] & 0xFF)),
+                ((data[10] << 8) | (data[9] & 0xFF)),
+                ((data[12] << 8) | (data[11] & 0xFF)),
+            ]
             if len(data) > 14:
-                self.values["channel_5"] = (data[14] << 8) | (data[13] & 0xFF)
-                self._channel_count_hint = 5
-            else:
-                self._channel_count_hint = 4
+                channels.append((data[14] << 8) | (data[13] & 0xFF))
+            self._channel_count_hint = 5 if len(channels) >= 5 else 4
+            for index, raw in enumerate(channels):
+                self.values[f"channel_{index + 1}"] = max(0, min(100, round(raw / 10)))
         else:
             for channel in NUMBERS:
                 self.values[channel] = 0
