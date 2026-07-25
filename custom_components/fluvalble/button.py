@@ -21,7 +21,10 @@ PARALLEL_UPDATES = 0
 
 def create_entities(device: Device) -> list:
     """Build the entity list for this platform."""
-    return [FluvalDiagnosticsButton(device, "refresh_diagnostics")]
+    return [
+        FluvalDiagnosticsButton(device, "refresh_diagnostics"),
+        FluvalChannelTestButton(device, "test_led_channels"),
+    ]
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -46,3 +49,18 @@ class FluvalDiagnosticsButton(FluvalEntity, ButtonEntity):
             _LOGGER.warning("Fluval diagnostics failed: %s", report)
         else:
             _LOGGER.info("Fluval diagnostics: %s", report)
+
+
+class FluvalChannelTestButton(FluvalEntity, ButtonEntity):
+    """Run a visible, verified test of each physical LED channel."""
+
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_icon = "mdi:led-strip-variant"
+
+    async def async_press(self) -> None:
+        """Illuminate every supported channel and record exact readback."""
+        if not await self.device.async_test_led_channels():
+            _LOGGER.warning(
+                "Fluval LED channel test did not verify every channel: %s",
+                self.device.diagnostics,
+            )

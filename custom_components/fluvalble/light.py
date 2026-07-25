@@ -40,9 +40,9 @@ class FluvalLight(FluvalEntity, LightEntity):
     _attr_supported_color_modes = {ColorMode.BRIGHTNESS}
 
     def internal_update(self):
-        self._attr_available = self.device.connected
+        self._attr_available = self.device.controls_available
         self._attr_is_on = bool(self.device.values.get("led_on_off"))
-        level = self.device.master_brightness()  # 0–1000
+        level = self.device.master_brightness()  # 0–100
         self._attr_brightness = round(level / DEVICE_MAX * HA_MAX)
 
         if self.hass:

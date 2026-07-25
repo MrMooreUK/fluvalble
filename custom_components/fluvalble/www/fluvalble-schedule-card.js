@@ -28,6 +28,7 @@ class FluvalbleScheduleCard extends HTMLElement {
     this.store = getScheduleStore(this.config);
     this.previewMinute = this.previewMinute ?? this.store.selectedMinute;
     this._subscribeStore();
+    this.startAutoClock();
     this.attachShadow({ mode: "open" });
     this.render();
   }
@@ -87,6 +88,7 @@ class FluvalbleScheduleCard extends HTMLElement {
               </select>
             </label>
             <button id="apply">Apply Schedule</button>
+            <button id="flatten">Flatten Schedule</button>
             <button id="play">Play 24h preview</button>
             <button id="stop">Stop preview</button>
           </div>
@@ -109,6 +111,7 @@ class FluvalbleScheduleCard extends HTMLElement {
         .mode-control { align-items: center; color: var(--secondary-text-color); display: flex; font-size: 13px; gap: 8px; }
         select { background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 6px; color: var(--primary-text-color); padding: 7px 10px; }
         button { background: var(--primary-color); border: 0; border-radius: 6px; color: var(--text-primary-color); cursor: pointer; padding: 8px 12px; }
+        button#flatten { background: var(--warning-color, #f0a000); color: var(--primary-text-color); }
         button#stop { background: var(--error-color); }
       </style>
     `;
@@ -134,10 +137,9 @@ class FluvalbleScheduleCard extends HTMLElement {
       setScheduleMode(this.config, event.target.value, this);
       persistSchedule(this.config, this);
       if (this.store.mode === "auto") {
-        this.previewMinute = currentMinute();
-        setSelectedMinute(this.config, this.previewMinute, this);
-        this.updateLocalTimeDisplay();
-        this.applyChannels(interpolate(this.store.points, this.previewMinute));
+        // Saving Auto immediately starts the backend scheduler.  This card
+        // only follows its time cursor; it must not be the active scheduler.
+        this.syncToCurrentTime();
       }
       this.toast(`HA mode set to ${this.store.mode === "auto" ? "Auto" : "Manual"}`);
     });
@@ -147,6 +149,12 @@ class FluvalbleScheduleCard extends HTMLElement {
       this.applyChannels(channels).then(() => {
         this.toast(`Schedule applied for ${formatMinute(this.previewMinute)}`);
       });
+    });
+    root.getElementById("flatten").addEventListener("click", () => {
+      flattenSchedule(this.config, this);
+      persistSchedule(this.config, this);
+      this.render();
+      this.toast("Schedule flattened to 0%");
     });
     root.getElementById("play").addEventListener("click", () => {
       this.startPreviewPlayback();
@@ -226,13 +234,12 @@ class FluvalbleScheduleCard extends HTMLElement {
 
   stopPreviewPlayback() {
     this.stopPreviewTimerOnly();
-    this.callService("stop_preview", targetData(this.config));
+    const stopped = this.callService("stop_preview", targetData(this.config));
 
     if ((this.store.previewRestoreMode || this.store.mode) === "auto") {
-      this.previewMinute = currentMinute();
-      setSelectedMinute(this.config, this.previewMinute, this);
-      this.updateLocalTimeDisplay();
-      this.applyChannels(interpolate(this.store.points, this.previewMinute));
+      stopped.finally(() => {
+        this.syncToCurrentTime({ apply: true, force: true });
+      });
       return;
     }
 
@@ -267,8 +274,7 @@ class FluvalbleScheduleCard extends HTMLElement {
       }
       this.store.mode = result?.mode || "manual";
       if (this.store.mode === "auto") {
-        this.previewMinute = currentMinute();
-        this.store.selectedMinute = this.previewMinute;
+        this.syncToCurrentTime({ notify: false });
       }
       this.store.loaded = true;
       notifyScheduleStore(this.config, null);
@@ -288,11 +294,47 @@ class FluvalbleScheduleCard extends HTMLElement {
     const x = (this.previewMinute / 1440) * 720;
     const subtitle = root.getElementById("subtitle");
     const cursor = root.getElementById("cursor");
+    const timeInput = root.getElementById("time");
     if (subtitle) subtitle.textContent = `${time} preview`;
+    if (timeInput) timeInput.value = this.previewMinute;
     if (cursor) {
       cursor.setAttribute("x1", x);
       cursor.setAttribute("x2", x);
     }
+  }
+
+  syncToCurrentTime({ notify = true, apply = false, force = false } = {}) {
+    if (this.store.playing) return;
+    this.previewMinute = currentMinute();
+    if (notify) {
+      setSelectedMinute(this.config, this.previewMinute, this);
+    } else {
+      this.store.selectedMinute = this.previewMinute;
+    }
+    this.updateLocalTimeDisplay();
+
+    if (apply) {
+      const channels = interpolate(this.store.points, this.previewMinute);
+      const alreadyApplied = (
+        !force
+        && this.store.lastCurrentTimeApplyMinute === this.previewMinute
+        && sameChannels(this.store.lastCurrentTimeApplyChannels, channels)
+      );
+      if (!alreadyApplied) {
+        this.store.lastCurrentTimeApplyMinute = this.previewMinute;
+        this.store.lastCurrentTimeApplyChannels = channels;
+        this.applyChannels(channels);
+      }
+    }
+  }
+
+  startAutoClock() {
+    if (this._autoClock) return;
+    this._autoClock = setInterval(() => {
+      if (this.store?.mode === "auto" && !this.store.playing) {
+        this.syncToCurrentTime();
+      }
+    }, 30000);
   }
 
   _subscribeStore() {
@@ -307,6 +349,10 @@ class FluvalbleScheduleCard extends HTMLElement {
 
   disconnectedCallback() {
     this.stopPreviewTimerOnly();
+    if (this._autoClock) {
+      clearInterval(this._autoClock);
+      this._autoClock = null;
+    }
     if (this._storeListener) {
       window.removeEventListener(SCHEDULE_STORE_EVENT, this._storeListener);
       this._storeListener = null;
@@ -567,24 +613,81 @@ function firstScheduleMinute(points) {
 
 function updateSelectedChannels(config, values, source) {
   const store = getScheduleStore(config);
-  const minute = store.selectedMinute;
-  const current = {
-    minute,
-    ...interpolate(store.points, minute),
-  };
   CHANNELS.forEach(([key]) => {
     if (key in values) {
-      current[key] = clampPercent(values[key]);
+      applyChannelRamp(store, key, clampPercent(values[key]));
     }
   });
-  const existing = store.points.findIndex((point) => point.minute === minute);
-  if (existing >= 0) {
-    store.points[existing] = { ...store.points[existing], ...current };
-  } else {
-    store.points.push(current);
-  }
   store.points.sort((a, b) => a.minute - b.minute);
   notifyScheduleStore(config, source);
+}
+
+function flattenSchedule(config, source) {
+  const store = getScheduleStore(config);
+  store.points = store.points.map((point) => ({
+    ...point,
+    red: 0,
+    green: 0,
+    blue: 0,
+    white: 0,
+    channel_5: 0,
+  }));
+  notifyScheduleStore(config, source);
+}
+
+function applyChannelRamp(store, channel, targetValue) {
+  const selectedMinute = store.selectedMinute;
+  const originalPoints = store.points.map((point) => ({ ...point }));
+  const startMinute = Math.max(0, selectedMinute - 60);
+  const endMinute = Math.min(1439, selectedMinute + 60);
+  const startValue = clampPercent(interpolate(originalPoints, startMinute)[channel]);
+  const endValue = clampPercent(interpolate(originalPoints, endMinute)[channel]);
+  const rampMinutes = uniqueSortedMinutes([
+    startMinute,
+    Math.max(0, selectedMinute - 45),
+    Math.max(0, selectedMinute - 30),
+    Math.max(0, selectedMinute - 15),
+    selectedMinute,
+    Math.min(1439, selectedMinute + 15),
+    Math.min(1439, selectedMinute + 30),
+    Math.min(1439, selectedMinute + 45),
+    endMinute,
+  ]);
+
+  store.points = store.points.filter((point) => point.minute < startMinute || point.minute > endMinute);
+  rampMinutes.forEach((minute) => {
+    const point = {
+      minute,
+      ...interpolate(originalPoints, minute),
+    };
+    if (minute <= selectedMinute) {
+      const progress = selectedMinute === startMinute ? 1 : (minute - startMinute) / (selectedMinute - startMinute);
+      point[channel] = easedValue(startValue, targetValue, progress);
+    } else {
+      const progress = selectedMinute === endMinute ? 1 : (minute - selectedMinute) / (endMinute - selectedMinute);
+      point[channel] = easedValue(targetValue, endValue, progress);
+    }
+    upsertSchedulePoint(store, point);
+  });
+}
+
+function upsertSchedulePoint(store, point) {
+  const existing = store.points.findIndex((candidate) => candidate.minute === point.minute);
+  if (existing >= 0) {
+    store.points[existing] = { ...store.points[existing], ...point };
+  } else {
+    store.points.push(point);
+  }
+}
+
+function uniqueSortedMinutes(minutes) {
+  return [...new Set(minutes.map((minute) => Math.max(0, Math.min(1439, Number(minute)))))]
+    .sort((a, b) => a - b);
+}
+
+function easedValue(from, to, progress) {
+  const eased = (1 - Math.cos(Math.max(0, Math.min(1, progress)) * Math.PI)) / 2;
+  return clampPercent(Math.round(from + ((to - from) * eased)));
 }
 
 function setScheduleMode(config, mode, source) {

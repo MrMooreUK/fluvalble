@@ -26,3 +26,19 @@ def test_wifi_mode_packet_uses_mode_key():
     packet = protocol.wifi_mode_packet(1)
 
     assert protocol.decode_cbor_map(packet) == {protocol.WIFI_MODE_KEY: 1}
+
+
+def test_decode_aquasky_facebd02_state_capture():
+    """Decode a hardware response with the AquaSky's four physical channels."""
+    captured_state = bytes.fromhex(
+        "a6 18 66 1b 00 00 01 9f 43 b3 19 af " "18 6d 00 18 71 0a 18 70 0a 18 6f 00 18 6e 00"
+    )
+
+    assert protocol.decode_cbor_map(captured_state) == {
+        102: 1783547238831,
+        protocol.WIFI_MANUAL_KEY: 0,
+        protocol.WIFI_CHANNEL_KEYS[3]: 10,
+        protocol.WIFI_CHANNEL_KEYS[2]: 10,
+        protocol.WIFI_CHANNEL_KEYS[1]: 0,
+        protocol.WIFI_CHANNEL_KEYS[0]: 0,
+    }

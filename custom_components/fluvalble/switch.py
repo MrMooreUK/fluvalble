@@ -32,7 +32,7 @@ class FluvalSwitch(FluvalEntity, SwitchEntity):
 
     def internal_update(self):
         attribute = self.device.attribute(self.attr)
-        self._attr_available = bool(attribute) and self.device.connected
+        self._attr_available = bool(attribute) and self.device.controls_available
         if not attribute:
             if self.hass:
                 self._async_write_ha_state()
