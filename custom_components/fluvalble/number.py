@@ -37,7 +37,7 @@ class FluvalNumber(FluvalEntity, NumberEntity):
             if self.hass:
                 self._async_write_ha_state()
             return
-        self._attr_available = "value" in attribute and self.device.connected
+        self._attr_available = "value" in attribute and self.device.controls_available
         self._attr_native_min_value = attribute.get("min")
         self._attr_native_max_value = attribute.get("max")
         self._attr_native_step = attribute.get("step")

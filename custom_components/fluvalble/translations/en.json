@@ -54,6 +54,9 @@
     "button": {
       "refresh_diagnostics": {
         "name": "Refresh diagnostics"
+      },
+      "test_led_channels": {
+        "name": "Test LED channels"
       }
     },
     "number": {

@@ -10,6 +10,7 @@ there is a single place to update if HA changes its API.
 import enum
 import sys
 import types
+from datetime import UTC, datetime
 import pytest
 from unittest.mock import MagicMock
 
@@ -84,11 +85,13 @@ def _stub_homeassistant():
 
     ha_const = types.ModuleType("homeassistant.const")
     ha_const.CONF_MAC = "mac"
+    ha_const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
     ha_const.Platform = Platform
     ha_const.EntityCategory = EntityCategory
 
     # ---- homeassistant.core ----
     ha_core = types.ModuleType("homeassistant.core")
+    ha_core.CoreState = enum.Enum("CoreState", {"running": "running"})
     ha_core.HomeAssistant = MagicMock
     ha_core.ServiceCall = MagicMock
     ha_core.callback = lambda f: f  # passthrough decorator
@@ -133,6 +136,7 @@ def _stub_homeassistant():
     ha_bt.BluetoothScanningMode = MagicMock()
     ha_bt.BluetoothChange = MagicMock
     ha_bt.async_discovered_service_info = MagicMock(return_value=[])
+    ha_bt.async_ble_device_from_address = MagicMock(return_value=None)
     ha_bt.async_last_service_info = MagicMock(return_value=None)
     ha_bt.async_register_callback = MagicMock(return_value=lambda: None)
 
@@ -278,6 +282,13 @@ def _stub_homeassistant():
     ha_event = types.ModuleType("homeassistant.helpers.event")
     ha_event.async_track_time_interval = MagicMock(return_value=lambda: None)
 
+    # ---- homeassistant.util.dt ----
+    ha_util = types.ModuleType("homeassistant.util")
+    ha_dt = types.ModuleType("homeassistant.util.dt")
+    ha_dt.now = MagicMock(return_value=datetime(2026, 1, 1, 12, 0, tzinfo=UTC))
+    ha_dt.utcnow = MagicMock(return_value=datetime(2026, 1, 1, 12, 0, tzinfo=UTC))
+    ha_util.dt = ha_dt
+
     # ---- register everything in sys.modules ----
     modules = {
         "homeassistant": types.ModuleType("homeassistant"),
@@ -301,6 +312,8 @@ def _stub_homeassistant():
         "homeassistant.helpers.entity_platform": ha_ep,
         "homeassistant.helpers.event": ha_event,
         "homeassistant.helpers.storage": ha_storage,
+        "homeassistant.util": ha_util,
+        "homeassistant.util.dt": ha_dt,
         "homeassistant.components.websocket_api": ha_ws,
     }
     for name, mod in modules.items():

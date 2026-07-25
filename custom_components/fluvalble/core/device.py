@@ -23,7 +23,7 @@ from . import protocol
 _LOGGER = logging.getLogger(__name__)
 
 NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
-SELECTS = ["mode"]
+SELECTS = ["mode", "schedule_mode"]
 SENSORS = ["rssi", "last_seen"]
 DIAGNOSTICS = ["diagnostics"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
@@ -36,12 +36,15 @@ CHANNEL_NAMES = {
 }
 MODES = ["manual", "automatic", "professional"]
 MODE_TO_CODE = {mode: index for index, mode in enumerate(MODES)}
+SCHEDULE_MODES = ["manual", "auto"]
 DIAGNOSTIC_UPDATE_INTERVAL = 5
 BLE_LOOKUP_TIMEOUT = 10
 BLE_LOOKUP_RETRIES = 3
 PREVIEW_STEP_SECONDS = 2
 TRANSITION_STEP_SECONDS = 30
 DAY_MINUTES = 24 * 60
+CHANNEL_TEST_LEVEL = 100
+CHANNEL_TEST_HOLD_SECONDS = 2
 
 
 class Attribute(TypedDict, total=False):
@@ -86,6 +89,9 @@ class Device:
         self._ping_interval = ping_interval
         self._active_time = active_time
         self.connected = False
+        self.entry_id: str | None = None
+        self.schedule_mode = "manual"
+        self.channel_test_active = False
         self.conn_info = {
             "mac": self.address,
             "model": self.model,
@@ -126,6 +132,11 @@ class Device:
         """Expose a model name for Home Assistant device info."""
         return self.model
 
+    @property
+    def controls_available(self) -> bool:
+        """Return true when HA has enough BLE info to attempt commands."""
+        return bool(self.client or self.conn_info.get("last_seen"))
+
     def update_ble(self, device: BLEDevice, advertisment: AdvertisementData):
         """Update BLE metadata."""
         self.address = device.address
@@ -142,23 +153,21 @@ class Device:
         )
 
         if self.client is None:
-            self.client = Client(
-                device,
-                self.set_connected,
-                self.decode_update_packet,
-                ping_interval=self._ping_interval,
-                active_time=self._active_time,
-            )
+            self.client = self._new_client(device)
         else:
             self.client.device = device
 
         self._notify_diagnostics_throttled()
+        for handler in self.updates_component:
+            handler()
 
     def set_connected(self, connected: bool):
         """Set the connection status."""
         self.connected = connected
 
         for handler in self.updates_connect:
+            handler()
+        for handler in self.updates_component:
             handler()
 
     def _notify_diagnostics_throttled(self):
@@ -205,6 +214,8 @@ class Device:
         """Return a user-facing entity suffix for this device attribute."""
         if attr in CHANNEL_NAMES:
             return CHANNEL_NAMES[attr]
+        if attr == "test_led_channels":
+            return "Test LED Channels"
         return attr.replace("_", " ").title()
 
     def selects(self) -> list[str]:
@@ -224,6 +235,8 @@ class Device:
             return Attribute(min=0, max=100, step=1, value=self.values[attr])
         if attr == "mode":
             return Attribute(options=MODES, default=self.values[attr])
+        if attr == "schedule_mode":
+            return Attribute(options=SCHEDULE_MODES, default=self.schedule_mode)
         if attr == "led_on_off":
             return Attribute(is_on=self.values[attr])
         if attr == "rssi":
@@ -273,6 +286,7 @@ class Device:
         *,
         transition: int = 0,
         step_seconds: int = TRANSITION_STEP_SECONDS,
+        force: bool = False,
     ) -> bool:
         """Set multiple channel values, optionally ramping over time."""
         channels = self.numbers()
@@ -280,7 +294,7 @@ class Device:
         if not targets:
             return False
 
-        if all(int(self.values.get(channel, -1)) == value for channel, value in targets.items()):
+        if not force and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items()):
             _LOGGER.debug("Skipping Fluval channel write because targets are unchanged: %s", targets)
             return True
 
@@ -303,7 +317,10 @@ class Device:
         if transition <= 0:
             for channel, value in targets.items():
                 self.values[channel] = value
-            return await self._async_send_channel_state(old_values)
+            return await self._async_send_channel_state(
+                old_values,
+                force_power=force,
+            )
 
         steps = max(1, int(transition / max(1, step_seconds)))
         start_values = {channel: int(old_values[channel]) for channel in channels}
@@ -313,7 +330,10 @@ class Device:
                 start = start_values[channel]
                 end = targets[channel]
                 self.values[channel] = round(start + ((end - start) * ratio))
-            if not await self._async_send_channel_state(old_values):
+            if not await self._async_send_channel_state(
+                old_values,
+                force_power=force,
+            ):
                 self.values = old_values
                 return False
             if step < steps:
@@ -321,15 +341,25 @@ class Device:
 
         return True
 
-    async def _async_send_channel_state(self, old_values: dict[str, Any]) -> bool:
+    async def _async_send_channel_state(
+        self,
+        old_values: dict[str, Any],
+        *,
+        force_power: bool = False,
+    ) -> bool:
         """Send the current channel values to the controller."""
         if self._uses_wifi_protocol():
-            if any(self._channel_values()) and not self.values["led_on_off"]:
+            any_channel_on = any(self._channel_values())
+            if any_channel_on and (force_power or not self.values["led_on_off"]):
                 self.values["led_on_off"] = True
                 if not await self._async_send_packet(protocol.wifi_switch_packet(True)):
                     self.values = old_values
                     return False
             ok = await self._async_send_packet(protocol.wifi_all_zone_packet(self._channel_values()))
+            if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
+                ok = await self._async_send_packet(protocol.wifi_switch_packet(False))
+                if ok:
+                    self.values["led_on_off"] = False
         else:
             ok = await self._async_send_packet(protocol.old_all_zone_packet(self._channel_values()))
 
@@ -363,6 +393,107 @@ class Device:
             restore_values = self.preview_restore_values
             self.preview_restore_values = None
             await self.async_set_channels(restore_values)
+
+    async def async_test_led_channels(self) -> bool:
+        """Test power and each supported channel, then restore prior state."""
+        if self.channel_test_active:
+            return False
+        self.channel_test_active = True
+        await self.async_stop_preview()
+        original_values = {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
+        original_power = bool(self.values.get("led_on_off"))
+        results: list[dict[str, Any]] = []
+        error = None
+        self.diagnostics.update(
+            {
+                "status": "channel_test_running",
+                "channel_test_started_at": datetime.now(UTC).isoformat(),
+                "channel_test_results": results,
+            }
+        )
+
+        try:
+            power_ok = await self.async_set_switch("led_on_off", True)
+            results.append(self._channel_test_result("Power", True, power_ok))
+            for channel in self.numbers() if power_ok else []:
+                targets = {candidate: 0 for candidate in self.numbers()}
+                targets[channel] = CHANNEL_TEST_LEVEL
+                write_ok = await self.async_set_channels(targets, force=True)
+                results.append(
+                    self._channel_test_result(
+                        self.entity_name(channel),
+                        CHANNEL_TEST_LEVEL,
+                        write_ok,
+                    )
+                )
+                self.diagnostics.update(
+                    {
+                        "channel_test_current": self.entity_name(channel),
+                        "channel_test_results": list(results),
+                    }
+                )
+                for handler in self.updates_connect:
+                    handler()
+                if not write_ok:
+                    break
+                await asyncio.sleep(CHANNEL_TEST_HOLD_SECONDS)
+        except Exception as err:  # noqa: BLE001
+            error = f"{type(err).__name__}: {err}"
+            _LOGGER.exception("Fluval LED channel test failed")
+        finally:
+            try:
+                restore_ok = await self.async_set_channels(
+                    original_values,
+                    force=True,
+                )
+                if not original_power:
+                    restore_ok = await self.async_set_switch("led_on_off", False) and restore_ok
+            except Exception as err:  # noqa: BLE001
+                restore_ok = False
+                restore_error = f"{type(err).__name__}: {err}"
+                error = f"{error}; restore failed: {restore_error}" if error else f"restore failed: {restore_error}"
+                _LOGGER.exception("Unable to restore Fluval state after channel test")
+            self.channel_test_active = False
+
+        expected_count = len(self.numbers()) + 1
+        passed = (
+            len(results) == expected_count
+            and all(item["write_ok"] and item["verified"] for item in results)
+            and error is None
+        )
+        writes_ok = bool(results) and all(item["write_ok"] for item in results)
+        self.diagnostics.update(
+            {
+                "status": (
+                    "channel_test_passed"
+                    if passed
+                    else ("channel_test_unverified" if writes_ok else "channel_test_failed")
+                ),
+                "channel_test_completed_at": datetime.now(UTC).isoformat(),
+                "channel_test_results": list(results),
+                "channel_test_restore_ok": restore_ok,
+                "channel_test_error": error,
+            }
+        )
+        for handler in self.updates_connect:
+            handler()
+        return passed
+
+    def _channel_test_result(
+        self,
+        channel: str,
+        requested: bool | int,
+        write_ok: bool,
+    ) -> dict[str, Any]:
+        """Build a copyable result for one channel-test step."""
+        return {
+            "channel": channel,
+            "requested": requested,
+            "write_ok": write_ok,
+            "verified": bool(write_ok and self.client and self.client.last_write_verified),
+            "confirmed_state": (dict(self.client.last_confirmed_state) if self.client is not None else {}),
+            "mismatches": (dict(self.client.last_verification_mismatches) if self.client is not None else {}),
+        }
 
     async def _async_preview_schedule(
         self,
@@ -526,13 +657,11 @@ class Device:
     def _uses_wifi_protocol(self) -> bool:
         """Prefer the live GATT profile over advertisement heuristics."""
         if self.client is not None and self.client.command_write_uuid:
-            write_uuid = self.client.command_write_uuid.lower()
-            if write_uuid.startswith("facebd80"):
-                # WiFi-over-BLE CBOR path used by the working probe script.
+            if self.client.wifi_facebd:
                 self.facebd = True
                 return True
+            write_uuid = self.client.command_write_uuid.lower()
             if write_uuid.startswith("facebd"):
-                # FACEBD BLE write path still uses raw (unencrypted) framing.
                 self.facebd = True
                 return True
             if write_uuid.startswith(("00001001", "0000fff2")):
@@ -543,43 +672,52 @@ class Device:
 
     async def _async_prepare_command(self) -> bool:
         """Resolve the BLE device and connect far enough to know the protocol."""
-        if not await self._async_ensure_client():
+        if not await self._async_ensure_client() or self.client is None:
             self._set_diagnostic_error("device_not_found", "BLE device is not available")
             return False
-        ok = await self.client.ensure_connected()
+        client = self.client
+        ok = await client.ensure_connected()
         if not ok:
             self._set_diagnostic_error(
                 "connect_failed",
-                self.client.last_error or "Unable to connect to BLE device",
+                client.last_error or "Unable to connect to BLE device",
             )
         return ok
 
     async def _async_send_packet(self, packet: bytes) -> bool:
         """Send one already-built command packet to the controller."""
-        if not await self._async_ensure_client():
+        if not await self._async_ensure_client() or self.client is None:
             _LOGGER.warning("Cannot send Fluval state before BLE device is available")
             return False
+        client = self.client
 
         _LOGGER.debug(
             "Sending Fluval packet via %s (facebd=%s raw=%s): %s",
-            self.client.command_write_uuid,
+            client.command_write_uuid,
             self.facebd,
-            self.client.raw_facebd,
+            client.raw_facebd,
             packet.hex(),
         )
-        if not await self.client.send_now(packet):
+        expected_state = self._expected_state_for_packet(packet)
+        if not await client.send_now(packet, expected_state=expected_state):
             self._set_diagnostic_error(
                 "write_failed",
-                self.client.last_error or "BLE write failed",
+                client.last_error or "BLE write failed",
             )
             return False
 
         self.diagnostics.update(
             {
-                "status": "last_write_ok",
+                "status": ("last_write_verified" if client.last_write_verified else "last_write_unverified"),
                 "last_write_at": datetime.now(UTC).isoformat(),
                 "last_write_packet": packet.hex(),
-                "last_write_targets": list(self.client.last_write_targets),
+                "last_write_targets": list(client.last_write_targets),
+                "last_write_verified": client.last_write_verified,
+                "connection_profile": client.profile,
+                "command_write_uuid": client.command_write_uuid,
+                "last_expected_state": dict(client.last_expected_state),
+                "last_confirmed_state": dict(client.last_confirmed_state),
+                "last_verification_mismatches": dict(client.last_verification_mismatches),
                 "last_error": None,
             }
         )
@@ -590,13 +728,31 @@ class Device:
             handler()
         return True
 
+    def _expected_state_for_packet(self, packet: bytes) -> dict[int, Any] | None:
+        """Return exact supported FACEBD values expected after a command."""
+        if self.client is None or not self.client.raw_facebd:
+            return None
+        try:
+            decoded = protocol.decode_cbor_map(packet)
+        except ValueError:
+            return None
+        if not decoded:
+            return None
+        supported_keys = {
+            protocol.WIFI_MODE_KEY,
+            protocol.WIFI_SWITCH_KEY,
+            *(protocol.WIFI_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
+        }
+        return {key: value for key, value in decoded.items() if key in supported_keys}
+
     async def async_refresh_state(self) -> bool:
         """Resolve the controller and request its current state."""
-        if not await self._async_ensure_client():
+        if not await self._async_ensure_client() or self.client is None:
             return False
+        client = self.client
 
         try:
-            await self.client.request_state()
+            await client.request_state()
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Unable to refresh Fluval state", exc_info=err)
             return False
@@ -630,7 +786,12 @@ class Device:
                 self.update_ble(service_info.device, service_info.advertisement)
 
         direct_device = None
-        if self.address:
+        if self.hass is not None:
+            direct_device = self._connectable_ble_device()
+            report["ha_connectable_route_found"] = direct_device is not None
+            if direct_device is not None:
+                report["selected_ble_device"] = self._ble_device_report(direct_device)
+        elif self.address:
             try:
                 direct_device = await BleakScanner.find_device_by_address(self.address, timeout=BLE_LOOKUP_TIMEOUT)
             except (TimeoutError, BleakError) as err:
@@ -641,13 +802,7 @@ class Device:
             report["direct_scan_device"] = self._ble_device_report(direct_device)
             self._update_from_ble_device(direct_device)
             if self.client is None:
-                self.client = Client(
-                    direct_device,
-                    self.set_connected,
-                    self.decode_update_packet,
-                    ping_interval=self._ping_interval,
-                    active_time=self._active_time,
-                )
+                self.client = self._new_client(direct_device)
 
         report["refresh_state_attempted"] = False
         report["refresh_state_ok"] = False
@@ -655,7 +810,7 @@ class Device:
             report["refresh_state_attempted"] = True
             report["refresh_state_ok"] = await self.async_refresh_state()
 
-        report["status"] = "ok" if report.get("direct_scan_found") else "not_found"
+        report["status"] = "ok" if direct_device is not None else "not_found"
         report["updated_connection_info"] = dict(self.conn_info)
         self.diagnostics = report
 
@@ -665,41 +820,41 @@ class Device:
         return report
 
     def _channel_values(self) -> list[int]:
-        """Return the current channel values in Fluval app order."""
-        return [self.values[channel] for channel in NUMBERS]
+        """Return supported channel values in Fluval app order."""
+        return [self.values[channel] for channel in self.numbers()]
+
+    def _new_client(self, device: BLEDevice) -> Client:
+        """Create a client that refreshes HA's preferred BLE route on reconnect."""
+        return Client(
+            device,
+            self.set_connected,
+            self.decode_update_packet,
+            ping_interval=self._ping_interval,
+            active_time=self._active_time,
+            device_provider=self._connectable_ble_device,
+        )
 
     async def _async_ensure_client(self) -> bool:
-        """Create a BLE client from the configured MAC when HA has not populated one."""
-        if self.client is not None:
-            return True
-
+        """Create or refresh a client using HA's best connectable BLE route."""
         if not self.address:
             return False
 
         device = await self._async_find_device()
 
         if device is None:
-            return False
+            return self.client is not None
 
         self._update_from_ble_device(device)
-        self.client = Client(
-            device,
-            self.set_connected,
-            self.decode_update_packet,
-            ping_interval=self._ping_interval,
-            active_time=self._active_time,
-        )
+        if self.client is None:
+            self.client = self._new_client(device)
+        else:
+            self.client.device = device
         return True
 
     async def _async_find_device(self) -> BLEDevice | None:
-        """Find the configured BLE device using HA cache first, then active scan."""
+        """Find the configured device through HA, including ESPHome proxies."""
         if self.hass is not None:
-            service_info = bluetooth.async_last_service_info(self.hass, self.address, connectable=True)
-            if service_info is None:
-                service_info = bluetooth.async_last_service_info(self.hass, self.address)
-            if service_info is not None:
-                self.update_ble(service_info.device, service_info.advertisement)
-                return service_info.device
+            return self._connectable_ble_device()
 
         for attempt in range(1, BLE_LOOKUP_RETRIES + 1):
             try:
@@ -716,6 +871,25 @@ class Device:
                 return device
 
         return None
+
+    def _connectable_ble_device(self) -> BLEDevice | None:
+        """Ask HA for the best local adapter or ESPHome proxy route."""
+        if self.hass is not None:
+            device = bluetooth.async_ble_device_from_address(
+                self.hass,
+                self.address,
+                connectable=True,
+            )
+            if device is not None:
+                return device
+            service_info = bluetooth.async_last_service_info(
+                self.hass,
+                self.address,
+                connectable=True,
+            )
+            if service_info is not None:
+                return service_info.device
+        return self.client.device if self.client is not None else None
 
     def _set_diagnostic_error(self, status: str, message: str) -> None:
         """Store command failures in the diagnostics sensor for quick copying."""
@@ -758,6 +932,7 @@ class Device:
         return {
             "name": device.name,
             "address": device.address,
+            "source": details.get("source"),
             "rssi": props.get("RSSI"),
             "uuids": list(props.get("UUIDs", [])),
             "service_data_keys": list(props.get("ServiceData", {})),
@@ -821,7 +996,7 @@ class Device:
 
         return packet
 
-    def decode_update_packet(self, data: bytearray):
+    def decode_update_packet(self, data: bytes | bytearray) -> bool:
         """Decode the received Fluval packet and sort into values."""
         is_cbor_map = bool(data and data[0] >> 5 == 5)
         if is_cbor_map:
@@ -829,18 +1004,18 @@ class Device:
                 cbor = protocol.decode_cbor_map(data)
             except ValueError as err:
                 _LOGGER.debug("Ignoring unsupported Fluval CBOR packet", exc_info=err)
-                return
+                return False
 
             if cbor is not None:
-                self._decode_wifi_update(cbor)
-            return
+                return self._decode_wifi_update(cbor)
+            return False
 
         if len(data) < 13:
             _LOGGER.debug("Ignoring short Fluval update packet: %s", data.hex())
-            return
+            return False
         if data[0] != 0x68:
             _LOGGER.debug("Ignoring non-state Fluval packet: %s", data.hex())
-            return
+            return False
 
         if data[2] == 0x00:
             self.values["mode"] = MODES[0]
@@ -875,20 +1050,27 @@ class Device:
 
         for handler in self.updates_component:
             handler()
+        return True
 
-    def _decode_wifi_update(self, data: dict[int, Any]):
+    def _decode_wifi_update(self, data: dict[int, Any]) -> bool:
         """Decode a FACEBD WiFi-over-BLE CBOR state update."""
+        updated = False
         if protocol.WIFI_MODE_KEY in data:
             mode = data[protocol.WIFI_MODE_KEY]
             if isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
+                updated = True
 
         if protocol.WIFI_SWITCH_KEY in data:
             self.values["led_on_off"] = bool(data[protocol.WIFI_SWITCH_KEY])
+            updated = True
 
-        for channel, key in zip(NUMBERS, protocol.WIFI_CHANNEL_KEYS, strict=False):
+        for channel, key in zip(self.numbers(), protocol.WIFI_CHANNEL_KEYS, strict=False):
             if key in data and isinstance(data[key], int):
                 self.values[channel] = max(0, min(100, int(data[key])))
+                updated = True
 
-        for handler in self.updates_component:
-            handler()
+        if updated:
+            for handler in self.updates_component:
+                handler()
+        return updated
