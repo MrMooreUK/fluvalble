@@ -261,31 +261,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler()
 
 
-class OptionsFlowHandler(config_entries.OptionsFlowWithConfigEntry):
-    """Handle options for Fluval Aquarium LED."""
+class OptionsFlowHandler(config_entries.OptionsFlow):
+    """Handle options for Fluval Aquarium LED.
+
+    Uses OptionsFlow (not OptionsFlowWithConfigEntry) so Home Assistant injects
+    ``self.config_entry`` correctly. Returning OptionsFlowWithConfigEntry()
+    without an entry caused Configure → 500 on modern HA cores (#16).
+    """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and handle the options form."""
         if user_input is not None:
             return self.async_create_entry(data=user_input)
 
+        options = self.config_entry.options
         schema = vol.Schema(
             {
                 vol.Optional(
                     CONF_PING_INTERVAL,
-                    default=self.config_entry.options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
+                    default=options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
                 ): vol.All(int, vol.Range(min=5, max=60)),
                 vol.Optional(
                     CONF_ACTIVE_TIME,
-                    default=self.config_entry.options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME),
+                    default=options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME),
                 ): vol.All(int, vol.Range(min=30, max=600)),
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)
-
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
 
 
 class InvalidFormat(HomeAssistantError):
