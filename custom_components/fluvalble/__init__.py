@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from dataclasses import dataclass, field
 from datetime import timedelta
@@ -59,6 +60,12 @@ def _runtime_device(entry_data: Any) -> Device | None:
     if isinstance(entry_data, dict):
         return entry_data.get("device")
     return None
+
+
+def _entry_device_config(entry: ConfigEntry) -> dict[str, Any]:
+    """Return config/options merged for Device, with options taking precedence."""
+    return {**dict(entry.data), **dict(entry.options)}
+
 
 DISCOVERY_LOG_INTERVAL = 5
 SERVICE_SET_CHANNELS = "set_channels"
@@ -168,7 +175,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             service_info.device,
             service_info.advertisement,
             hass=hass,
-            config_data=dict(entry.data),
+            config_data=_entry_device_config(entry),
             ping_interval=ping_interval,
             active_time=active_time,
         )

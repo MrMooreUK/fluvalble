@@ -82,7 +82,9 @@ def old_all_zone_packet(values: Iterable[int]) -> bytes:
     packet = bytearray((0x68, OLD_ALL_ZONE))
     for value in values:
         scaled = _clamp_percent(value) * 10
-        packet.extend((scaled & 0xFF, scaled >> 8))
+        # APK helper name says "Little", but it only zero-pads a hex word;
+        # the command payload is sent high byte first, e.g. 100% -> 03 E8.
+        packet.extend((scaled >> 8, scaled & 0xFF))
     return old_packet(packet)
 
 

@@ -24,6 +24,13 @@ def test_wifi_values_are_clamped_to_percent_range():
     assert decoded[protocol.WIFI_CHANNEL_KEYS[1]] == 100
 
 
+def test_old_all_zone_packet_uses_apk_word_order():
+    packet = protocol.old_all_zone_packet([0, 50, 100])
+
+    assert packet[:8] == bytes.fromhex("68 04 00 00 01 F4 03 E8")
+    assert packet[-1] == 0x72
+
+
 def test_wifi_mode_packet_uses_mode_key():
     packet = protocol.wifi_mode_packet(1)
 

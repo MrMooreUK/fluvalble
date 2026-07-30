@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from custom_components.fluvalble.core import LAMP_PROFILE_PLANT, protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
+    CHANNEL_NAMES_AQUASKY,
     CHANNEL_NAMES_PLANT,
     Device,
     NUMBERS,
@@ -56,6 +57,37 @@ def test_plant_profile_exposes_five_channels_with_plant_labels():
     assert device.numbers() == NUMBERS
     assert device.entity_name("channel_1") == CHANNEL_NAMES_PLANT["channel_1"]
     assert device.entity_name("channel_5") == CHANNEL_NAMES_PLANT["channel_5"]
+
+
+def test_four_channel_status_hint_overrides_conflicting_plant_profile():
+    device = _make_device(
+        name="Fish Tank",
+        model="Unknown Bluetooth LED",
+        lamp_profile=LAMP_PROFILE_PLANT,
+    )
+    # Manual mode, on, four channels only.
+    packet = bytearray(
+        [
+            0x68,
+            0x18,
+            0x00,
+            0x01,
+            0x00,
+            100 & 0xFF,
+            100 >> 8,
+            200 & 0xFF,
+            200 >> 8,
+            300 & 0xFF,
+            300 >> 8,
+            400 & 0xFF,
+            400 >> 8,
+        ]
+    )
+
+    device.decode_update_packet(packet)
+
+    assert device.numbers() == AQUASKY_NUMBERS
+    assert device.entity_name("channel_1") == CHANNEL_NAMES_AQUASKY["channel_1"]
 
 
 def test_plant_name_exposes_five_channels():

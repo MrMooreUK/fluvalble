@@ -212,13 +212,13 @@ class Device:
 
     def _resolved_channel_count(self) -> int:
         """Return 4 or 5 channels from profile, packet hint, or name heuristics."""
+        if self._channel_count_hint in (4, 5):
+            return self._channel_count_hint
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
         if profile == LAMP_PROFILE_AQUASKY:
             return 4
         if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_AQUASKY3):
             return 5
-        if self._channel_count_hint in (4, 5):
-            return self._channel_count_hint
         if self.facebd or any(
             str(uuid).lower().startswith("0000fff0") for uuid in self.conn_info.get("service_uuids", [])
         ):
@@ -242,6 +242,8 @@ class Device:
 
     def _channel_labels(self) -> dict[str, str]:
         """Return channel labels for the active lamp profile."""
+        if self._channel_count_hint == 4:
+            return CHANNEL_NAMES_AQUASKY
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
         if profile == LAMP_PROFILE_PLANT:
             return CHANNEL_NAMES_PLANT
