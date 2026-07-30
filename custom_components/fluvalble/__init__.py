@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from pathlib import Path
+import re
 from time import monotonic
 import inspect
 from datetime import timedelta
@@ -43,6 +44,34 @@ STORAGE_KEY = "fluvalble_schedules"
 STORAGE_VERSION = 1
 STARTUP_SCHEDULE_RETRY_SECONDS = 5
 STARTUP_SCHEDULE_RETRY_COUNT = 12
+MAX_SCHEDULE_POINTS = 96
+SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
+SCHEDULE_POINT_FIELDS = {"time", *SCHEDULE_CHANNELS}
+
+
+def _validate_schedule_points(points: object) -> list[dict]:
+    """Validate untrusted schedule data before storing it or driving BLE writes."""
+    if not isinstance(points, list) or not 2 <= len(points) <= MAX_SCHEDULE_POINTS:
+        raise vol.Invalid(f"Schedule must contain 2 to {MAX_SCHEDULE_POINTS} points")
+
+    validated = []
+    for point in points:
+        if not isinstance(point, dict) or set(point) - SCHEDULE_POINT_FIELDS:
+            raise vol.Invalid("Each schedule point must contain only supported fields")
+        time_value = point.get("time")
+        if not isinstance(time_value, str) or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", time_value) is None:
+            raise vol.Invalid("Schedule times must use HH:MM in the 24-hour range")
+
+        validated_point: dict[str, str | int] = {"time": time_value}
+        for channel in SCHEDULE_CHANNELS:
+            value = point.get(channel, 0)
+            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                raise vol.Invalid(f"{channel} must be an integer from 0 to 100")
+            validated_point[channel] = value
+        validated.append(validated_point)
+
+    return validated
+
 
 CHANNEL_SERVICE_SCHEMA = vol.Schema(
     {
@@ -62,7 +91,7 @@ PREVIEW_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional("entry_id"): str,
         vol.Optional("mac"): str,
-        vol.Required("points"): list,
+        vol.Required("points"): _validate_schedule_points,
         vol.Optional("duration", default=60): vol.All(int, vol.Range(min=1, max=3600)),
         vol.Optional("step_seconds", default=2): vol.All(int, vol.Range(min=1, max=300)),
     }
@@ -79,7 +108,7 @@ SCHEDULE_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional("entry_id"): str,
         vol.Optional("mac"): str,
-        vol.Required("points"): list,
+        vol.Required("points"): _validate_schedule_points,
         vol.Optional("mode"): vol.In(["manual", "auto", "professional"]),
     }
 )

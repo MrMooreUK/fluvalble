@@ -7,6 +7,10 @@ from typing import Any
 
 from . import encryption
 
+MAX_CBOR_CONTAINER_ITEMS = 64
+MAX_CBOR_BYTE_STRING_LENGTH = 4096
+MAX_CBOR_NESTING_DEPTH = 8
+
 WIFI_MODE_KEY = 103
 WIFI_SWITCH_KEY = 104
 WIFI_MANUAL_KEY = 109
@@ -92,8 +96,13 @@ def decode_cbor_map(data: bytes) -> dict[Any, Any] | None:
     if not data or data[0] >> 5 != 5:
         return None
 
-    value, _offset = _read_cbor_value(data, 0)
+    try:
+        value, offset = _read_cbor_value(data, 0)
+    except (UnicodeError, ValueError):
+        return None
     if not isinstance(value, dict):
+        return None
+    if offset != len(data):
         return None
     return value
 
@@ -116,7 +125,9 @@ def _cbor_uint(value: int) -> bytes:
     return bytes((0x1B, *value.to_bytes(8, "big")))
 
 
-def _read_cbor_value(data: bytes, offset: int) -> tuple[Any, int]:
+def _read_cbor_value(data: bytes, offset: int, depth: int = 0) -> tuple[Any, int]:
+    if depth > MAX_CBOR_NESTING_DEPTH:
+        raise ValueError("CBOR nesting is too deep")
     if offset >= len(data):
         raise ValueError("Unexpected end of CBOR data")
 
@@ -135,6 +146,8 @@ def _read_cbor_value(data: bytes, offset: int) -> tuple[Any, int]:
         return -1 - value, offset
     if major in (2, 3):
         length, offset = _read_cbor_length(data, offset)
+        if length > MAX_CBOR_BYTE_STRING_LENGTH:
+            raise ValueError("CBOR byte/text string is too large")
         end = offset + length
         if end > len(data):
             raise ValueError("CBOR byte/text string is truncated")
@@ -144,17 +157,23 @@ def _read_cbor_value(data: bytes, offset: int) -> tuple[Any, int]:
         return raw.decode("utf-8", errors="replace"), end
     if major == 4:
         length, offset = _read_cbor_length(data, offset)
+        if length > MAX_CBOR_CONTAINER_ITEMS:
+            raise ValueError("CBOR array has too many items")
         items = []
         for _ in range(length):
-            value, offset = _read_cbor_value(data, offset)
+            value, offset = _read_cbor_value(data, offset, depth + 1)
             items.append(value)
         return items, offset
     if major == 5:
         length, offset = _read_cbor_length(data, offset)
+        if length > MAX_CBOR_CONTAINER_ITEMS:
+            raise ValueError("CBOR map has too many items")
         result = {}
         for _ in range(length):
-            key, offset = _read_cbor_value(data, offset)
-            value, offset = _read_cbor_value(data, offset)
+            key, offset = _read_cbor_value(data, offset, depth + 1)
+            value, offset = _read_cbor_value(data, offset, depth + 1)
+            if not isinstance(key, (bool, bytes, int, str, type(None))):
+                raise ValueError("CBOR map key is not hashable")
             result[key] = value
         return result, offset
     if major == 7:

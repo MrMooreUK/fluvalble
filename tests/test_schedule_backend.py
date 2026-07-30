@@ -4,6 +4,9 @@ import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
+import voluptuous as vol
+
 from custom_components.fluvalble import (
     DOMAIN,
     _async_apply_auto_schedule,
@@ -12,6 +15,7 @@ from custom_components.fluvalble import (
     _async_load_schedule_data,
     _async_run_auto_schedule,
     _async_save_schedule,
+    _validate_schedule_points,
     async_set_schedule_mode,
 )
 from custom_components.fluvalble.core.device import Device
@@ -52,6 +56,34 @@ def _schedule_points():
         {"time": "19:00", "red": 3, "green": 0, "blue": 8, "white": 0},
         {"time": "20:00", "red": 0, "green": 0, "blue": 0, "white": 0},
     ]
+
+
+def test_schedule_validator_rejects_malformed_points():
+    with pytest.raises(vol.Invalid):
+        _validate_schedule_points([{"time": "not-a-time"}, {"time": "20:00"}])
+
+
+def test_schedule_validator_limits_schedule_size():
+    points = [{"time": "00:00"}, {"time": "00:01"}] * 49
+    with pytest.raises(vol.Invalid):
+        _validate_schedule_points(points)
+
+
+def test_schedule_validator_rejects_unknown_fields():
+    with pytest.raises(vol.Invalid):
+        _validate_schedule_points([{"time": "19:00", "unexpected": 1}, {"time": "20:00"}])
+
+
+def test_schedule_validator_normalizes_missing_channels():
+    validated = _validate_schedule_points([{"time": "19:00", "blue": 8}, {"time": "20:00"}])
+    assert validated[0] == {
+        "time": "19:00",
+        "red": 0,
+        "green": 0,
+        "blue": 8,
+        "white": 0,
+        "channel_5": 0,
+    }
 
 
 def test_save_and_load_schedule_data(monkeypatch):
