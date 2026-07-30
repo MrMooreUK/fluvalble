@@ -240,7 +240,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if mac in configured_normalized:
                 continue
             options[mac] = _device_display_name(info, is_fluval=True)
-        options[MANUAL_ENTRY] = "My device isn't in the list ÔÇö enter MAC address manually"
+        options[MANUAL_ENTRY] = "My device isn't in the list — enter MAC address manually"
         return options
 
     async def async_step_manual(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -282,7 +282,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
     """Handle options for Fluval Aquarium LED.
 
     Uses OptionsFlow (not OptionsFlowWithConfigEntry) so HA injects
-    ``self.config_entry`` correctly ÔÇö fixing the Configure gear 500 (#16).
+    ``self.config_entry`` correctly — fixing the Configure gear 500 (#16).
     """
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -299,7 +299,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): vol.In(
                     {
                         LAMP_PROFILE_AUTO: "Auto-detect from BLE name / protocol",
-                        LAMP_PROFILE_PLANT: "Plant / Marine 5-channel (RoseÔÇôWarm White)",
+                        LAMP_PROFILE_PLANT: "Plant / Marine 5-channel (Rose–Warm White)",
                         LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
                         LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (5-channel)",
                     }
