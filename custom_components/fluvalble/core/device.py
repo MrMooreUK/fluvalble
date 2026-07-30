@@ -12,6 +12,14 @@ from bleak import AdvertisementData, BLEDevice, BleakError, BleakScanner
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant
 
+from . import (
+    CONF_LAMP_PROFILE,
+    DEFAULT_LAMP_PROFILE,
+    LAMP_PROFILE_AQUASKY,
+    LAMP_PROFILE_AQUASKY3,
+    LAMP_PROFILE_AUTO,
+    LAMP_PROFILE_PLANT,
+)
 from .client import Client
 from .discovery import (
     CONF_MODEL,
@@ -27,13 +35,22 @@ SELECTS = ["mode", "schedule_mode"]
 SENSORS = ["rssi", "last_seen"]
 DIAGNOSTICS = ["diagnostics"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
-CHANNEL_NAMES = {
+CHANNEL_NAMES_AQUASKY = {
     "channel_1": "Red",
     "channel_2": "Green",
     "channel_3": "Blue",
     "channel_4": "White",
     "channel_5": "Violet",
 }
+CHANNEL_NAMES_PLANT = {
+    "channel_1": "Rose",
+    "channel_2": "Blue",
+    "channel_3": "Cold White",
+    "channel_4": "Pure White",
+    "channel_5": "Warm White",
+}
+# Back-compat alias used by tests / schedule helpers
+CHANNEL_NAMES = CHANNEL_NAMES_AQUASKY
 MODES = ["manual", "automatic", "professional"]
 MODE_TO_CODE = {mode: index for index, mode in enumerate(MODES)}
 SCHEDULE_MODES = ["manual", "auto"]
@@ -48,7 +65,7 @@ CHANNEL_TEST_HOLD_SECONDS = 2
 
 
 class Attribute(TypedDict, total=False):
-    """Attributes used by enitites like binary_sensor and number."""
+    """Attributes used by entities like binary_sensor and number."""
 
     options: list[str]
     default: str
@@ -84,6 +101,8 @@ class Device:
         self.model = config_data.get(CONF_MODEL) or detect_model(
             (device.name if device else None) or name, advertisement
         )
+        self.lamp_profile = config_data.get(CONF_LAMP_PROFILE, DEFAULT_LAMP_PROFILE)
+        self._channel_count_hint: int | None = None
         self.address = (config_data.get("mac") or (device.address if device else "")).upper()
         self.client: Client | None = None
         self._ping_interval = ping_interval
@@ -137,19 +156,19 @@ class Device:
         """Return true when HA has enough BLE info to attempt commands."""
         return bool(self.client or self.conn_info.get("last_seen"))
 
-    def update_ble(self, device: BLEDevice, advertisment: AdvertisementData):
+    def update_ble(self, device: BLEDevice, advertisement: AdvertisementData):
         """Update BLE metadata."""
         self.address = device.address
         self.conn_info["mac"] = device.address
         self.conn_info["last_seen"] = datetime.now(UTC)
-        self.conn_info["rssi"] = advertisment.rssi
-        self.conn_info["service_uuids"] = list(advertisment.service_uuids)
-        self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisment.service_data.items()}
+        self.conn_info["rssi"] = advertisement.rssi
+        self.conn_info["service_uuids"] = list(advertisement.service_uuids)
+        self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisement.service_data.items()}
         self.facebd = self._uses_facebd_protocol(
             device.name,
-            advertisment.service_uuids,
-            advertisment.service_data,
-            advertisment.manufacturer_data,
+            advertisement.service_uuids,
+            advertisement.service_data,
+            advertisement.manufacturer_data,
         )
 
         if self.client is None:
@@ -182,9 +201,52 @@ class Device:
 
     def numbers(self) -> list[str]:
         """List of numbers provided by the device."""
-        if "aquasky" in (self.model or "").lower() or "aquasky" in (self.name or "").lower():
+        if self._resolved_channel_count() == 4:
             return list(AQUASKY_NUMBERS)
         return list(NUMBERS)
+
+    def _resolved_channel_count(self) -> int:
+        """Return 4 or 5 channels from profile, packet hint, or name heuristics."""
+        profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
+        if profile == LAMP_PROFILE_AQUASKY:
+            return 4
+        if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_AQUASKY3):
+            return 5
+        if self._channel_count_hint in (4, 5):
+            return self._channel_count_hint
+        if self.facebd or any(
+            str(uuid).lower().startswith("0000fff0") for uuid in self.conn_info.get("service_uuids", [])
+        ):
+            return 5
+
+        model_l = (self.model or "").lower()
+        name_l = (self.name or "").lower()
+        combined = f"{model_l} {name_l}"
+
+        if any(token in combined for token in ("plant", "marine", "reef")):
+            return 5
+        # AquaSky 3.x / FACEBD-era names are 5-channel; only classic 2.0 is 4.
+        if "aquasky" in combined:
+            if any(token in combined for token in ("3.0", "3_", "aquasky3", "3.0 bluetooth")):
+                return 5
+            if any(token in combined for token in ("2.0", "2_", "aquasky2")):
+                return 4
+            # Ambiguous "AquaSky" without version -> 4 (classic default).
+            return 4
+        return 5
+
+    def _channel_labels(self) -> dict[str, str]:
+        """Return channel labels for the active lamp profile."""
+        profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
+        if profile == LAMP_PROFILE_PLANT:
+            return CHANNEL_NAMES_PLANT
+        if profile in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
+            return CHANNEL_NAMES_AQUASKY
+        model_l = (self.model or "").lower()
+        name_l = (self.name or "").lower()
+        if "plant" in model_l or "plant" in name_l or "marine" in model_l or "reef" in model_l:
+            return CHANNEL_NAMES_PLANT
+        return CHANNEL_NAMES_AQUASKY
 
     def master_brightness(self) -> int:
         """Overall brightness as the brightest supported channel."""
@@ -212,8 +274,9 @@ class Device:
 
     def entity_name(self, attr: str) -> str:
         """Return a user-facing entity suffix for this device attribute."""
-        if attr in CHANNEL_NAMES:
-            return CHANNEL_NAMES[attr]
+        labels = self._channel_labels()
+        if attr in labels:
+            return labels[attr]
         if attr == "test_led_channels":
             return "Test LED Channels"
         return attr.replace("_", " ").title()
@@ -228,7 +291,6 @@ class Device:
 
     def attribute(self, attr: str) -> Attribute:
         """Provide attributes to the entities like switches, numbers etc."""
-        _LOGGER.debug("XXX -> attr: %s", attr)
         if attr == "connection":
             return Attribute(is_on=self.connected, extra=self.conn_info)
         if attr.startswith("channel_"):
@@ -1033,6 +1095,9 @@ class Device:
             self.values["channel_4"] = (data[12] << 8) | (data[11] & 0xFF)
             if len(data) > 14:
                 self.values["channel_5"] = (data[14] << 8) | (data[13] & 0xFF)
+                self._channel_count_hint = 5
+            else:
+                self._channel_count_hint = 4
         else:
             for channel in NUMBERS:
                 self.values[channel] = 0
@@ -1065,10 +1130,14 @@ class Device:
             self.values["led_on_off"] = bool(data[protocol.WIFI_SWITCH_KEY])
             updated = True
 
-        for channel, key in zip(self.numbers(), protocol.WIFI_CHANNEL_KEYS, strict=False):
+        present = 0
+        for channel, key in zip(NUMBERS, protocol.WIFI_CHANNEL_KEYS, strict=False):
             if key in data and isinstance(data[key], int):
                 self.values[channel] = max(0, min(100, int(data[key])))
+                present += 1
                 updated = True
+        if present:
+            self._channel_count_hint = 5 if present >= 5 else 4
 
         if updated:
             for handler in self.updates_component:
