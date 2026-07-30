@@ -209,7 +209,7 @@ async def _async_test_home_assistant_selects_connectable_esphome_route(
 
 
 def test_aquasky_facebd_packet_excludes_violet_channel():
-    device = _make_device()
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
     device.values.update(
         {
             "channel_1": 10,
@@ -243,7 +243,7 @@ async def _async_test_led_channel_test_verifies_each_channel_and_restores_state(
 ):
     import custom_components.fluvalble.core.device as device_module
 
-    device = _make_device()
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
     device.values.update(
         {
             "channel_1": 8,
