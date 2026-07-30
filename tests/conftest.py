@@ -56,12 +56,13 @@ def _stub_homeassistant():
     def _identity(*args, **kwargs):
         return args[0] if args else None
 
+    vol.Invalid = type("Invalid", (Exception,), {})
     vol.Schema = _Schema
     vol.Optional = _identity
     vol.Required = _identity
-    vol.All = lambda *args, **kwargs: (lambda value: value)
-    vol.Range = lambda *args, **kwargs: (lambda value: value)
-    vol.In = lambda *args, **kwargs: (lambda value: value)
+    vol.All = lambda *args, **kwargs: lambda value: value
+    vol.Range = lambda *args, **kwargs: lambda value: value
+    vol.In = lambda *args, **kwargs: lambda value: value
 
     # ---- homeassistant.exceptions ----
     class HomeAssistantError(Exception):
@@ -261,7 +262,7 @@ def _stub_homeassistant():
     ha_ws = types.ModuleType("homeassistant.components.websocket_api")
     ha_ws.ActiveConnection = MagicMock
     ha_ws.async_register_command = MagicMock()
-    ha_ws.websocket_command = lambda schema: (lambda func: func)
+    ha_ws.websocket_command = lambda schema: lambda func: func
     ha_ws.async_response = lambda func: func
 
     # ---- homeassistant.helpers.storage ----
