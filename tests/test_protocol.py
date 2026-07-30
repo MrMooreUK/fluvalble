@@ -1,5 +1,7 @@
 """Tests for Fluval packet builders."""
 
+from datetime import datetime, timezone
+
 from custom_components.fluvalble.core import protocol
 
 
@@ -42,3 +44,49 @@ def test_decode_aquasky_facebd02_state_capture():
         protocol.WIFI_CHANNEL_KEYS[1]: 0,
         protocol.WIFI_CHANNEL_KEYS[0]: 0,
     }
+
+
+def test_wifi_clock_and_timezone_packets():
+    moment = datetime(2026, 7, 19, 12, 30, 0, tzinfo=timezone.utc)
+    clock = protocol.decode_cbor_map(protocol.wifi_clock_packet(moment))
+    tz = protocol.decode_cbor_map(protocol.wifi_timezone_packet(moment))
+
+    assert clock[protocol.WIFI_CLOCK_MS_KEY] == int(moment.timestamp() * 1000)
+    assert tz[protocol.WIFI_TZ_OFFSET_KEY] == 0
+
+
+def test_old_clock_packet_shape():
+    moment = datetime(2026, 7, 19, 12, 30, 45, tzinfo=timezone.utc)
+    local = moment.astimezone()
+    packet = protocol.old_clock_packet(moment)
+
+    assert packet[0] == 0x68
+    assert packet[1] == protocol.OLD_CLOCK
+    assert packet[2] == local.year % 100
+    assert packet[3] == local.month
+    assert packet[4] == local.day
+    assert packet[6] == local.hour
+    assert packet[7] == local.minute
+    assert packet[8] == local.second
+
+
+def test_mesh_clock_packet_shape():
+    moment = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+    local = moment.astimezone()
+    clock = protocol.mesh_clock_packet(moment)
+    assert clock[0] == protocol.MESH_OPCODE_CLOCK
+    assert list(clock[1:8]) == [
+        local.year % 100,
+        local.month,
+        local.day,
+        (local.weekday() + 1) % 7,
+        local.hour,
+        local.minute,
+        local.second,
+    ]
+
+
+def test_cbor_signed_timezone_offset():
+    packet = protocol.cbor_map({protocol.WIFI_TZ_OFFSET_KEY: -150})
+    decoded = protocol.decode_cbor_map(packet)
+    assert decoded[protocol.WIFI_TZ_OFFSET_KEY] == -150

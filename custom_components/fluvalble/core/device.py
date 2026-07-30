@@ -137,6 +137,8 @@ class Device:
         }
         self.preview_task: asyncio.Task | None = None
         self.preview_restore_values: dict[str, int] | None = None
+        self._clock_synced = False
+        self._clock_sync_lock = asyncio.Lock()
 
         if device and advertisement:
             self.update_ble(device, advertisement)
@@ -183,6 +185,9 @@ class Device:
     def set_connected(self, connected: bool):
         """Set the connection status."""
         self.connected = connected
+        if not connected:
+            # Allow clock sync again on the next successful connect (#8).
+            self._clock_synced = False
 
         for handler in self.updates_connect:
             handler()
@@ -716,6 +721,59 @@ class Device:
                 handler()
         return ok
 
+    async def _async_on_client_ready(self) -> None:
+        """Run post-connect housekeeping after the BLE link is established."""
+        ok = await self.async_sync_clock(force=False)
+        if not ok:
+            _LOGGER.warning("Fluval clock sync failed after connect for %s", self.address)
+
+    async def async_sync_clock(self, *, force: bool = False) -> bool:
+        """Sync the lamp RTC from the Home Assistant host clock (#8)."""
+        if self._clock_synced and not force:
+            return True
+
+        async with self._clock_sync_lock:
+            if self._clock_synced and not force:
+                return True
+
+            if self.client is None:
+                if not await self._async_ensure_client():
+                    return False
+            elif not await self.client.ensure_connected():
+                self._set_diagnostic_error(
+                    "clock_sync_failed",
+                    self.client.last_error or "Unable to connect for clock sync",
+                )
+                return False
+
+            if self._uses_wifi_protocol():
+                packets = [protocol.wifi_timezone_packet(), protocol.wifi_clock_packet()]
+            elif self._uses_mesh_protocol():
+                packets = [protocol.mesh_clock_packet()]
+            else:
+                packets = [protocol.old_clock_packet()]
+
+            for packet in packets:
+                if not await self._async_send_packet(packet):
+                    self._set_diagnostic_error("clock_sync_failed", "Unable to sync lamp clock")
+                    return False
+
+            self._clock_synced = True
+            self.diagnostics.update(
+                {
+                    "status": "clock_synced",
+                    "clock_synced_at": datetime.now(UTC).isoformat(),
+                    "last_error": None,
+                }
+            )
+            for handler in self.updates_connect:
+                handler()
+            return True
+
+    def _uses_mesh_protocol(self) -> bool:
+        """Return true when advertisements expose the mesh fff0 service."""
+        return any(str(uuid).lower().startswith("0000fff0") for uuid in self.conn_info.get("service_uuids", []))
+
     def _uses_wifi_protocol(self) -> bool:
         """Prefer the live GATT profile over advertisement heuristics."""
         if self.client is not None and self.client.command_write_uuid:
@@ -894,6 +952,7 @@ class Device:
             ping_interval=self._ping_interval,
             active_time=self._active_time,
             device_provider=self._connectable_ble_device,
+            ready_callback=self._async_on_client_ready,
         )
 
     async def _async_ensure_client(self) -> bool:
