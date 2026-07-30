@@ -38,7 +38,7 @@ def _make_device():
 def test_create_entities_for_platforms():
     device = _make_device()
 
-    assert len(number.create_entities(device)) == 4
+    assert len(number.create_entities(device)) == 5
     assert len(switch.create_entities(device)) == 1
     assert len(select.create_entities(device)) == 2
     assert len(sensor.create_entities(device)) == 3
