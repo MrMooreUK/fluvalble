@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 import re
 from time import monotonic
-import inspect
-from datetime import timedelta
+from typing import Any, TypeAlias
 
 import voluptuous as vol
 
@@ -29,7 +30,36 @@ from .core import (
 )
 from .core.device import Device
 
+try:
+    from homeassistant.config_entries import ConfigEntryState
+except ImportError:  # pragma: no cover - stubbed test environments
+    ConfigEntryState = None  # type: ignore[misc, assignment]
+
 _LOGGER = logging.getLogger(__name__)
+
+
+@dataclass
+class FluvalRuntimeData:
+    """Runtime state for one Fluval config entry (stored on entry.runtime_data)."""
+
+    device: Device | None = None
+    pending_add_entities: dict[Platform, Any] = field(default_factory=dict)
+    auto_schedule_lock: asyncio.Lock | None = field(default=None, repr=False)
+
+
+try:
+    FluvalConfigEntry: TypeAlias = ConfigEntry[FluvalRuntimeData]
+except TypeError:  # pragma: no cover - stubbed test ConfigEntry isn't generic
+    FluvalConfigEntry: TypeAlias = ConfigEntry  # type: ignore[misc,assignment]
+
+
+def _runtime_device(entry_data: Any) -> Device | None:
+    """Return the device from runtime_data or legacy hass.data dict entries."""
+    if isinstance(entry_data, FluvalRuntimeData):
+        return entry_data.device
+    if isinstance(entry_data, dict):
+        return entry_data.get("device")
+    return None
 
 DISCOVERY_LOG_INTERVAL = 5
 SERVICE_SET_CHANNELS = "set_channels"
@@ -124,7 +154,7 @@ PLATFORMS: list[Platform] = [
 ]
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
     """Set up Fluval Aquarium LED from a config entry."""
     hass.data.setdefault(DOMAIN, {})
     await _register_static_paths(hass)
@@ -140,15 +170,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.error("Config entry %s has no MAC address", entry.entry_id)
         return False
 
-    # Shared dict for this entry — platforms read from here.
-    # "device" is set once the BLE device is seen; "pending_add_entities" lets
-    # platforms that loaded before the device register their add_entities
-    # callbacks so we can populate them once the device arrives.
-    entry_data: dict = {
-        "device": None,
-        "pending_add_entities": {},
-    }
-    hass.data[DOMAIN][entry.entry_id] = entry_data
+    runtime = FluvalRuntimeData()
+    entry.runtime_data = runtime
+    hass.data[DOMAIN][entry.entry_id] = runtime
     last_discovery_log = 0.0
 
     def log_discovery_update(message: str, service_info, change) -> None:
@@ -178,7 +202,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             active_time=active_time,
         )
         device.entry_id = entry.entry_id
-        entry_data["device"] = device
+        runtime.device = device
 
         # Retroactively add entities for platforms that set up before the
         # device was available (they stashed their add_entities callback).
@@ -200,11 +224,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             Platform.SENSOR: diagnostics_entities,
         }
 
-        for platform, add_fn in entry_data["pending_add_entities"].items():
+        for platform, add_fn in runtime.pending_add_entities.items():
             factory = factories.get(platform)
             if factory:
                 add_fn(factory(device))
-        entry_data["pending_add_entities"].clear()
+        runtime.pending_add_entities.clear()
 
         _LOGGER.info("Device %s ready", mac)
         # A light can be rediscovered after an adapter recovery.  Re-apply an
@@ -242,7 +266,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         change: bluetooth.BluetoothChange,
     ) -> None:
         log_discovery_update("Fluval BLE update: %s %s", service_info, change)
-        if device := entry_data["device"]:
+        if device := runtime.device:
             device.update_ble(service_info.device, service_info.advertisement)
             return
 
@@ -341,7 +365,7 @@ def _register_services(hass: HomeAssistant) -> None:
                 WEBSOCKET_REGISTERED,
             }:
                 continue
-            device = entry_data.get("device") if isinstance(entry_data, dict) else None
+            device = _runtime_device(entry_data)
             if device is None:
                 continue
             if entry_id and candidate_entry_id != entry_id:
@@ -361,9 +385,9 @@ def _register_services(hass: HomeAssistant) -> None:
                 WEBSOCKET_REGISTERED,
             }:
                 continue
-            if not isinstance(entry_data, dict):
+            device = _runtime_device(entry_data)
+            if device is None:
                 continue
-            device = entry_data.get("device")
             if entry_id and candidate_entry_id == entry_id:
                 return candidate_entry_id
             if mac and device is not None and device.mac.upper() == mac:
@@ -554,8 +578,8 @@ async def _async_save_schedule(
     }
     await store.async_save(data)
 
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-    device = entry_data.get("device") if isinstance(entry_data, dict) else None
+    runtime = hass.data.get(DOMAIN, {}).get(entry_id)
+    device = _runtime_device(runtime)
     if device is not None:
         device.schedule_mode = schedule_mode
         for handler in device.updates_component:
@@ -575,11 +599,11 @@ async def async_set_schedule_mode(hass: HomeAssistant, entry_id: str, mode: str)
 
 async def _async_apply_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool:
     """Apply the saved schedule for one entry when HA schedule mode is auto."""
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-    if not isinstance(entry_data, dict):
+    runtime = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(runtime, FluvalRuntimeData):
         return False
 
-    device = entry_data.get("device")
+    device = runtime.device
     if device is None:
         return False
 
@@ -671,17 +695,18 @@ async def _async_apply_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool
 
 async def _async_run_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool:
     """Run the auto schedule without allowing a timer exception to be lost."""
-    entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-    if not isinstance(entry_data, dict):
+    runtime = hass.data.get(DOMAIN, {}).get(entry_id)
+    if not isinstance(runtime, FluvalRuntimeData):
         return False
-    lock = entry_data.setdefault("auto_schedule_lock", asyncio.Lock())
+    if runtime.auto_schedule_lock is None:
+        runtime.auto_schedule_lock = asyncio.Lock()
     try:
-        async with lock:
+        async with runtime.auto_schedule_lock:
             return await _async_apply_auto_schedule(hass, entry_id)
     except Exception:  # noqa: BLE001
         _LOGGER.exception("Unable to apply auto schedule for entry %s", entry_id)
-        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        device = entry_data.get("device") if isinstance(entry_data, dict) else None
+        runtime = hass.data.get(DOMAIN, {}).get(entry_id)
+        device = _runtime_device(runtime)
         if device is not None:
             device.diagnostics.update(
                 {
@@ -698,8 +723,8 @@ async def _async_run_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool:
 async def _async_apply_startup_schedule(hass: HomeAssistant, entry_id: str) -> None:
     """Apply Auto mode once the Bluetooth device is available after startup."""
     for attempt in range(STARTUP_SCHEDULE_RETRY_COUNT):
-        entry_data = hass.data.get(DOMAIN, {}).get(entry_id)
-        device = entry_data.get("device") if isinstance(entry_data, dict) else None
+        runtime = hass.data.get(DOMAIN, {}).get(entry_id)
+        device = _runtime_device(runtime)
         if device is not None:
             device.diagnostics["auto_schedule_startup_attempt"] = attempt + 1
             if await _async_run_auto_schedule(hass, entry_id):
@@ -714,11 +739,23 @@ async def _async_apply_startup_schedule(hass: HomeAssistant, entry_id: str) -> N
     )
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        entry_data = hass.data[DOMAIN].pop(entry.entry_id, None)
-        if entry_data and entry_data.get("device"):
-            await entry_data["device"].client.stop()
+async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
+    """Unload a config entry and tear down BLE / platform resources."""
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    if not unload_ok:
+        return False
 
-    return unload_ok
+    runtime = getattr(entry, "runtime_data", None)
+    if not isinstance(runtime, FluvalRuntimeData):
+        runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+
+    if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
+        client = runtime.device.client
+        if client is not None:
+            try:
+                await client.stop()
+            except Exception:  # noqa: BLE001
+                _LOGGER.debug("Error stopping Fluval BLE client during unload", exc_info=True)
+
+    hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+    return True

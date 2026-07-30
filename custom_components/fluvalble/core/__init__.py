@@ -32,3 +32,4 @@ CMD_MODE = 0x02  # followed by mode byte: 0=manual, 1=automatic, 2=professional
 CMD_SWITCH = 0x03  # followed by 0x01 (on) / 0x00 (off)
 CMD_BRIGHTNESS = 0x04  # followed by per-channel 16-bit big-endian values
 CMD_STATUS = 0x05  # request current state (no payload)
+CMD_CLOCK = 0x0E  # sync RTC: Y M D W h m s

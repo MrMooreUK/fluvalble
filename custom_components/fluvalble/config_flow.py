@@ -33,9 +33,6 @@ from .core.discovery import discovery_metadata, is_likely_fluval
 
 _LOGGER = logging.getLogger(__name__)
 
-# Fluval LED GATT service UUID (advertised by the light)
-FLUVAL_SERVICE_UUID = "00001002-0000-1000-8000-00805F9B34FB"
-
 # Bluetooth address filter expects uppercase with colons (e.g. AA:BB:CC:DD:EE:FF)
 MAC_REGEX = re.compile(
     r"^([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2}):([0-9A-Fa-f]{2})$"
@@ -67,14 +64,13 @@ def _format_bluetooth_mac(mac: str) -> str:
 
 
 def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
-    """True if this device advertises the Fluval service UUID or has Fluval in the name."""
+    """True only for Fluval LED advertisements (strict — avoids discovery spam)."""
     try:
         adv = info.advertisement if info else None
         name = (adv.local_name if adv else None) or getattr(info, "name", None) or ""
-        uuids = list(adv.service_uuids) if (adv and adv.service_uuids) else []
     except Exception:  # noqa: BLE001
         return False
-    return FLUVAL_SERVICE_UUID.lower() in [str(u).lower() for u in uuids] or is_likely_fluval(name, adv)
+    return is_likely_fluval(name, adv)
 
 
 def _device_display_name(
@@ -153,7 +149,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await self.async_set_unique_id(mac)
         self._abort_if_unique_id_configured()
 
-        if not is_likely_fluval(discovery_info.name, discovery_info.advertisement):
+        # Secondary filter after manifest matchers — abort anything that isn't
+        # a real Fluval LED (manifest wildcards can still be broad).
+        adv = discovery_info.advertisement
+        local_name = (adv.local_name if adv else None) or discovery_info.name
+        if not is_likely_fluval(local_name, adv):
             return self.async_abort(reason="not_fluval")
 
         self._bluetooth_discovery_info = discovery_info

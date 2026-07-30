@@ -28,16 +28,41 @@ def test_plant_name_is_likely_fluval():
     assert is_likely_fluval("Plant 3.0_AABBCC")
 
 
+def test_plant_nano_name_is_likely_fluval():
+    assert is_likely_fluval("Plant Nano_123")
+
+
+def test_bare_plant_name_is_not_fluval():
+    assert not is_likely_fluval("Plant Sensor")
+    assert not is_likely_fluval("plant")
+    assert not is_likely_fluval("Marine Radio")
+    assert not is_likely_fluval("reef")
+
+
 def test_facebd_service_uuid_is_likely_fluval():
     adv = _advertisement(service_uuids=["facebd00-7261-6262-6974-696f74626c65"])
 
     assert is_likely_fluval(None, adv)
 
 
-def test_mesh_service_uuid_is_likely_fluval():
-    adv = _advertisement(service_uuids=["0000fff0-0000-1000-8000-00805f9b34fb"])
+def test_classic_fluval_service_uuid_is_likely_fluval():
+    adv = _advertisement(service_uuids=["00001000-0000-1000-8000-00805f9b34fb"])
 
     assert is_likely_fluval(None, adv)
+
+
+def test_mesh_service_uuid_alone_is_not_fluval():
+    """fff0 is common on many BLE mesh devices — must not prompt discovery alone."""
+    adv = _advertisement(service_uuids=["0000fff0-0000-1000-8000-00805f9b34fb"])
+
+    assert not is_likely_fluval(None, adv)
+    assert not is_likely_fluval("Generic Mesh Light", adv)
+
+
+def test_mesh_with_fluval_name_is_likely_fluval():
+    adv = _advertisement(service_uuids=["0000fff0-0000-1000-8000-00805f9b34fb"])
+
+    assert is_likely_fluval("Fluval Mesh_ABCD", adv)
 
 
 def test_detect_model_plant_not_aquasky():

@@ -42,7 +42,7 @@ def test_create_entities_for_platforms():
     assert len(switch.create_entities(device)) == 1
     assert len(select.create_entities(device)) == 2
     assert len(sensor.create_entities(device)) == 3
-    assert len(button.create_entities(device)) == 2
+    assert len(button.create_entities(device)) == 3
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
 
