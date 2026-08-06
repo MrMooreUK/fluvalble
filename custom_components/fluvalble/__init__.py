@@ -62,6 +62,7 @@ def _runtime_device(entry_data: Any) -> Device | None:
         return entry_data.get("device")
     return None
 
+
 DISCOVERY_LOG_INTERVAL = 5
 SERVICE_SET_CHANNELS = "set_channels"
 SERVICE_PREVIEW_SCHEDULE = "preview_schedule"

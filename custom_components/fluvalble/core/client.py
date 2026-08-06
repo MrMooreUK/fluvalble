@@ -487,8 +487,7 @@ class Client:
                             await self._write_packet(self.command_write_uuid, data)
                         except (TimeoutError, BleakError, EOFError) as err:
                             self.last_error = (
-                                f"write {self.command_write_uuid} attempt {attempt} failed: "
-                                f"{type(err).__name__}: {err}"
+                                f"write {self.command_write_uuid} attempt {attempt} failed: {type(err).__name__}: {err}"
                             )
                             _LOGGER.debug(
                                 "Fluval BLE write target failed: %s attempt %s",
