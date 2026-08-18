@@ -59,6 +59,9 @@
       },
       "test_led_channels": {
         "name": "Test LED channels"
+      },
+      "sync_clock": {
+        "name": "Sync clock"
       }
     },
     "number": {

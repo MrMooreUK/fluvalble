@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Sync clock** button and automatic RTC sync on BLE connect (fixes #8).
 - AquaSky 3.0/FACEBD discovery, diagnostics, and write support.
 - Lovelace schedule, spectrum bar, and wavelength preview cards.
 - HA-managed schedule storage, auto mode, and physical preview services.

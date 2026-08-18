@@ -13,7 +13,7 @@
   "documentation": "https://github.com/MrMooreUK/fluvalble",
   "iot_class": "local_push",
   "requirements": [],
-  "version": "0.0.7",
+  "version": "0.0.8",
   "loggers": ["custom_components.fluvalble"],
   "issue_tracker": "https://github.com/MrMooreUK/fluvalble/issues",
   "bluetooth": [
@@ -27,16 +27,22 @@
       "local_name": "AquaSky*"
     },
     {
-      "local_name": "AquaSky3.0*"
+      "local_name": "Plant 3*"
     },
     {
-      "local_name": "AquaSky3.0_*"
+      "local_name": "Plant Nano*"
     },
     {
-      "local_name": "Plant*"
+      "local_name": "Plant_*"
     },
     {
-      "local_name": "Marine*"
+      "local_name": "Marine 3*"
+    },
+    {
+      "local_name": "Marine_*"
+    },
+    {
+      "local_name": "Reef_*"
     },
     {
       "service_uuid": "00001000-0000-1000-8000-00805f9b34fb"

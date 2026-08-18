@@ -1,7 +1,9 @@
 """Client class connecting the Fluval BLE Entity to a bluetooth connection."""
 
+from __future__ import annotations
+
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 import contextlib
 import logging
 import time
@@ -72,17 +74,19 @@ class Client:
     def __init__(
         self,
         device: BLEDevice,
-        status_callback: Callable = None,
-        update_callback: Callable = None,
+        status_callback: Callable | None = None,
+        update_callback: Callable | None = None,
         ping_interval: int = 10,
         active_time: int = ACTIVE_TIME,
         device_provider: DeviceProvider | None = None,
+        ready_callback: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         """Initialize the client."""
         self.device = device
         self.status_callback = status_callback
         self.update_callback = update_callback
         self.device_provider = device_provider
+        self.ready_callback = ready_callback
         self._ping_interval = ping_interval
         self._active_time = active_time
 
@@ -325,6 +329,12 @@ class Client:
                 await self.request_state()
             elif self.init_write_uuid:
                 await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
+
+            if self.ready_callback:
+                try:
+                    await self.ready_callback()
+                except Exception as err:  # pylint: disable=broad-except
+                    _LOGGER.warning("Fluval post-connect callback failed", exc_info=err)
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval initial connection failed", exc_info=err)
             if self.status_callback:
@@ -477,8 +487,7 @@ class Client:
                             await self._write_packet(self.command_write_uuid, data)
                         except (TimeoutError, BleakError, EOFError) as err:
                             self.last_error = (
-                                f"write {self.command_write_uuid} attempt {attempt} failed: "
-                                f"{type(err).__name__}: {err}"
+                                f"write {self.command_write_uuid} attempt {attempt} failed: {type(err).__name__}: {err}"
                             )
                             _LOGGER.debug(
                                 "Fluval BLE write target failed: %s attempt %s",

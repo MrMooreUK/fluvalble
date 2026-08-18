@@ -82,6 +82,7 @@ def _stub_homeassistant():
         LIGHT = "light"
 
     class EntityCategory(str, enum.Enum):
+        CONFIG = "config"
         DIAGNOSTIC = "diagnostic"
 
     ha_const = types.ModuleType("homeassistant.const")

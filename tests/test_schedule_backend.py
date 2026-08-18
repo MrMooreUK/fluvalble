@@ -9,6 +9,7 @@ import voluptuous as vol
 
 from custom_components.fluvalble import (
     DOMAIN,
+    FluvalRuntimeData,
     _async_apply_auto_schedule,
     _async_apply_startup_schedule,
     _async_load_schedule,
@@ -36,7 +37,8 @@ class _MemoryStore:
 
 class _FakeHass:
     def __init__(self, device=None):
-        self.data = {DOMAIN: {"entry_1": {"device": device}}}
+        runtime = FluvalRuntimeData(device=device)
+        self.data = {DOMAIN: {"entry_1": runtime}}
 
 
 def _make_device():
@@ -376,7 +378,7 @@ async def _async_test_startup_schedule_waits_for_the_bluetooth_device(monkeypatc
     apply = AsyncMock(return_value=True)
 
     async def make_device_available(_seconds):
-        hass.data[DOMAIN]["entry_1"]["device"] = device
+        hass.data[DOMAIN]["entry_1"].device = device
 
     monkeypatch.setattr(integration, "_async_run_auto_schedule", apply)
     monkeypatch.setattr(integration.asyncio, "sleep", make_device_available)

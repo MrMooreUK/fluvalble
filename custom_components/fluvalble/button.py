@@ -10,7 +10,6 @@ from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .core import DOMAIN
 from .core.device import Device
 from .core.entity import FluvalEntity
 
@@ -24,17 +23,18 @@ def create_entities(device: Device) -> list:
     return [
         FluvalDiagnosticsButton(device, "refresh_diagnostics"),
         FluvalChannelTestButton(device, "test_led_channels"),
+        FluvalSyncClockButton(device, "sync_clock"),
     ]
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
-    entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    device = entry_data["device"]
+    runtime = config_entry.runtime_data
+    device = runtime.device
 
     if device:
         add_entities(create_entities(device))
     else:
-        entry_data["pending_add_entities"][Platform.BUTTON] = add_entities
+        runtime.pending_add_entities[Platform.BUTTON] = add_entities
 
 
 class FluvalDiagnosticsButton(FluvalEntity, ButtonEntity):
@@ -64,3 +64,17 @@ class FluvalChannelTestButton(FluvalEntity, ButtonEntity):
                 "Fluval LED channel test did not verify every channel: %s",
                 self.device.diagnostics,
             )
+
+
+class FluvalSyncClockButton(FluvalEntity, ButtonEntity):
+    """Button to sync the lamp RTC from Home Assistant time."""
+
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_icon = "mdi:clock-check-outline"
+
+    async def async_press(self) -> None:
+        """Force a clock sync on the connected lamp."""
+        if not await self.device.async_sync_clock(force=True):
+            _LOGGER.warning("Fluval clock sync failed for %s", self.device.mac)
+        else:
+            _LOGGER.info("Fluval clock synced for %s", self.device.mac)

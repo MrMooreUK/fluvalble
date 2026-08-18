@@ -65,6 +65,13 @@ def test_plant_name_exposes_five_channels():
     assert device.entity_name("channel_3") == "Cold White"
 
 
+def test_clock_sync_flag_resets_on_disconnect():
+    device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
+    device._clock_synced = True
+    device.set_connected(False)
+    assert device._clock_synced is False
+
+
 def test_status_packet_sets_channel_count_hint():
     device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
     packet = bytearray(

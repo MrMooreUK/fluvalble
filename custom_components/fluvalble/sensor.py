@@ -6,7 +6,6 @@ from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .core import DOMAIN
 from .core.device import Device
 from .core.entity import FluvalEntity
 
@@ -19,13 +18,13 @@ def create_entities(device: Device) -> list:
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
-    entry_data = hass.data[DOMAIN][config_entry.entry_id]
-    device = entry_data["device"]
+    runtime = config_entry.runtime_data
+    device = runtime.device
 
     if device:
         add_entities(create_entities(device))
     else:
-        entry_data["pending_add_entities"][Platform.SENSOR] = add_entities
+        runtime.pending_add_entities[Platform.SENSOR] = add_entities
 
 
 class FluvalSensor(FluvalEntity, SensorEntity):
