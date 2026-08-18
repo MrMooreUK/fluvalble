@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.fluvalble.config_flow import (
     normalize_mac,
+    unique_id_from_mac,
     MAC_REGEX,
 )
 
@@ -35,6 +36,14 @@ class TestNormalizeMac:
 
     def test_mixed_case_hyphens(self):
         assert normalize_mac("aa-BB-cc-DD-ee-FF") == "AA:BB:CC:DD:EE:FF"
+
+
+class TestUniqueIdFromMac:
+    def test_lowercase_stable(self):
+        assert unique_id_from_mac("B8:80:4F:3D:67:C0") == "b8:80:4f:3d:67:c0"
+
+    def test_matches_discovery_style(self):
+        assert unique_id_from_mac("b8:80:4f:3d:67:c0") == unique_id_from_mac("B8:80:4F:3D:67:C0")
 
 
 class TestMacRegex:
