@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from custom_components.fluvalble.core import protocol
@@ -95,6 +95,31 @@ def test_raw_facebd_notify_callback_forwards_cbor_payload():
     client.notify_callback(MagicMock(), bytearray([0xA1, 0x18, 0x68, 0xF5]))
 
     update_callback.assert_called_once_with(bytes([0xA1, 0x18, 0x68, 0xF5]))
+
+
+def test_write_packet_prefers_write_without_response():
+    asyncio.run(_async_test_write_packet_prefers_write_without_response())
+
+
+async def _async_test_write_packet_prefers_write_without_response():
+    client = _make_client()
+    client.raw_facebd = False
+    mock_client = MagicMock()
+    mock_client.write_gatt_char = AsyncMock()
+    client.client = mock_client
+
+    characteristic = MagicMock()
+    characteristic.properties = ["write", "write-without-response"]
+    client._get_characteristic = MagicMock(return_value=characteristic)
+
+    with patch(
+        "custom_components.fluvalble.core.client.protocol.encrypted_old_packet",
+        return_value=bytearray(b"\x54\x01"),
+    ):
+        await client._write_packet("00001001-0000-1000-8000-00805F9B34FB", bytes([0x68, 0x03, 0x01, 0x6A]))
+
+    kwargs = mock_client.write_gatt_char.await_args.kwargs
+    assert kwargs["response"] is False
 
 
 def test_facebd_profile_uses_command_endpoint_not_provisioning_or_echo():
