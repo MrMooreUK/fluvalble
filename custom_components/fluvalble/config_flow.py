@@ -63,6 +63,15 @@ def _format_bluetooth_mac(mac: str) -> str:
         return normalize_mac(mac)
 
 
+def unique_id_from_mac(mac: str) -> str:
+    """Stable config-entry unique_id for a MAC (always lowercase via format_mac).
+
+    Discovery uses format_mac (lowercase). Manual setup used to store uppercase
+    unique_ids, so HA treated the same lamp as a new discovery prompt.
+    """
+    return _format_bluetooth_mac(mac).lower()
+
+
 def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
     """True only for Fluval LED advertisements (strict — avoids discovery spam)."""
     try:
@@ -143,11 +152,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # Bluetooth auto-discovery (triggered by manifest.json bluetooth key)
     # ------------------------------------------------------------------
 
+    def _mac_already_configured(self, mac: str) -> bool:
+        """True if any entry already owns this MAC (case-insensitive)."""
+        target = unique_id_from_mac(mac)
+        for entry in self._async_current_entries():
+            for candidate in (entry.unique_id, entry.data.get(CONF_MAC)):
+                if candidate and unique_id_from_mac(str(candidate)) == target:
+                    return True
+        return False
+
     async def async_step_bluetooth(self, discovery_info: bluetooth.BluetoothServiceInfoBleak) -> ConfigFlowResult:
         """Handle Bluetooth auto-discovery when a Fluval light is seen."""
-        mac = _format_bluetooth_mac(discovery_info.address)
+        mac = unique_id_from_mac(discovery_info.address)
         await self.async_set_unique_id(mac)
         self._abort_if_unique_id_configured()
+        # Legacy entries stored uppercase unique_ids; still treat as configured.
+        if self._mac_already_configured(mac):
+            return self.async_abort(reason="already_configured")
 
         # Secondary filter after manifest matchers — abort anything that isn't
         # a real Fluval LED (manifest wildcards can still be broad).
@@ -206,8 +227,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_manual()
             mac = normalize_mac(selected)
             if MAC_REGEX.match(mac):
-                await self.async_set_unique_id(mac)
+                await self.async_set_unique_id(unique_id_from_mac(mac))
                 self._abort_if_unique_id_configured()
+                if self._mac_already_configured(mac):
+                    return self.async_abort(reason="already_configured")
                 try:
                     info = await validate_input(self.hass, {CONF_MAC: mac})
                 except InvalidFormat:
@@ -251,8 +274,10 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if not MAC_REGEX.match(mac):
                 errors["base"] = "invalid_format"
             else:
-                await self.async_set_unique_id(mac)
+                await self.async_set_unique_id(unique_id_from_mac(mac))
                 self._abort_if_unique_id_configured()
+                if self._mac_already_configured(mac):
+                    return self.async_abort(reason="already_configured")
                 try:
                     info = await validate_input(self.hass, {**user_input, CONF_MAC: mac})
                 except InvalidFormat:
