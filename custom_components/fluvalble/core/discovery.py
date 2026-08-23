@@ -7,20 +7,26 @@ from typing import Any
 
 from bleak import AdvertisementData
 
-# Reserved for future manufacturer-id matching (currently unused / empty so we
-# never treat random BLE vendors as Fluval lights).
-FLUVAL_MANUFACTURER_IDS: set[int] = set()
+# Fluval/Hagen manufacturer/company ID seen in Fluval LED advertisements.
+FLUVAL_MANUFACTURER_IDS = frozenset({12592})
 
-# Exact Fluval GATT / FACEBD service UUIDs. Do NOT match generic prefixes like
-# 0000fff0 (common on many BLE mesh devices) — that floods discovery prompts.
-FLUVAL_SERVICE_UUIDS = frozenset(
+CLASSIC_FLUVAL_SERVICE_UUIDS = frozenset(
     {
         "00001000-0000-1000-8000-00805f9b34fb",
         "00001002-0000-1000-8000-00805f9b34fb",
+    }
+)
+
+FACEBD_FLUVAL_SERVICE_UUIDS = frozenset(
+    {
         "facebd00-7261-6262-6974-696f74626c65",
         "facebd00-0000-1000-8000-00805f9b34fb",
     }
 )
+
+# Exact Fluval GATT / FACEBD service UUIDs. Do NOT match generic prefixes like
+# 0000fff0 (common on many BLE mesh devices) — that floods discovery prompts.
+FLUVAL_SERVICE_UUIDS = CLASSIC_FLUVAL_SERVICE_UUIDS | FACEBD_FLUVAL_SERVICE_UUIDS
 
 # Name tokens that are Fluval-branded on their own.
 _FLUVAL_BRAND_NAMES = ("fluval", "aquasky")
@@ -68,15 +74,27 @@ def has_mesh_advertisement(advertisement: AdvertisementData | None) -> bool:
     return any(uuid.startswith("0000fff0") for uuid in _advertised_protocol_keys(advertisement))
 
 
+def has_fluval_manufacturer_data(advertisement: AdvertisementData | None) -> bool:
+    """Return whether the advertisement exposes Fluval manufacturer data."""
+    if advertisement is None:
+        return False
+    return bool(FLUVAL_MANUFACTURER_IDS.intersection(advertisement.manufacturer_data))
+
+
 def has_fluval_service_uuid(advertisement: AdvertisementData | None) -> bool:
     """Return whether a known Fluval service UUID is advertised."""
     if advertisement is None:
         return False
     keys = _advertised_protocol_keys(advertisement)
-    if any(key in FLUVAL_SERVICE_UUIDS for key in keys):
+    # FACEBD UUID variants all start with facebd and are specific enough to
+    # identify current Fluval advertisements on their own.
+    if any(key in FACEBD_FLUVAL_SERVICE_UUIDS or key.startswith("facebd") for key in keys):
         return True
-    # FACEBD UUID variants all start with facebd — unique enough for Fluval.
-    return any(key.startswith("facebd") for key in keys)
+    # Classic UUIDs are not unique to Fluval; require the Fluval manufacturer
+    # payload as corroborating evidence before prompting discovery.
+    if any(key in CLASSIC_FLUVAL_SERVICE_UUIDS for key in keys):
+        return has_fluval_manufacturer_data(advertisement)
+    return False
 
 
 def name_looks_fluval(name: str | None) -> bool:
