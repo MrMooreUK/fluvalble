@@ -36,6 +36,8 @@ class _FakeGattClient:
 
     async def write_gatt_char(self, uuid, data, response):
         self.writes.append((uuid, bytes(data), response))
+        if on_write := getattr(self, "on_write", None):
+            on_write(uuid, bytes(data), response)
 
     async def disconnect(self):
         self.is_connected = False
@@ -76,6 +78,14 @@ def _facebd_characteristics():
     ]
 
 
+def _plant_pro_characteristics():
+    return [
+        _FakeCharacteristic(client_module.SPP_COMMAND_WRITE_UUIDS[0], ["write", "write-without-response"]),
+        _FakeCharacteristic("0000FFF1-0000-1000-8000-00805F9B34FB", ["notify"]),
+        _FakeCharacteristic("00001001-0000-1000-8000-00805F9B34FB", ["write"]),
+    ]
+
+
 def test_old_protocol_notify_callback_flushes_short_final_notifications():
     client = _make_client()
     update_callback = MagicMock()
@@ -95,6 +105,19 @@ def test_raw_facebd_notify_callback_forwards_cbor_payload():
     client.notify_callback(MagicMock(), bytearray([0xA1, 0x18, 0x68, 0xF5]))
 
     update_callback.assert_called_once_with(bytes([0xA1, 0x18, 0x68, 0xF5]))
+
+
+def test_plant_pro_notify_callback_forwards_spp_status_frame():
+    client = _make_client()
+    client.raw_facebd = True
+    client.plant_pro_spp = True
+    update_callback = MagicMock()
+    client.update_callback = update_callback
+
+    client.notify_callback(MagicMock(), bytearray.fromhex("d2 a1 02 f5"))
+
+    update_callback.assert_called_once_with(bytes.fromhex("d2 a1 02 f5"))
+    assert client.last_confirmed_state == {protocol.SPP_SWITCH_KEY: True}
 
 
 def test_write_packet_prefers_write_without_response():
@@ -136,6 +159,27 @@ async def _async_test_facebd_profile_uses_command_endpoint():
     assert client.wifi_facebd is True
     assert client.command_write_uuids == [client_module.FACEBD_COMMAND_WRITE_UUIDS[0]]
     assert client.notify_uuid.lower().startswith("facebd02")
+
+
+def test_plant_pro_profile_uses_spp_endpoint_before_legacy():
+    asyncio.run(_async_test_plant_pro_profile_uses_spp_endpoint_before_legacy())
+
+
+async def _async_test_plant_pro_profile_uses_spp_endpoint_before_legacy():
+    client = _make_client()
+    client.client = _FakeGattClient(_plant_pro_characteristics())
+
+    await client._resolve_characteristics()
+
+    assert client.profile == "plant_pro_spp"
+    assert client.plant_pro_spp is True
+    assert client.raw_facebd is True
+    assert client.wifi_facebd is False
+    assert client.command_write_uuids == [
+        client_module.SPP_COMMAND_WRITE_UUIDS[0],
+        "00001001-0000-1000-8000-00805F9B34FB",
+    ]
+    assert client.command_write_uuid.lower().startswith("0000fff2")
 
 
 def test_send_now_writes_only_facebd01_and_verifies_readback(monkeypatch):
@@ -191,6 +235,47 @@ async def _async_test_unverified_facebd_command(monkeypatch):
             "confirmed": False,
         }
     }
+
+
+def test_send_now_writes_raw_plant_pro_spp_and_verifies_readback(monkeypatch):
+    asyncio.run(_async_test_send_now_writes_raw_plant_pro_spp(monkeypatch))
+
+
+async def _async_test_send_now_writes_raw_plant_pro_spp(monkeypatch):
+    monkeypatch.setattr(client_module, "POST_WRITE_STATE_DELAY", 0)
+    state = bytes.fromhex("d2 a1 02 f5")
+    gatt = _FakeGattClient(_plant_pro_characteristics(), state=state)
+    client = _make_client()
+    client.client = gatt
+    client.update_callback = lambda data: protocol.decode_cbor_update(data) is not None
+    client.ping = MagicMock()
+    await client._resolve_characteristics()
+    gatt.on_write = lambda _uuid, _data, _response: client.notify_callback(MagicMock(), bytearray(state))
+
+    assert await client.send_now(
+        protocol.spp_switch_packet(True),
+        expected_state={protocol.SPP_SWITCH_KEY: True},
+    )
+
+    assert gatt.writes[0][0].lower().startswith("0000fff2")
+    assert gatt.writes[0][1] == bytes.fromhex("d1 a1 02 f5")
+    assert client.last_write_verified is True
+
+
+def test_plant_pro_request_state_writes_d0ff():
+    asyncio.run(_async_test_plant_pro_request_state_writes_d0ff())
+
+
+async def _async_test_plant_pro_request_state_writes_d0ff():
+    gatt = _FakeGattClient(_plant_pro_characteristics(), state=bytes.fromhex("d2 a1 02 f5"))
+    client = _make_client()
+    client.client = gatt
+    client.update_callback = lambda data: protocol.decode_cbor_update(data) is not None
+    await client._resolve_characteristics()
+
+    assert await client.request_state()
+
+    assert gatt.writes[0][1] == protocol.SPP_READ_PARAMS_PACKET
 
 
 def test_device_provider_refreshes_adapter_route():

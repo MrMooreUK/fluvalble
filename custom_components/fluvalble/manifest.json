@@ -30,7 +30,16 @@
       "local_name": "Plant 3*"
     },
     {
+      "local_name": "Plant 4*"
+    },
+    {
       "local_name": "Plant Nano*"
+    },
+    {
+      "local_name": "Plant Pro*"
+    },
+    {
+      "local_name": "PlantPro*"
     },
     {
       "local_name": "Plant_*"
@@ -43,6 +52,12 @@
     },
     {
       "local_name": "Reef_*"
+    },
+    {
+      "local_name": "Reef 4*"
+    },
+    {
+      "local_name": "Reef Nano 4*"
     },
     {
       "service_uuid": "00001000-0000-1000-8000-00805f9b34fb"

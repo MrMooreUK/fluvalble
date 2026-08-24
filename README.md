@@ -27,7 +27,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Power** | Turn the LED fixture on or off via a switch entity. |
-| **Channels** | Up to five brightness sliders (0–100) for manual control per channel. AquaSky 2.0/3.0 lamps expose their four physical channels; five-channel lamps also expose Violet. |
+| **Channels** | Up to five brightness sliders (0–100) for manual control per channel. AquaSky 2.0/3.0 lamps expose their four physical channels; five-channel lamps use their model-specific channel labels. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Adjusting a brightness slider while in Automatic or Professional mode automatically switches to Manual first. |
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
@@ -43,7 +43,9 @@ Entities are created per device: one switch, one connection sensor, one mode sel
 Designed for Fluval aquarium LED fixtures that use BLE (Bluetooth Low Energy), including series such as:
 
 - **Plant 3.0** (5 channels)
+- **Plant Pro / Plant 4.0** (5 channels)
 - **Reef 3.0** (5 channels)
+- **Reef 4.0** (5 channels)
 - **Aquasky 2.0 / 3.0** (4 channels)
 - **Marine 3.0** (5 channels)
 - Other 1st‑gen BLE Fluval LED lights
@@ -128,7 +130,7 @@ After setup you'll see one device with entities like:
 |--------|-------------|---------|
 | **Light** | Light | Master dimmer — on/off plus overall brightness, scaling all channels together while preserving their ratios. |
 | **Switch** | LED | Turn the light on or off. |
-| **Number** | Red / Green / Blue / White / Violet | Brightness 0–100 per physical channel (manual mode). AquaSky lamps expose four channels; supported five-channel lamps also expose Violet. |
+| **Number** | Model-specific channel names | Brightness 0–100 per physical channel (manual mode). AquaSky lamps expose four channels; supported five-channel lamps expose five sliders. Plant Pro / 4.0 defaults to Red, Blue, Cool White, Warm White, and Amber. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |
 | **Button** | Test LED Channels | Tests power and each supported channel, records verification details in Diagnostics, then restores the prior state. |
@@ -212,7 +214,7 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | **ESPHome proxy is online but commands are unreliable** | Check the proxy's Wi-Fi signal and place it closer to the light. The integration asks HA for the best connectable adapter or ESPHome proxy on reconnect; no adapter needs to be disabled manually. Run **Test LED Channels** and inspect the Diagnostics sensor for `verified`, `confirmed_state`, and any mismatches. |
 | **Switch doesn't turn light on/off** | Ensure the light model uses the same BLE command set. Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
 | **Entities show "unavailable"** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
-| **Channel 5 shows "unavailable"** | This is expected for 4-channel lamps (e.g. Aquasky 2.0). Only Plant 3.0, Reef 3.0, and Marine 3.0 use 5 channels; Channel 5 is disabled automatically based on the first state packet received. |
+| **Channel 5 shows "unavailable"** | This is expected for 4-channel lamps (e.g. Aquasky 2.0). Plant 3.0, Plant Pro / Plant 4.0, Reef 3.0/4.0, and Marine 3.0 use 5 channels; Channel 5 is disabled automatically based on the first state packet received. |
 | **Channels or mode don't update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn't report mode, the dropdown may not reflect external changes. |
 | **Channel sliders don't change the light** | See [Channel sliders troubleshooting](#channel-sliders-dont-change-the-light) below. |
 
@@ -248,7 +250,7 @@ If you have a different Fluval BLE model and the switch or other controls don't 
 
 ## How it works
 
-The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
+The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). Plant Pro / 4.0 controllers use the newer unencrypted SPP-over-BLE `FFF0` service with `D1` command and `D2` status CBOR frames. No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
 
 **BLE connection lifecycle:**
 - On load and reconnect, the integration asks HA for its best connectable BLE route. This includes local adapters and ESPHome Bluetooth proxies.

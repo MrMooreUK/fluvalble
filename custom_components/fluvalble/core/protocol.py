@@ -19,13 +19,22 @@ WIFI_SWITCH_KEY = 104
 WIFI_MANUAL_KEY = 109
 WIFI_CHANNEL_KEYS = (110, 111, 112, 113, 114)
 
+SPP_COMMAND_HEADER = 0xD1
+SPP_STATUS_HEADER = 0xD2
+SPP_READ_PARAMS_PACKET = bytes((0xD0, 0xFF))
+SPP_MODE_KEY = 1
+SPP_SWITCH_KEY = 2
+SPP_CHANNEL_KEYS = (3, 4, 5, 6, 7)
+SPP_MANUAL_KEY = 14
+
 OLD_READ_PARAMS = bytes((0x68, 0x05))
 OLD_MODE = 0x02
 OLD_SWITCH = 0x03
 OLD_ALL_ZONE = 0x04
 OLD_CLOCK = 0x0E
 
-# Mesh clock opcode (full mesh command path is a later PR)
+# Legacy mesh clock opcode. Plant Pro 4.0 SPP control uses D1/D2 CBOR frames
+# instead; keep this helper for existing tests/backwards compatibility only.
 MESH_OPCODE_CLOCK = 0xCD
 
 
@@ -64,6 +73,28 @@ def wifi_timezone_packet(now: datetime | None = None) -> bytes:
 def mesh_clock_packet(now: datetime | None = None) -> bytes:
     """Build mesh clock sync (opcode 0xCD + Y M D W h m s)."""
     return bytes((MESH_OPCODE_CLOCK,)) + _clock_payload(now)
+
+
+def spp_switch_packet(is_on: bool) -> bytes:
+    """Build a Plant Pro 4.0 SPP on/off packet."""
+    return spp_command({SPP_SWITCH_KEY: is_on})
+
+
+def spp_mode_packet(mode: int) -> bytes:
+    """Build a Plant Pro 4.0 SPP mode packet."""
+    return spp_command({SPP_MODE_KEY: mode})
+
+
+def spp_all_zone_packet(values: Iterable[int]) -> bytes:
+    """Build a Plant Pro 4.0 SPP all-channel packet."""
+    packet = {key: _clamp_percent(value) for key, value in zip(SPP_CHANNEL_KEYS, values, strict=False)}
+    packet[SPP_MANUAL_KEY] = 0
+    return spp_command(packet)
+
+
+def spp_command(values: dict[int, bool | int]) -> bytes:
+    """Build a Plant Pro 4.0 SPP command frame."""
+    return bytes((SPP_COMMAND_HEADER,)) + cbor_map(values)
 
 
 def old_read_params_packet() -> bytes:
@@ -137,6 +168,15 @@ def decode_cbor_map(data: bytes) -> dict[Any, Any] | None:
     if offset != len(data):
         return None
     return value
+
+
+def decode_cbor_update(data: bytes) -> dict[Any, Any] | None:
+    """Decode a raw CBOR or Plant Pro 4.0 SPP command/status update."""
+    if not data:
+        return None
+    if data[0] in (SPP_COMMAND_HEADER, SPP_STATUS_HEADER):
+        return decode_cbor_map(data[1:])
+    return decode_cbor_map(data)
 
 
 def _clock_payload(now: datetime | None = None) -> bytes:

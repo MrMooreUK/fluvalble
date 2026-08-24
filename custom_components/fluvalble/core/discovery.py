@@ -23,7 +23,7 @@ FLUVAL_SERVICE_UUIDS = frozenset(
 )
 
 # Name tokens that are Fluval-branded on their own.
-_FLUVAL_BRAND_NAMES = ("fluval", "aquasky")
+_FLUVAL_BRAND_NAMES = ("fluval", "aquasky", "plantpro")
 
 # Plant/Marine/Reef Fluval advertisements look like "Plant 3.0_AABB", not
 # arbitrary "plant sensor" / "marine radio" devices. Require a Fluval-style
@@ -32,7 +32,7 @@ _SERIES_NAME_RE = re.compile(
     r"^(plant|marine|reef)"
     r"(?:"
     r"\s*nano|"
-    r"\s*[23](?:\.0)?|"
+    r"\s*(?:pro|[234](?:\.0)?)|"
     r"[_\-]"
     r").+",
     re.IGNORECASE,
@@ -114,8 +114,14 @@ def detect_model(name: str | None, advertisement: AdvertisementData | None) -> s
     facebd = has_facebd_advertisement(advertisement)
 
     if "plant" in lowered and name_looks_fluval(display_name):
+        if "pro" in lowered:
+            return "Plant Pro 4.0 Bluetooth LED"
         if "nano" in lowered:
+            if "4.0" in lowered or "4_" in lowered:
+                return "Plant Nano 4.0 Bluetooth LED"
             return "Plant Nano Bluetooth LED"
+        if "4.0" in lowered or "4_" in lowered or "plantpro" in lowered:
+            return "Plant 4.0 Bluetooth LED"
         if "3.0" in lowered or "3_" in lowered:
             return "Plant 3.0 Bluetooth LED"
         return "Plant Bluetooth LED"
@@ -126,6 +132,10 @@ def detect_model(name: str | None, advertisement: AdvertisementData | None) -> s
         return "Marine Bluetooth LED"
 
     if "reef" in lowered and name_looks_fluval(display_name):
+        if "nano" in lowered and ("4.0" in lowered or "4_" in lowered):
+            return "Reef Nano 4.0 Bluetooth LED"
+        if "4.0" in lowered or "4_" in lowered:
+            return "Reef 4.0 Bluetooth LED"
         return "Reef Bluetooth LED"
 
     if "aquasky" in lowered:

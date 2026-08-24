@@ -8,6 +8,7 @@ from custom_components.fluvalble.core import LAMP_PROFILE_PLANT, protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
     CHANNEL_NAMES_PLANT,
+    CHANNEL_NAMES_PLANT_PRO,
     Device,
     NUMBERS,
 )
@@ -65,6 +66,14 @@ def test_plant_name_exposes_five_channels():
     assert device.entity_name("channel_3") == "Cold White"
 
 
+def test_plant_pro_name_exposes_five_channels_with_plant_labels():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+
+    assert device.numbers() == NUMBERS
+    assert device.entity_name("channel_1") == CHANNEL_NAMES_PLANT_PRO["channel_1"]
+    assert device.entity_name("channel_5") == CHANNEL_NAMES_PLANT_PRO["channel_5"]
+
+
 def test_clock_sync_flag_resets_on_disconnect():
     device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
     device._clock_synced = True
@@ -101,6 +110,28 @@ def test_old_status_packet_scales_to_percent():
     assert device.values["channel_2"] == 20
     assert device.values["channel_5"] == 50
     assert device._channel_count_hint == 5
+
+
+def test_plant_pro_status_packet_updates_state():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    status = bytes.fromhex("d2 a7 01 00 02 f5 03 18 64 04 14 05 18 1e 06 18 28 07 18 32")
+
+    assert device.decode_update_packet(status)
+
+    assert device.values["mode"] == "manual"
+    assert device.values["led_on_off"] is True
+    assert device.values["channel_1"] == 100
+    assert device.values["channel_2"] == 20
+    assert device.values["channel_5"] == 50
+    assert device._channel_count_hint == 5
+
+
+def test_plant_pro_channel_only_status_packet_updates_state():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+
+    assert device.decode_update_packet(bytes.fromhex("d2 a1 03 18 2a"))
+
+    assert device.values["channel_1"] == 42
 
 
 def test_schedule_points_are_normalized_from_color_names():
@@ -241,6 +272,77 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
         protocol.WIFI_CHANNEL_KEYS[3]: 40,
     }
     assert protocol.WIFI_CHANNEL_KEYS[4] not in expected
+
+
+def test_plant_pro_expected_state_uses_spp_keys():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = MagicMock(raw_facebd=True, plant_pro_spp=True)
+    device.values.update(
+        {
+            "channel_1": 10,
+            "channel_2": 20,
+            "channel_3": 30,
+            "channel_4": 40,
+            "channel_5": 50,
+        }
+    )
+
+    packet = protocol.spp_all_zone_packet(device._channel_values())
+    expected = device._expected_state_for_packet(packet)
+
+    assert expected == {
+        protocol.SPP_CHANNEL_KEYS[0]: 10,
+        protocol.SPP_CHANNEL_KEYS[1]: 20,
+        protocol.SPP_CHANNEL_KEYS[2]: 30,
+        protocol.SPP_CHANNEL_KEYS[3]: 40,
+        protocol.SPP_CHANNEL_KEYS[4]: 50,
+    }
+
+
+def test_plant_pro_switch_uses_spp_packet():
+    asyncio.run(_async_test_plant_pro_switch_uses_spp_packet())
+
+
+async def _async_test_plant_pro_switch_uses_spp_packet():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = MagicMock(plant_pro_spp=True)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_switch("led_on_off", True)
+
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_switch_packet(True))
+
+
+def test_plant_pro_mode_uses_spp_packet():
+    asyncio.run(_async_test_plant_pro_mode_uses_spp_packet())
+
+
+async def _async_test_plant_pro_mode_uses_spp_packet():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = MagicMock(plant_pro_spp=True)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_select_option("mode", "professional")
+
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_mode_packet(2))
+
+
+def test_plant_pro_channels_use_spp_packet():
+    asyncio.run(_async_test_plant_pro_channels_use_spp_packet())
+
+
+async def _async_test_plant_pro_channels_use_spp_packet():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = MagicMock(plant_pro_spp=True)
+    device.values["led_on_off"] = True
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 75})
+
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_all_zone_packet([75, 0, 0, 0, 0]))
 
 
 def test_led_channel_test_verifies_each_channel_and_restores_state(monkeypatch):
