@@ -7,14 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.0.10] — 2026-08-30
+
 ### Added
 - Native Home Assistant RGBW control for AquaSky fixtures and RGB spectrum
-  translation for Plant/Marine fixtures.
+  translation for Plant/Marine fixtures (#32).
 
 ### Changed
 - Replaced the individual channel number entities with the standard light
   entity's colour and brightness controls. Existing channel entities are
-  removed from the entity registry during config-entry setup.
+  removed from the entity registry during config-entry setup (#32).
 
 ---
 
