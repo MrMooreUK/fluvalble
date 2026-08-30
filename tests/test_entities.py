@@ -226,3 +226,13 @@ def test_connection_changes_refresh_control_entities():
     device.set_connected(True)
 
     handler.assert_called_once()
+
+
+def test_unique_id_and_identifiers_are_uppercase_for_mixed_case_mac():
+    device = _make_device()
+    device.address = "aa:bb:cc:dd:ee:ff"
+    entity = number.FluvalNumber(device, "channel_1")
+
+    assert entity._attr_unique_id == "AABBCCDDEEFF_channel_1"
+    assert entity._attr_device_info["identifiers"] == {("fluvalble", "AA:BB:CC:DD:EE:FF")}
+    assert ("bluetooth", "AA:BB:CC:DD:EE:FF") in entity._attr_device_info["connections"]

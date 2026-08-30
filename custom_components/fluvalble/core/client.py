@@ -33,35 +33,37 @@ UNVERIFIED_WRITE_COPIES = 2
 #
 # facebd02 accepts and echoes writes, but that does not prove the controller
 # acted on them, so neither facebd02 nor facebd80 is a command fallback.
+# Lowercase UUID strings are required for ESPHome 2026.x / esp-idf 5.x
+# Bluetooth proxies, which compare characteristic UUIDs case-sensitively.
 FACEBD_COMMAND_WRITE_UUIDS = (
-    "FACEBD01-7261-6262-6974-696F74626C65",
-    "FACEBD01-0000-1000-8000-00805F9B34FB",
+    "facebd01-7261-6262-6974-696f74626c65",
+    "facebd01-0000-1000-8000-00805f9b34fb",
 )
 LEGACY_COMMAND_WRITE_UUIDS = (
-    "00001001-0000-1000-8000-00805F9B34FB",
-    "0000FFF2-0000-1000-8000-00805F9B34FB",
+    "00001001-0000-1000-8000-00805f9b34fb",
+    "0000fff2-0000-1000-8000-00805f9b34fb",
 )
 COMMAND_WRITE_UUIDS = FACEBD_COMMAND_WRITE_UUIDS + LEGACY_COMMAND_WRITE_UUIDS
 NOTIFY_UUIDS = (
-    "FACEBD02-7261-6262-6974-696F74626C65",
-    "FACEBD02-0000-1000-8000-00805F9B34FB",
-    "FACEBD03-7261-6262-6974-696F74626C65",
-    "FACEBD03-0000-1000-8000-00805F9B34FB",
-    "FACEBD80-7261-6262-6974-696F74626C65",
-    "FACEBD80-0000-1000-8000-00805F9B34FB",
-    "00001002-0000-1000-8000-00805F9B34FB",
-    "0000FFF1-0000-1000-8000-00805F9B34FB",
+    "facebd02-7261-6262-6974-696f74626c65",
+    "facebd02-0000-1000-8000-00805f9b34fb",
+    "facebd03-7261-6262-6974-696f74626c65",
+    "facebd03-0000-1000-8000-00805f9b34fb",
+    "facebd80-7261-6262-6974-696f74626c65",
+    "facebd80-0000-1000-8000-00805f9b34fb",
+    "00001002-0000-1000-8000-00805f9b34fb",
+    "0000fff1-0000-1000-8000-00805f9b34fb",
 )
 INIT_WRITE_UUIDS = LEGACY_COMMAND_WRITE_UUIDS
 WAKE_READ_UUIDS = (
-    "FACEBD02-7261-6262-6974-696F74626C65",
-    "FACEBD02-0000-1000-8000-00805F9B34FB",
-    "FACEBD81-7261-6262-6974-696F74626C65",
-    "FACEBD81-0000-1000-8000-00805F9B34FB",
-    "FACEBD80-7261-6262-6974-696F74626C65",
-    "FACEBD80-0000-1000-8000-00805F9B34FB",
-    "00001004-0000-1000-8000-00805F9B34FB",
-    "0000FFF6-0000-1000-8000-00805F9B34FB",
+    "facebd02-7261-6262-6974-696f74626c65",
+    "facebd02-0000-1000-8000-00805f9b34fb",
+    "facebd81-7261-6262-6974-696f74626c65",
+    "facebd81-0000-1000-8000-00805f9b34fb",
+    "facebd80-7261-6262-6974-696f74626c65",
+    "facebd80-0000-1000-8000-00805f9b34fb",
+    "00001004-0000-1000-8000-00805f9b34fb",
+    "0000fff6-0000-1000-8000-00805f9b34fb",
 )
 WRITE_PROPERTIES = frozenset({"write", "write-without-response"})
 
@@ -125,10 +127,31 @@ class Client:
 
     def _get_characteristic(self, uuid: str) -> BleakGATTCharacteristic | None:
         """Return a characteristic if present, without raising on missing UUIDs."""
-        try:
-            return self.client.services.get_characteristic(uuid)
-        except BleakError:
+        if self.client is None:
             return None
+        target = str(uuid).lower()
+        try:
+            characteristic = self.client.services.get_characteristic(uuid)
+        except BleakError:
+            characteristic = None
+        if characteristic is not None:
+            return characteristic
+        # ESPHome 2026.x / esp-idf 5.x compares UUID strings case-sensitively.
+        if uuid != target:
+            try:
+                characteristic = self.client.services.get_characteristic(target)
+            except BleakError:
+                characteristic = None
+            if characteristic is not None:
+                return characteristic
+        try:
+            for service in self.client.services:
+                for char in getattr(service, "characteristics", ()):
+                    if str(char.uuid).lower() == target:
+                        return char
+        except (AttributeError, TypeError, BleakError):
+            return None
+        return None
 
     def _find_characteristic(
         self,

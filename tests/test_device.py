@@ -294,3 +294,14 @@ async def _async_test_led_channel_test_verifies_each_channel_and_restores_state(
         force=True,
     )
     assert device.async_set_switch.await_count == 2
+
+
+def test_facebd_service_uuid_selects_facebd_protocol():
+    device = _make_device()
+
+    assert device._uses_facebd_protocol(
+        "AquaSky3.0_Test",
+        ["facebd00-7261-6262-6974-696f74626c65"],
+        {},
+        {},
+    ) is True

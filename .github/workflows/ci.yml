@@ -210,6 +210,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Need origin remotes so we can detect whether a `dev` branch exists.
+          fetch-depth: 1
+
       - name: Enforce dev-first workflow
         run: |
           TARGET="${{ github.base_ref }}"

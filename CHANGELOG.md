@@ -31,6 +31,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   not depend on an open dashboard.
 
 ### Fixed
+- Restore lowercase BLE characteristic UUIDs so ESPHome 2026.x / esp-idf 5.x
+  Bluetooth proxies can look up GATT characteristics (regression of #7).
+- Keep entity unique IDs and device identifiers uppercase so they stay stable
+  if a proxy reports a mixed-case MAC address.
 - FACEBD commands now use the hardware-verified command characteristic and
   confirm the requested state through the response characteristic.
 - Retry and report unverified AquaSky writes instead of treating an accepted
