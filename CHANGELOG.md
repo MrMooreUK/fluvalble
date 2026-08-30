@@ -7,14 +7,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.0.8] — 2026-08-30
+
 ### Added
-- **Sync clock** button and automatic RTC sync on BLE connect (fixes #8).
-- AquaSky 3.0/FACEBD discovery, diagnostics, and write support.
-- Lovelace schedule, spectrum bar, and wavelength preview cards.
+- **Sync clock** button and automatic RTC sync on BLE connect (fixes #8, #25).
+- AquaSky 3.0/FACEBD discovery, diagnostics, and write support (#22).
+- Lovelace schedule, spectrum bar, and wavelength preview cards (#15).
 - HA-managed schedule storage, auto mode, and physical preview services.
 - ESP32 boards running ESPHome Bluetooth Proxy as a supported connection path.
 - A Test LED Channels button that verifies power and each physical channel,
   records the results in Diagnostics, and restores the previous light state.
+- Lamp profile option (`auto` / `plant` / `aquasky` / `aquasky3`) with tighter
+  model detection and packet-based channel-count hints (#24, fixes #17).
 
 ### Changed
 - Renamed channel 5 to Violet.
@@ -35,6 +41,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   BLE write as proof that the fixture changed.
 - Schedule preview stop/restore, live slider dragging, physical playback, and
   unavailable control behavior during BLE reconnects.
+- Options Configure flow returning HTTP 500 (#18, fixes #16).
+- Rediscovery of already-configured lamps caused by mixed-case unique IDs (#26).
+- Old BLE AquaSky writes now prefer write-without-response and scale channels
+  correctly (#20, related to #6).
+
+### Security
+- Harden schedule inputs and pin GitHub Actions to SHAs (#23).
 
 ### Notes
 - AquaSky 3.0 control and state verification were validated on physical
