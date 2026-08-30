@@ -219,3 +219,26 @@ async def _async_test_ping_loop_can_be_cancelled_while_waiting():
 
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+def test_characteristic_uuid_constants_are_lowercase():
+    """ESPHome 2026.x / esp-idf 5.x proxies compare UUIDs case-sensitively."""
+    for uuid in (
+        *client_module.FACEBD_COMMAND_WRITE_UUIDS,
+        *client_module.LEGACY_COMMAND_WRITE_UUIDS,
+        *client_module.NOTIFY_UUIDS,
+        *client_module.WAKE_READ_UUIDS,
+    ):
+        assert uuid == uuid.lower()
+
+
+def test_get_characteristic_matches_case_insensitively():
+    client = _make_client()
+    stored = "00001001-0000-1000-8000-00805f9b34fb"
+    characteristic = _FakeCharacteristic(stored, ["write"])
+    client.client = _FakeGattClient([characteristic])
+
+    found = client._get_characteristic("00001001-0000-1000-8000-00805F9B34FB")
+
+    assert found is characteristic
+    assert found.uuid == stored

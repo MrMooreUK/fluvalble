@@ -31,7 +31,7 @@ class FluvalEntity(Entity):
             self._attr_translation_key = None
         else:
             self._attr_translation_key = attr
-        self._attr_unique_id = device.mac.replace(":", "") + "_" + attr
+        self._attr_unique_id = device.mac.replace(":", "").upper() + "_" + attr
 
         # Store the bound method so deregistration uses the exact same object.
         self._update_handler = self.internal_update
