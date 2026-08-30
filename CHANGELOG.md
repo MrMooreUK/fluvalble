@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Require Fluval manufacturer data for classic discovery without treating that
+  shared vendor identifier as proof of the newer FACEBD protocol (#27, #29).
+- Restore lowercase BLE characteristic UUIDs for ESPHome 2026.x / esp-idf 5.x
+  Bluetooth proxies and keep mixed-case MAC identifiers stable (#29).
+
 ---
 
 ## [0.0.8] — 2026-08-30
@@ -31,10 +37,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   not depend on an open dashboard.
 
 ### Fixed
-- Restore lowercase BLE characteristic UUIDs so ESPHome 2026.x / esp-idf 5.x
-  Bluetooth proxies can look up GATT characteristics (regression of #7).
-- Keep entity unique IDs and device identifiers uppercase so they stay stable
-  if a proxy reports a mixed-case MAC address.
 - FACEBD commands now use the hardware-verified command characteristic and
   confirm the requested state through the response characteristic.
 - Retry and report unverified AquaSky writes instead of treating an accepted

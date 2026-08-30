@@ -23,7 +23,6 @@ from . import (
 from .client import Client
 from .discovery import (
     CONF_MODEL,
-    FLUVAL_MANUFACTURER_IDS,
     detect_model,
 )
 from . import protocol
@@ -1084,15 +1083,18 @@ class Device:
         service_data: dict,
         manufacturer_data: dict,
     ) -> bool:
-        """Return true when advertisements match the newer FACEBD controllers."""
+        """Return true only when advertisements expose the FACEBD protocol.
+
+        Fluval manufacturer data is shared by classic and FACEBD controllers,
+        so it is vendor evidence for discovery but never protocol evidence.
+        """
         if any(uuid.lower().startswith("facebd") for uuid in service_uuids):
             return True
 
         if any(str(uuid).lower().startswith("facebd") for uuid in service_data):
             return True
 
-        manufacturer_ids = {int(key) for key in manufacturer_data}
-        return bool(FLUVAL_MANUFACTURER_IDS.intersection(manufacturer_ids))
+        return False
 
     def _build_state_packet(self) -> bytearray:
         """Build a command packet from the current entity state.
