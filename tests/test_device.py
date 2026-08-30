@@ -299,9 +299,24 @@ async def _async_test_led_channel_test_verifies_each_channel_and_restores_state(
 def test_facebd_service_uuid_selects_facebd_protocol():
     device = _make_device()
 
-    assert device._uses_facebd_protocol(
-        "AquaSky3.0_Test",
-        ["facebd00-7261-6262-6974-696f74626c65"],
-        {},
-        {},
-    ) is True
+    assert (
+        device._uses_facebd_protocol(
+            "AquaSky3.0_Test",
+            ["facebd00-7261-6262-6974-696f74626c65"],
+            {},
+            {},
+        )
+        is True
+    )
+
+
+def test_classic_manufacturer_data_is_not_facebd_protocol_evidence():
+    device = _make_device(
+        name="AquaSky2.0_Test",
+        model="AquaSky 2.0 Bluetooth LED",
+        service_uuids=["00001000-0000-1000-8000-00805f9b34fb"],
+        manufacturer_data={"12592": "3438303130330000000000000000000000000000"},
+    )
+
+    assert device.facebd is False
+    assert device.numbers() == AQUASKY_NUMBERS
