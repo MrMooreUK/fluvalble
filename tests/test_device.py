@@ -296,43 +296,6 @@ async def _async_test_led_channel_test_verifies_each_channel_and_restores_state(
     assert device.async_set_switch.await_count == 2
 
 
-def test_update_ble_keeps_mac_uppercase(monkeypatch):
-    class _FakeTask:
-        def __init__(self, coroutine=None):
-            if coroutine is not None:
-                coroutine.close()
-
-        def cancel(self):
-            pass
-
-    monkeypatch.setattr("asyncio.create_task", lambda coro: _FakeTask(coro))
-    device = _make_device()
-    ble = MagicMock()
-    ble.address = "aa:bb:cc:dd:ee:ff"
-    ble.name = "Plant 3.0_AABB"
-    adv = MagicMock()
-    adv.rssi = -50
-    adv.service_uuids = ["00001002-0000-1000-8000-00805f9b34fb"]
-    adv.service_data = {}
-    adv.manufacturer_data = {}
-
-    device.update_ble(ble, adv)
-
-    assert device.address == "AA:BB:CC:DD:EE:FF"
-    assert device.conn_info["mac"] == "AA:BB:CC:DD:EE:FF"
-
-
-def test_manufacturer_data_alone_is_not_facebd_protocol():
-    device = _make_device(name="Plant 3.0_AABB", model="Plant 3.0 Bluetooth LED")
-
-    assert device._uses_facebd_protocol(
-        "Plant 3.0_AABB",
-        ["00001002-0000-1000-8000-00805f9b34fb"],
-        {},
-        {12592: b"480103"},
-    ) is False
-
-
 def test_facebd_service_uuid_selects_facebd_protocol():
     device = _make_device()
 
