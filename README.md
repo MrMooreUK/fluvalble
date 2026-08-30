@@ -17,7 +17,7 @@
 
 ## Why Fluval BLE?
 
-Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assistant devices. Control power, colour channels, lighting modes, and connection health directly from your dashboard while keeping every command local over Bluetooth Low Energy.
+Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assistant devices. Control power, colour, brightness, lighting modes, and connection health directly from your dashboard while keeping every command local over Bluetooth Low Energy.
 
 ---
 
@@ -26,15 +26,14 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | Feature | Description |
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
-| **Power** | Turn the LED fixture on or off via a switch entity. |
-| **Channels** | Up to five brightness sliders (0–100) for manual control per channel. AquaSky 2.0/3.0 lamps expose their four physical channels; five-channel lamps also expose Violet. |
-| **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Adjusting a brightness slider while in Automatic or Professional mode automatically switches to Manual first. |
+| **Native light control** | Use Home Assistant's standard light card for power, brightness, and colour. AquaSky fixtures expose RGBW; Plant and Marine spectra are translated to RGB. |
+| **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
 | **Bluetooth routing** | Works with local Bluetooth adapters and ESP32 boards running ESPHome Bluetooth Proxy. Home Assistant automatically selects the best connectable route on each connection. |
 | **Channel test** | A diagnostic button tests power and each physical LED channel, verifies the state returned by supported controllers, and restores the previous light state. |
 
-Entities are created per device: one switch, one connection sensor, one mode select, and up to five number entities for the channels. Everything updates from the device when it sends state, so the UI stays in sync.
+Entities are created per device around one native colour light, with mode, connection, and diagnostic controls alongside it. Everything updates from the device when it sends state, so the UI stays in sync.
 
 ---
 
@@ -126,9 +125,8 @@ After setup you'll see one device with entities like:
 
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
-| **Light** | Light | Master dimmer — on/off plus overall brightness, scaling all channels together while preserving their ratios. |
+| **Light** | Light | Native power, brightness, and colour control. AquaSky uses RGBW; Plant and Marine spectra use RGB translation. |
 | **Switch** | LED | Turn the light on or off. |
-| **Number** | Red / Green / Blue / White / Violet | Brightness 0–100 per physical channel (manual mode). AquaSky lamps expose four channels; supported five-channel lamps also expose Violet. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |
 | **Button** | Test LED Channels | Tests power and each supported channel, records verification details in Diagnostics, then restores the prior state. |
@@ -163,7 +161,7 @@ Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, f
         entity_id: switch.fluval_aabbccddeeff_led_on_off
 ```
 
-**Dim the light when you're away**
+**Set a dim blue colour when you're away**
 
 ```yaml
 - id: fluval_away_dim
@@ -174,11 +172,12 @@ Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, f
         - person.you
       to: "not_home"
   action:
-    - service: number.set_value
+    - service: light.turn_on
       target:
-        entity_id: number.fluval_aabbccddeeff_channel_1
+        entity_id: light.fluval_aabbccddeeff_light
       data:
-        value: 200
+        brightness_pct: 35
+        rgb_color: [0, 80, 255]
 ```
 
 **Notify if the light disconnects**
@@ -212,35 +211,8 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | **ESPHome proxy is online but commands are unreliable** | Check the proxy's Wi-Fi signal and place it closer to the light. The integration asks HA for the best connectable adapter or ESPHome proxy on reconnect; no adapter needs to be disabled manually. Run **Test LED Channels** and inspect the Diagnostics sensor for `verified`, `confirmed_state`, and any mismatches. |
 | **Switch doesn't turn light on/off** | Ensure the light model uses the same BLE command set. Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
 | **Entities show "unavailable"** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
-| **Channel 5 shows "unavailable"** | This is expected for 4-channel lamps (e.g. Aquasky 2.0). Only Plant 3.0, Reef 3.0, and Marine 3.0 use 5 channels; Channel 5 is disabled automatically based on the first state packet received. |
-| **Channels or mode don't update** | Some features (e.g. mode change) may require the device to send state back; if the firmware doesn't report mode, the dropdown may not reflect external changes. |
-| **Channel sliders don't change the light** | See [Channel sliders troubleshooting](#channel-sliders-dont-change-the-light) below. |
-
-### Channel sliders don't change the light
-
-If the switch and mode work but brightness sliders have no effect:
-
-1. **Enable debug logging** to see what's being sent. Add to `configuration.yaml`:
-   ```yaml
-   logger:
-     default: info
-     logs:
-       custom_components.fluvalble: debug
-   ```
-   Restart HA, move a slider, then check **Settings → System → Logs** (or the full log file). Look for lines like:
-   ```text
-   Sending to XX:XX:XX:XX:XX:XX — raw: 68 04 03 e8 00 00 00 00 ... | encrypted: 54 ...
-   ```
-   - `raw` = command before encryption (e.g. `68 04` = brightness command, then channel bytes as 16-bit big-endian values)
-   - `encrypted` = what goes over BLE
-
-2. **Verify the Fluval app works** — If the app can change brightness, the hardware is fine; the protocol may differ for your model.
-
-3. **Confirm you're in Manual mode** — The integration automatically switches to Manual when you adjust a slider, but if that switch command is dropped (e.g. connection is unstable), the brightness command will be ignored by the device. Switch to Manual via the select entity first, then adjust sliders.
-
-4. **Check your model** — Different Fluval models (Plant 3.0, Reef 3.0, Aquasky 2.0, etc.) may use slightly different command formats. Open an issue with your model name and a log snippet showing the `raw` and `encrypted` bytes when you move a slider.
-
-5. **Packet capture (advanced)** — Use an ESP32 or nRF Sniffer to capture BLE traffic while changing brightness in the Fluval app, then compare with what this integration sends.
+| **Colour or mode doesn't update** | Some firmware reports only its physical channel levels. Plant/Marine RGB is therefore an approximation when the colour was changed outside Home Assistant. |
+| **Colour control doesn't change the light** | Confirm the fixture works in the Fluval app, select Manual mode, and retry. If it still fails, run **Test LED Channels** and include the Diagnostics result with your model when opening an issue. |
 
 If you have a different Fluval BLE model and the switch or other controls don't behave as expected, open an issue with your model name and (if possible) a note on what works in the official app.
 

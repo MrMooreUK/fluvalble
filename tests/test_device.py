@@ -65,6 +65,88 @@ def test_plant_name_exposes_five_channels():
     assert device.entity_name("channel_3") == "Cold White"
 
 
+def test_aquasky_uses_rgbw_and_maps_channels_at_requested_brightness():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+
+    assert device.light_mode() == "rgbw"
+    assert device.channels_from_rgbw((0, 255, 128, 0), 128) == {
+        "channel_1": 0,
+        "channel_2": 50,
+        "channel_3": 25,
+        "channel_4": 0,
+    }
+
+
+def test_plant_uses_rgb_and_maps_saturated_colours_without_white_channels():
+    device = _make_device(name="Plant 3.0_AABB", model="Plant 3.0 Bluetooth LED")
+
+    assert device.light_mode() == "rgb"
+    assert device.channels_from_rgb((255, 0, 0), 255) == {
+        "channel_1": 100,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 0,
+        "channel_5": 0,
+    }
+
+
+def test_light_colour_cache_is_used_only_while_physical_channels_match():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    channels = {"channel_1": 0, "channel_2": 50, "channel_3": 0, "channel_4": 0}
+    device.values.update(channels)
+    device.remember_commanded_light(channels, rgbw=(0, 255, 0, 0), brightness=128)
+
+    assert device.light_rgbw_255() == (0, 255, 0, 0)
+    assert device.light_brightness_255() == 128
+
+    device.values["channel_1"] = 50
+    assert device.light_rgbw_255() == (255, 255, 0, 0)
+
+
+def test_apply_light_channels_turns_on_after_channel_write():
+    asyncio.run(_async_test_apply_light_channels_turns_on_after_channel_write())
+
+
+async def _async_test_apply_light_channels_turns_on_after_channel_write():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.async_set_channels = AsyncMock(return_value=True)
+    device.async_set_switch = AsyncMock(return_value=True)
+
+    values = {"channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40}
+    assert await device.async_apply_light_channels(values)
+
+    device.async_set_channels.assert_awaited_once_with(values)
+    device.async_set_switch.assert_awaited_once_with("led_on_off", True)
+
+
+def test_master_brightness_writes_every_scaled_channel():
+    asyncio.run(_async_test_master_brightness_writes_every_scaled_channel())
+
+
+async def _async_test_master_brightness_writes_every_scaled_channel():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.values.update(
+        {
+            "channel_1": 20,
+            "channel_2": 40,
+            "channel_3": 60,
+            "channel_4": 80,
+        }
+    )
+    device.async_set_channels = AsyncMock(return_value=True)
+
+    assert await device.async_set_master_brightness(50)
+
+    device.async_set_channels.assert_awaited_once_with(
+        {
+            "channel_1": 12,
+            "channel_2": 25,
+            "channel_3": 38,
+            "channel_4": 50,
+        }
+    )
+
+
 def test_clock_sync_flag_resets_on_disconnect():
     device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
     device._clock_synced = True
