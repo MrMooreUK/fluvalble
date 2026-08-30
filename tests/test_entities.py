@@ -4,9 +4,9 @@ import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from homeassistant.components.light import ATTR_BRIGHTNESS
+from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_RGBW_COLOR
 
-from custom_components.fluvalble import binary_sensor, button, light, number, select, sensor, switch
+from custom_components.fluvalble import binary_sensor, button, light, select, sensor, switch
 from custom_components.fluvalble.core.device import Device
 
 
@@ -38,30 +38,12 @@ def _make_device():
 def test_create_entities_for_platforms():
     device = _make_device()
 
-    assert len(number.create_entities(device)) == 5
     assert len(switch.create_entities(device)) == 1
     assert len(select.create_entities(device)) == 2
     assert len(sensor.create_entities(device)) == 3
     assert len(button.create_entities(device)) == 3
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
-
-
-def test_number_internal_update_and_set_value():
-    asyncio.run(_async_test_number_internal_update_and_set_value())
-
-
-async def _async_test_number_internal_update_and_set_value():
-    device = _make_device()
-    entity = number.FluvalNumber(device, "channel_1")
-    device.async_set_value = AsyncMock(return_value=True)
-
-    entity.internal_update()
-    await entity.async_set_native_value(55)
-
-    assert entity._attr_native_value == 55
-    assert entity._attr_available is True
-    device.async_set_value.assert_awaited_once_with("channel_1", 55)
 
 
 def test_switch_internal_update_and_actions():
@@ -175,28 +157,35 @@ def test_light_internal_update_and_actions():
 async def _async_test_light_internal_update_and_actions():
     device = _make_device()
     entity = light.FluvalLight(device, "light")
-    device.async_set_master_brightness = AsyncMock(return_value=True)
+    device.async_apply_light_channels = AsyncMock(return_value=True)
     device.async_set_switch = AsyncMock(return_value=True)
     device.values["led_on_off"] = False
 
     entity.internal_update()
-    await entity.async_turn_on(**{ATTR_BRIGHTNESS: 128})
+    await entity.async_turn_on(**{ATTR_BRIGHTNESS: 128, ATTR_RGBW_COLOR: (0, 255, 0, 0)})
     await entity.async_turn_off()
 
     assert entity._attr_is_on is False
-    device.async_set_master_brightness.assert_awaited_once()
-    assert device.async_set_switch.await_args_list[0].args == ("led_on_off", True)
-    assert device.async_set_switch.await_args_list[1].args == ("led_on_off", False)
+    device.async_apply_light_channels.assert_awaited_once_with(
+        {
+            "channel_1": 0,
+            "channel_2": 50,
+            "channel_3": 0,
+            "channel_4": 0,
+            "channel_5": 0,
+        }
+    )
+    device.async_set_switch.assert_awaited_once_with("led_on_off", False)
 
 
 def test_entity_unregisters_update_handler():
     device = _make_device()
     device.deregister_update = MagicMock()
-    entity = number.FluvalNumber(device, "channel_1")
+    entity = light.FluvalLight(device, "light")
 
     asyncio.run(entity.async_will_remove_from_hass())
 
-    device.deregister_update.assert_called_once_with("channel_1", entity._update_handler)
+    device.deregister_update.assert_called_once_with("light", entity._update_handler)
 
 
 def test_controls_remain_available_when_recently_seen_but_not_connected():
@@ -205,12 +194,10 @@ def test_controls_remain_available_when_recently_seen_but_not_connected():
     device.client = None
     device.conn_info["last_seen"] = datetime(2026, 1, 1, tzinfo=UTC)
 
-    number_entity = number.FluvalNumber(device, "channel_1")
     switch_entity = switch.FluvalSwitch(device, "led_on_off")
     select_entity = select.FluvalSelect(device, "mode")
     light_entity = light.FluvalLight(device, "light")
 
-    assert number_entity._attr_available is True
     assert switch_entity._attr_available is True
     assert select_entity._attr_available is True
     assert light_entity._attr_available is True
@@ -219,7 +206,7 @@ def test_controls_remain_available_when_recently_seen_but_not_connected():
 def test_connection_changes_refresh_control_entities():
     device = _make_device()
     device.connected = False
-    number.FluvalNumber(device, "channel_1")
+    light.FluvalLight(device, "light")
     handler = MagicMock()
     device.updates_component.append(handler)
 
@@ -231,8 +218,8 @@ def test_connection_changes_refresh_control_entities():
 def test_unique_id_and_identifiers_are_uppercase_for_mixed_case_mac():
     device = _make_device()
     device.address = "aa:bb:cc:dd:ee:ff"
-    entity = number.FluvalNumber(device, "channel_1")
+    entity = light.FluvalLight(device, "light")
 
-    assert entity._attr_unique_id == "AABBCCDDEEFF_channel_1"
+    assert entity._attr_unique_id == "AABBCCDDEEFF_light"
     assert entity._attr_device_info["identifiers"] == {("fluvalble", "AA:BB:CC:DD:EE:FF")}
     assert ("bluetooth", "AA:BB:CC:DD:EE:FF") in entity._attr_device_info["connections"]

@@ -64,23 +64,6 @@
         "name": "Sync clock"
       }
     },
-    "number": {
-      "channel_1": {
-        "name": "Channel 1"
-      },
-      "channel_2": {
-        "name": "Channel 2"
-      },
-      "channel_3": {
-        "name": "Channel 3"
-      },
-      "channel_4": {
-        "name": "Channel 4"
-      },
-      "channel_5": {
-        "name": "Channel 5"
-      }
-    },
     "select": {
       "mode": {
         "name": "Mode",

@@ -62,6 +62,17 @@ DAY_MINUTES = 24 * 60
 CHANNEL_TEST_LEVEL = 100
 CHANNEL_TEST_HOLD_SECONDS = 2
 
+# Approximate sRGB appearance of the five Plant/Marine LED channels.  These
+# fixtures do not expose literal RGB LEDs, so Home Assistant colours need to be
+# translated to and from Rose / Blue / Cold White / Pure White / Warm White.
+PLANT_CHANNEL_RGB = {
+    "channel_1": (1.00, 0.28, 0.38),
+    "channel_2": (0.18, 0.38, 1.00),
+    "channel_3": (0.72, 0.84, 1.00),
+    "channel_4": (1.00, 1.00, 1.00),
+    "channel_5": (1.00, 0.72, 0.42),
+}
+
 
 class Attribute(TypedDict, total=False):
     """Attributes used by entities like binary_sensor and number."""
@@ -138,6 +149,14 @@ class Device:
         self.preview_restore_values: dict[str, int] | None = None
         self._clock_synced = False
         self._clock_sync_lock = asyncio.Lock()
+        # Preserve the exact colour HA requested while the decoded physical
+        # channels still match it.  Plant RGB conversion is intentionally
+        # lossy, so reconstructing RGB from those five channels would otherwise
+        # make the colour picker jump after every status update.
+        self._commanded_rgb: tuple[int, int, int] | None = None
+        self._commanded_rgbw: tuple[int, int, int, int] | None = None
+        self._commanded_brightness: int | None = None
+        self._commanded_channels: dict[str, int] | None = None
 
         if device and advertisement:
             self.update_ble(device, advertisement)
@@ -252,29 +271,168 @@ class Device:
             return CHANNEL_NAMES_PLANT
         return CHANNEL_NAMES_AQUASKY
 
+    def uses_plant_spectrum(self) -> bool:
+        """Return whether the fixture uses the five-channel Plant spectrum."""
+        return self._channel_labels() == CHANNEL_NAMES_PLANT
+
+    def light_mode(self) -> str:
+        """Return the native Home Assistant colour mode for this fixture."""
+        return "rgb" if self.uses_plant_spectrum() else "rgbw"
+
     def master_brightness(self) -> int:
         """Overall brightness as the brightest supported channel."""
         chans = self.numbers()
         return max((self.values.get(ch, 0) for ch in chans), default=0)
 
+    def light_brightness_255(self) -> int:
+        """Return the current light brightness on Home Assistant's 0-255 scale."""
+        if self._commanded_state_matches() and self._commanded_brightness is not None:
+            return self._commanded_brightness
+        return round(self.master_brightness() / 100 * 255)
+
+    def light_rgb_255(self) -> tuple[int, int, int]:
+        """Return a Plant spectrum as an RGB colour for Home Assistant."""
+        if self._commanded_state_matches() and self._commanded_rgb is not None:
+            return self._commanded_rgb
+
+        mix_r = mix_g = mix_b = 0.0
+        for channel, (channel_r, channel_g, channel_b) in PLANT_CHANNEL_RGB.items():
+            weight = max(0, min(100, int(self.values.get(channel, 0)))) / 100
+            mix_r += channel_r * weight
+            mix_g += channel_g * weight
+            mix_b += channel_b * weight
+        peak = max(mix_r, mix_g, mix_b, 1e-6)
+        return (
+            max(0, min(255, round(mix_r / peak * 255))),
+            max(0, min(255, round(mix_g / peak * 255))),
+            max(0, min(255, round(mix_b / peak * 255))),
+        )
+
+    def light_rgbw_255(self) -> tuple[int, int, int, int]:
+        """Return AquaSky physical channels as a normalized RGBW colour."""
+        if self._commanded_state_matches() and self._commanded_rgbw is not None:
+            return self._commanded_rgbw
+        channels = [int(self.values.get(channel, 0)) for channel in AQUASKY_NUMBERS]
+        peak = max(*channels, 1)
+        return tuple(round(value / peak * 255) for value in channels)  # type: ignore[return-value]
+
+    @staticmethod
+    def _ha_component_to_percent(component: int, brightness: int) -> int:
+        """Scale one HA colour component and brightness to a channel percent."""
+        component = max(0, min(255, int(component)))
+        brightness = max(0, min(255, int(brightness)))
+        return max(0, min(100, round(component / 255 * brightness / 255 * 100)))
+
+    def channels_from_rgbw(
+        self,
+        rgbw: tuple[int, int, int, int],
+        brightness: int,
+    ) -> dict[str, int]:
+        """Map an HA RGBW colour directly onto AquaSky channels."""
+        channels = {
+            channel: self._ha_component_to_percent(component, brightness)
+            for channel, component in zip(AQUASKY_NUMBERS, rgbw, strict=True)
+        }
+        # RGBW has no fifth component. Preserve a fifth non-Plant channel when
+        # a profile exposes one instead of silently zeroing it.
+        if "channel_5" in self.numbers():
+            channels["channel_5"] = int(self.values.get("channel_5", 0))
+        return channels
+
+    def channels_from_rgb(
+        self,
+        rgb: tuple[int, int, int],
+        brightness: int,
+    ) -> dict[str, int]:
+        """Translate HA RGB into Plant Rose/Blue/CW/PW/WW percentages."""
+        red = max(0, min(255, int(rgb[0]))) / 255
+        green = max(0, min(255, int(rgb[1]))) / 255
+        blue = max(0, min(255, int(rgb[2]))) / 255
+        scale = max(0, min(255, int(brightness))) / 255
+
+        white = min(red, green, blue)
+        remaining_red = red - white
+        remaining_green = green - white
+        remaining_blue = blue - white
+        chroma = max(remaining_red, remaining_green, remaining_blue)
+        warmth = red / (red + blue + 1e-6)
+        white_weight = 0.0 if chroma >= 0.85 else (1.0 - chroma) * 0.55
+
+        def percent(value: float) -> int:
+            return max(0, min(100, round(value * scale * 100)))
+
+        return {
+            "channel_1": percent(remaining_red),
+            "channel_2": percent(remaining_blue),
+            "channel_3": percent(white * white_weight * (0.70 * (1.0 - warmth) + 0.15)),
+            "channel_4": percent(remaining_green * 0.85 + white * 0.45 * white_weight),
+            "channel_5": percent(white * white_weight * (0.70 * warmth + 0.15)),
+        }
+
+    def remember_commanded_light(
+        self,
+        channels: dict[str, int],
+        *,
+        rgb: tuple[int, int, int] | None = None,
+        rgbw: tuple[int, int, int, int] | None = None,
+        brightness: int,
+    ) -> None:
+        """Remember the exact HA colour while device channels still match it."""
+        self._commanded_channels = {channel: max(0, min(100, int(channels[channel]))) for channel in self.numbers()}
+        self._commanded_brightness = max(1, min(255, int(brightness)))
+        self._commanded_rgb = (
+            (
+                max(0, min(255, int(rgb[0]))),
+                max(0, min(255, int(rgb[1]))),
+                max(0, min(255, int(rgb[2]))),
+            )
+            if rgb is not None
+            else None
+        )
+        self._commanded_rgbw = (
+            (
+                max(0, min(255, int(rgbw[0]))),
+                max(0, min(255, int(rgbw[1]))),
+                max(0, min(255, int(rgbw[2]))),
+                max(0, min(255, int(rgbw[3]))),
+            )
+            if rgbw is not None
+            else None
+        )
+
+    def clear_commanded_light(self) -> None:
+        """Forget a cached HA colour after a non-light channel change."""
+        self._commanded_rgb = None
+        self._commanded_rgbw = None
+        self._commanded_brightness = None
+        self._commanded_channels = None
+
+    def _commanded_state_matches(self) -> bool:
+        """Return whether current decoded channels still match the HA command."""
+        if self._commanded_channels is None:
+            return False
+        return all(int(self.values.get(channel, 0)) == value for channel, value in self._commanded_channels.items())
+
+    async def async_apply_light_channels(self, values: dict[str, int]) -> bool:
+        """Apply colour channels and ensure the physical fixture is powered on."""
+        if not await self.async_set_channels(values):
+            return False
+        self.clear_commanded_light()
+        if not self.values.get("led_on_off"):
+            return await self.async_set_switch("led_on_off", True)
+        return True
+
     async def async_set_master_brightness(self, level: int) -> bool:
         """Scale all supported channels to level, preserving ratios."""
         level = min(100, max(0, round(level / 10) if level > 100 else int(level)))
         chans = self.numbers()
-        old_values = dict(self.values)
         current_max = max((self.values.get(ch, 0) for ch in chans), default=0)
         if current_max <= 0:
-            for ch in chans:
-                self.values[ch] = level
+            targets = {channel: level for channel in chans}
         else:
             factor = level / current_max
-            for ch in chans:
-                self.values[ch] = min(100, max(0, round(self.values.get(ch, 0) * factor)))
-
-        if not await self.async_set_value(chans[0], self.values[chans[0]]):
-            self.values = old_values
-            return False
-        return True
+            targets = {channel: min(100, max(0, round(self.values.get(channel, 0) * factor))) for channel in chans}
+        return await self.async_set_channels(targets)
 
     def entity_name(self, attr: str) -> str:
         """Return a user-facing entity suffix for this device attribute."""

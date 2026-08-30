@@ -247,17 +247,23 @@ def _stub_homeassistant():
     # ---- homeassistant.components.light ----
     class ColorMode(str, enum.Enum):
         BRIGHTNESS = "brightness"
+        RGB = "rgb"
+        RGBW = "rgbw"
 
     class _FakeLightEntity(_FakeEntity):
         _attr_is_on = None
         _attr_brightness = None
         _attr_color_mode = None
         _attr_supported_color_modes = None
+        _attr_rgb_color = None
+        _attr_rgbw_color = None
 
     ha_light = types.ModuleType("homeassistant.components.light")
     ha_light.LightEntity = _FakeLightEntity
     ha_light.ColorMode = ColorMode
     ha_light.ATTR_BRIGHTNESS = "brightness"
+    ha_light.ATTR_RGB_COLOR = "rgb_color"
+    ha_light.ATTR_RGBW_COLOR = "rgbw_color"
 
     # ---- homeassistant.components.websocket_api ----
     ha_ws = types.ModuleType("homeassistant.components.websocket_api")

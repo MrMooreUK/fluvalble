@@ -80,6 +80,7 @@ STARTUP_SCHEDULE_RETRY_COUNT = 12
 MAX_SCHEDULE_POINTS = 96
 SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
 SCHEDULE_POINT_FIELDS = {"time", *SCHEDULE_CHANNELS}
+RETIRED_CHANNEL_SUFFIXES = tuple(f"_channel_{index}" for index in range(1, 6))
 
 
 def _validate_schedule_points(points: object) -> list[dict]:
@@ -147,7 +148,6 @@ SCHEDULE_SERVICE_SCHEMA = vol.Schema(
 )
 
 PLATFORMS: list[Platform] = [
-    Platform.NUMBER,
     Platform.BINARY_SENSOR,
     Platform.BUTTON,
     Platform.SELECT,
@@ -179,6 +179,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     if entry.unique_id != desired_unique_id:
         hass.config_entries.async_update_entry(entry, unique_id=desired_unique_id)
 
+    _remove_retired_channel_entities(hass, entry)
+
     runtime = FluvalRuntimeData()
     entry.runtime_data = runtime
     hass.data[DOMAIN][entry.entry_id] = runtime
@@ -206,7 +208,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             service_info.device,
             service_info.advertisement,
             hass=hass,
-            config_data=dict(entry.data),
+            # Lamp profile is an option and determines whether the light entity
+            # exposes RGB or RGBW. Options intentionally override discovered
+            # config-entry data after a supported entry reload.
+            config_data={**dict(entry.data), **dict(entry.options)},
             ping_interval=ping_interval,
             active_time=active_time,
         )
@@ -216,7 +221,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         # Retroactively add entities for platforms that set up before the
         # device was available (they stashed their add_entities callback).
         from .switch import create_entities as switch_entities  # noqa: PLC0415
-        from .number import create_entities as number_entities  # noqa: PLC0415
         from .binary_sensor import create_entities as sensor_entities  # noqa: PLC0415
         from .select import create_entities as select_entities  # noqa: PLC0415
         from .light import create_entities as light_entities  # noqa: PLC0415
@@ -225,7 +229,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
         factories = {
             Platform.SWITCH: switch_entities,
-            Platform.NUMBER: number_entities,
             Platform.BINARY_SENSOR: sensor_entities,
             Platform.SELECT: select_entities,
             Platform.LIGHT: light_entities,
@@ -315,6 +318,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
     _LOGGER.debug("Setup complete for %s — waiting for BLE", mac)
     return True
+
+
+@callback
+def _remove_retired_channel_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Remove channel sliders superseded by the native colour light entity."""
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    registry = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        domain = str(getattr(entity, "domain", "") or str(entity.entity_id).partition(".")[0])
+        unique_id = str(getattr(entity, "unique_id", ""))
+        if domain == Platform.NUMBER.value and unique_id.endswith(RETIRED_CHANNEL_SUFFIXES):
+            _LOGGER.info("Removing retired Fluval channel entity %s", entity.entity_id)
+            registry.async_remove(entity.entity_id)
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
