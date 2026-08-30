@@ -18,9 +18,13 @@ class FluvalEntity(Entity):
         self.device = device
         self.attr = attr
 
+        # HA unique_ids and device identifiers are case-sensitive. Proxies can
+        # report mixed-case MACs; keep a single uppercase form so entities are
+        # not duplicated or orphaned across reloads.
+        mac = device.mac.upper()
         self._attr_device_info = DeviceInfo(
-            connections={(CONNECTION_BLUETOOTH, device.mac)},
-            identifiers={(DOMAIN, device.mac)},
+            connections={(CONNECTION_BLUETOOTH, mac)},
+            identifiers={(DOMAIN, mac)},
             manufacturer="Fluval",
             model=device.model_name,
             name=device.name or "Fluval",
@@ -31,7 +35,7 @@ class FluvalEntity(Entity):
             self._attr_translation_key = None
         else:
             self._attr_translation_key = attr
-        self._attr_unique_id = device.mac.replace(":", "").upper() + "_" + attr
+        self._attr_unique_id = mac.replace(":", "") + "_" + attr
 
         # Store the bound method so deregistration uses the exact same object.
         self._update_handler = self.internal_update
