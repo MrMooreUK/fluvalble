@@ -26,7 +26,8 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | Feature | Description |
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
-| **Native light control** | Use Home Assistant's standard light card for power, brightness, and colour. AquaSky fixtures expose RGBW; Plant and Marine spectra are translated to RGB. |
+| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant and Marine spectra are translated to RGB. |
+| **Classic weather effects** | Positively identified classic controllers expose the 11 native FluvalConnect weather effects, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
@@ -125,7 +126,7 @@ After setup you'll see one device with entities like:
 
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
-| **Light** | Light | Native power, brightness, and colour control. AquaSky uses RGBW; Plant and Marine spectra use RGB translation. |
+| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGBW; Plant and Marine spectra use RGB translation. |
 | **Switch** | LED | Turn the light on or off. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |

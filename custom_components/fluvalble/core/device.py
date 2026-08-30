@@ -25,6 +25,7 @@ from .discovery import (
     CONF_MODEL,
     detect_model,
 )
+from .effects import effect_id, effect_list as classic_effect_list
 from . import protocol
 
 _LOGGER = logging.getLogger(__name__)
@@ -141,6 +142,7 @@ class Device:
             self.values[channel] = 0
         self.values["mode"] = "manual"
         self.values["led_on_off"] = False
+        self.values["effect"] = None
         self.diagnostics: dict[str, Any] = {
             "status": "not_run",
             "configured_mac": self.address,
@@ -157,6 +159,7 @@ class Device:
         self._commanded_rgbw: tuple[int, int, int, int] | None = None
         self._commanded_brightness: int | None = None
         self._commanded_channels: dict[str, int] | None = None
+        self._effect_restore_channels: dict[str, int] | None = None
 
         if device and advertisement:
             self.update_ble(device, advertisement)
@@ -422,6 +425,87 @@ class Device:
             return await self.async_set_switch("led_on_off", True)
         return True
 
+    def supports_classic_effects(self) -> bool:
+        """Return whether available BLE evidence identifies a classic controller."""
+        if self.client is not None and self.client.command_write_uuid:
+            return self.client.command_write_uuid.lower().startswith("00001001")
+
+        service_uuids = [str(uuid).lower() for uuid in self.conn_info.get("service_uuids", [])]
+        return any(uuid.startswith(("00001000", "00001002")) for uuid in service_uuids) and not any(
+            uuid.startswith(("facebd", "0000fff0")) for uuid in service_uuids
+        )
+
+    def effect_list(self) -> list[str]:
+        """Return effects only when the classic transport is positively identified."""
+        return classic_effect_list() if self.supports_classic_effects() else []
+
+    def _channel_snapshot(self) -> dict[str, int]:
+        """Return the current supported static channel values."""
+        return {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
+
+    def _channels_after_effect(self) -> dict[str, int]:
+        """Return a useful static channel mix for leaving an effect."""
+        targets = self._effect_restore_channels or self._channel_snapshot()
+        if any(targets.values()):
+            return dict(targets)
+        targets = {channel: 0 for channel in self.numbers()}
+        targets["channel_4"] = 100
+        return targets
+
+    def _clear_effect_state(self) -> None:
+        """Clear controller-effect state after a successful static command."""
+        self.values["effect"] = None
+        self._effect_restore_channels = None
+
+    async def async_set_effect(self, effect: str) -> bool:
+        """Start one APK-native effect on a positively identified classic light."""
+        effect_code = effect_id(effect)
+        if effect_code is None:
+            return False
+        if not await self._async_prepare_command():
+            _LOGGER.warning("Cannot set Fluval effect before BLE device is available")
+            return False
+        if not self.supports_classic_effects():
+            _LOGGER.warning(
+                "Classic weather effects are not valid for Fluval transport %s",
+                self.client.command_write_uuid if self.client else None,
+            )
+            return False
+
+        old_values = dict(self.values)
+        old_restore = self._effect_restore_channels
+        if not self.values.get("effect"):
+            static_channels = self._channel_snapshot()
+            if any(static_channels.values()):
+                self._effect_restore_channels = static_channels
+
+        packets: list[bytes] = []
+        if self.values.get("mode") != "manual":
+            packets.append(protocol.old_mode_packet(MODE_TO_CODE["manual"]))
+        if not self.values.get("led_on_off"):
+            packets.append(protocol.old_switch_packet(True))
+        packets.append(protocol.old_weather_effect_packet(effect_code))
+
+        for packet in packets:
+            if not await self._async_send_packet(packet):
+                self.values = old_values
+                self._effect_restore_channels = old_restore
+                return False
+
+        self.values["mode"] = "manual"
+        self.values["led_on_off"] = True
+        self.values["effect"] = effect
+        self.clear_commanded_light()
+        for handler in self.updates_component:
+            handler()
+        return True
+
+    async def async_stop_effect(self) -> bool:
+        """Stop a native effect by restoring the preceding static channel mix."""
+        if not self.values.get("effect"):
+            return True
+        return await self.async_set_channels(self._channels_after_effect(), force=True)
+
     async def async_set_master_brightness(self, level: int) -> bool:
         """Scale all supported channels to level, preserving ratios."""
         level = min(100, max(0, round(level / 10) if level > 100 else int(level)))
@@ -514,6 +598,8 @@ class Device:
     ) -> bool:
         """Set multiple channel values, optionally ramping over time."""
         channels = self.numbers()
+        effect_active = bool(self.values.get("effect"))
+        force = force or effect_active
         targets = {channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels}
         if not targets:
             return False
@@ -541,10 +627,15 @@ class Device:
         if transition <= 0:
             for channel, value in targets.items():
                 self.values[channel] = value
-            return await self._async_send_channel_state(
+            ok = await self._async_send_channel_state(
                 old_values,
                 force_power=force,
             )
+            if ok and effect_active:
+                self._clear_effect_state()
+                for handler in self.updates_component:
+                    handler()
+            return ok
 
         steps = max(1, int(transition / max(1, step_seconds)))
         start_values = {channel: int(old_values[channel]) for channel in channels}
@@ -563,6 +654,10 @@ class Device:
             if step < steps:
                 await asyncio.sleep(step_seconds)
 
+        if effect_active:
+            self._clear_effect_state()
+            for handler in self.updates_component:
+                handler()
         return True
 
     async def _async_send_channel_state(
@@ -850,6 +945,10 @@ class Device:
 
         if not ok:
             self.values = old_values
+            for handler in self.updates_component:
+                handler()
+        elif attr == "led_on_off" and not value and self.values.get("effect"):
+            self._clear_effect_state()
             for handler in self.updates_component:
                 handler()
         return ok

@@ -23,6 +23,7 @@ OLD_READ_PARAMS = bytes((0x68, 0x05))
 OLD_MODE = 0x02
 OLD_SWITCH = 0x03
 OLD_ALL_ZONE = 0x04
+OLD_WEATHER_EFFECT = 0x0A
 OLD_CLOCK = 0x0E
 
 # Mesh clock opcode (full mesh command path is a later PR)
@@ -88,6 +89,13 @@ def old_all_zone_packet(values: Iterable[int]) -> bytes:
         scaled = _clamp_percent(value) * 10
         packet.extend((scaled & 0xFF, scaled >> 8))
     return old_packet(packet)
+
+
+def old_weather_effect_packet(effect_id: int) -> bytes:
+    """Build the APK-native classic weather-effect packet."""
+    if not 1 <= effect_id <= 11:
+        raise ValueError("Classic Fluval effect ID must be between 1 and 11")
+    return old_packet(bytes((0x68, OLD_WEATHER_EFFECT, effect_id)))
 
 
 def old_clock_packet(now: datetime | None = None) -> bytes:

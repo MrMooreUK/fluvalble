@@ -11,6 +11,7 @@ from custom_components.fluvalble.core.device import (
     Device,
     NUMBERS,
 )
+from custom_components.fluvalble.core.effects import WEATHER_EFFECTS
 
 
 def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config):
@@ -32,6 +33,114 @@ def test_initial_values_include_all_channels():
         assert device.values[channel] == 0
     assert device.values["mode"] == "manual"
     assert device.values["led_on_off"] is False
+    assert device.values["effect"] is None
+
+
+def test_classic_effects_require_positive_transport_evidence():
+    unknown = _make_device()
+    classic = _make_device(service_uuids=["00001002-0000-1000-8000-00805f9b34fb"])
+    facebd = _make_device(service_uuids=["facebd00-0000-1000-8000-00805f9b34fb"])
+
+    assert unknown.effect_list() == []
+    assert classic.effect_list() == ["None", *WEATHER_EFFECTS]
+    assert facebd.effect_list() == []
+
+
+def test_native_weather_effect_uses_apk_packet():
+    asyncio.run(_async_test_native_weather_effect_uses_apk_packet())
+
+
+async def _async_test_native_weather_effect_uses_apk_packet():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.client = SimpleNamespace(command_write_uuid="00001001-0000-1000-8000-00805f9b34fb")
+    device.values.update(
+        {
+            "channel_1": 10,
+            "channel_2": 20,
+            "channel_3": 30,
+            "channel_4": 40,
+            "mode": "automatic",
+            "led_on_off": False,
+        }
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_effect("Lightning")
+
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.old_mode_packet(0),
+        protocol.old_switch_packet(True),
+        protocol.old_weather_effect_packet(2),
+    ]
+    assert device.values["effect"] == "Lightning"
+    assert device.values["led_on_off"] is True
+    assert device.values["mode"] == "manual"
+    assert device._effect_restore_channels == {
+        "channel_1": 10,
+        "channel_2": 20,
+        "channel_3": 30,
+        "channel_4": 40,
+    }
+
+
+def test_native_weather_effect_rejects_nonclassic_transport():
+    asyncio.run(_async_test_native_weather_effect_rejects_nonclassic_transport())
+
+
+async def _async_test_native_weather_effect_rejects_nonclassic_transport():
+    device = _make_device()
+    device.client = SimpleNamespace(command_write_uuid="facebd80-0000-1000-8000-00805f9b34fb")
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert not await device.async_set_effect("Lightning")
+    device._async_send_packet.assert_not_awaited()
+    assert device.values["effect"] is None
+
+
+def test_stopping_effect_forces_static_channel_restore():
+    asyncio.run(_async_test_stopping_effect_forces_static_channel_restore())
+
+
+async def _async_test_stopping_effect_forces_static_channel_restore():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    restore = {
+        "channel_1": 10,
+        "channel_2": 20,
+        "channel_3": 30,
+        "channel_4": 40,
+    }
+    device.values.update(restore)
+    device.values["effect"] = "Lightning"
+    device._effect_restore_channels = dict(restore)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_channel_state = AsyncMock(return_value=True)
+
+    assert await device.async_stop_effect()
+
+    device._async_send_channel_state.assert_awaited_once()
+    assert device._async_send_channel_state.await_args.kwargs["force_power"] is True
+    assert device.values["effect"] is None
+
+
+def test_effect_active_off_sends_only_switch_packet():
+    asyncio.run(_async_test_effect_active_off_sends_only_switch_packet())
+
+
+async def _async_test_effect_active_off_sends_only_switch_packet():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.values["led_on_off"] = True
+    device.values["effect"] = "Lightning"
+    device._effect_restore_channels = device._channel_snapshot()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_switch("led_on_off", False)
+
+    device._async_send_packet.assert_awaited_once_with(protocol.old_switch_packet(False))
+    assert device.values["led_on_off"] is False
+    assert device.values["effect"] is None
 
 
 def test_aquasky_2_exposes_four_color_channels():
