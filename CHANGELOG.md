@@ -7,11 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.0.9] — 2026-08-30
+
 ### Fixed
-- Require Fluval manufacturer data for classic discovery without treating that
-  shared vendor identifier as proof of the newer FACEBD protocol (#27, #29).
+- Require Fluval manufacturer data for classic discovery (#27).
 - Restore lowercase BLE characteristic UUIDs for ESPHome 2026.x / esp-idf 5.x
   Bluetooth proxies and keep mixed-case MAC identifiers stable (#29).
+- Treat manufacturer ID 12592 as Fluval vendor evidence for discovery, not
+  FACEBD protocol evidence, so classic AquaSky 2.0 stays four-channel before
+  GATT (#31).
 
 ---
 
