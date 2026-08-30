@@ -45,8 +45,17 @@ def test_facebd_service_uuid_is_likely_fluval():
     assert is_likely_fluval(None, adv)
 
 
-def test_classic_fluval_service_uuid_is_likely_fluval():
+def test_classic_service_uuid_alone_is_not_fluval():
     adv = _advertisement(service_uuids=["00001000-0000-1000-8000-00805f9b34fb"])
+
+    assert not is_likely_fluval(None, adv)
+
+
+def test_classic_service_uuid_with_fluval_manufacturer_data_is_likely_fluval():
+    adv = _advertisement(
+        service_uuids=["00001000-0000-1000-8000-00805f9b34fb"],
+        manufacturer_data={12592: b"480103"},
+    )
 
     assert is_likely_fluval(None, adv)
 
