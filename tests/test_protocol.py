@@ -137,6 +137,81 @@ def test_plant_pro_all_zone_packet_matches_reference_capture():
     }
 
 
+def test_plant_pro_effect_packet_matches_apk_cbor_command():
+    assert protocol.spp_effect_packet(3) == bytes.fromhex("d1 a1 0e 03")
+
+
+def test_plant_pro_auto_schedule_round_trip():
+    packet = protocol.spp_auto_schedule_packet(
+        sunrise=(8, 0, 60),
+        sunset=(20, 30, 45),
+        sleep=(23, 15),
+        day_levels=[80, 70, 60, 50, 40],
+        night_levels=[0, 5, 0, 0, 0],
+    )
+    decoded = protocol.decode_cbor_update(packet)
+
+    assert decoded == {
+        8: bytes((8, 0, 60)),
+        9: bytes((20, 30, 45)),
+        10: bytes((23, 15)),
+        11: bytes((80, 70, 60, 50, 40)),
+        12: bytes((0, 5, 0, 0, 0)),
+    }
+    assert protocol.decode_spp_auto_schedule(decoded) == {
+        "sunrise": "08:00",
+        "sunrise_ramp": 60,
+        "sunset": "20:30",
+        "sunset_ramp": 45,
+        "sleep": "23:15",
+        "day_levels": [80, 70, 60, 50, 40],
+        "night_levels": [0, 5, 0, 0, 0],
+    }
+
+
+def test_plant_pro_pro_schedule_round_trip():
+    points = [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+    ]
+    decoded = protocol.decode_cbor_update(protocol.spp_pro_schedule_packet(points))
+
+    assert decoded[protocol.SPP_PRO_SCHEDULE_KEY] == bytes((2, 8, 0, 0, 0, 0, 0, 0, 12, 30, 80, 70, 60, 50, 40))
+    assert protocol.decode_spp_pro_schedule(decoded) == [
+        {"time": "08:00", "levels": [0, 0, 0, 0, 0]},
+        {"time": "12:30", "levels": [80, 70, 60, 50, 40]},
+    ]
+
+
+def test_plant_pro_effect_schedule_uses_fixed_42_byte_apk_blob():
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 1,
+            "weekdays": [True, False, True, False, True, False, False],
+            "enabled": True,
+        }
+    ]
+    packet = protocol.spp_effect_schedule_packet(windows)
+    decoded = protocol.decode_cbor_update(packet)
+
+    assert packet[:5] == bytes.fromhex("d1 a1 0f 58 2a")
+    assert len(decoded[protocol.SPP_EFFECT_SCHEDULE_KEY]) == 42
+    assert decoded[protocol.SPP_EFFECT_SCHEDULE_KEY][:6] == bytes((0x95, 12, 0, 12, 10, 1))
+    assert protocol.decode_spp_effect_schedule(decoded) == [
+        {
+            "enabled": True,
+            "weekdays": [True, False, True, False, True, False, False],
+            "start": "12:00",
+            "end": "12:10",
+            "effect_id": 1,
+        }
+    ]
+
+
 def test_plant_pro_status_strips_d2_header_and_skips_schedule_blobs():
     status = bytes.fromhex(
         "d2 aa 00 0e 01 00 02 f5 03 18 64 04 18 64 05 18 64 06 18 64 07 18 64 08 43 0d 00 a0 09 43 15 03 26"

@@ -28,6 +28,8 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant, Plant Pro, and Marine spectra are translated to RGB. |
 | **Classic weather effects** | Positively identified classic controllers expose the 11 native FluvalConnect weather effects, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
+| **Plant Pro effects** | Plant Pro / Plant 4.0 exposes its four native effects—Thunderstorm, Lightning, Sun and lightning, and Colour cycle—through the standard light effect control. |
+| **Plant Pro fixture schedules** | Store native Auto, Pro, and timed-effect schedules directly in Plant Pro / Plant 4.0 fixtures with Home Assistant actions. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
@@ -68,6 +70,8 @@ local adapter and ESPHome Bluetooth proxies as signal and availability change.
 ## Installation
 
 ### Option A: HACS (recommended)
+
+[![Open your Home Assistant instance and open this repository inside HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=MrMooreUK&repository=fluvalble&category=integration)
 
 1. Ensure [HACS](https://hacs.xyz/) is installed.
 2. In HACS: **Integrations** → **⋮** → **Custom repositories**.
@@ -118,6 +122,22 @@ Optional dashboard cards are available for AquaSky 3.0 schedule editing,
 spectrum bar preview, and wavelength preview. See
 [`docs/lovelace-cards.md`](docs/lovelace-cards.md) for setup instructions,
 example YAML, usage notes, and preview safety guidance.
+
+### Plant Pro native schedules
+
+Plant Pro / Plant 4.0 can keep schedules in the fixture itself, independently
+of Home Assistant's existing saved schedule and dashboard card. The integration
+provides three actions under **Developer tools → Actions**:
+
+- `fluvalble.set_native_auto_schedule` stores sunrise, sunset, optional sleep,
+  ramp duration, and five-channel day/night levels.
+- `fluvalble.set_native_pro_schedule` stores 1–20 timed five-channel points.
+- `fluvalble.set_native_effect_schedule` stores up to seven effect windows;
+  passing an empty `windows` list clears them.
+
+The action UI contains complete examples and field descriptions. These actions
+are rejected unless the live BLE connection identifies the Plant Pro SPP
+transport. Fixture readback is shown in the Diagnostics entity attributes.
 
 ---
 
