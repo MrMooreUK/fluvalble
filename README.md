@@ -126,7 +126,10 @@ example YAML, usage notes, and preview safety guidance.
 The schedule card offers **Manual** and **Fixture native** modes. Fixture native
 uploads a 2–12 point Professional curve once; Manual disables the fixture's
 onboard schedule. Saved schedules from the retired Home Assistant Auto executor
-are migrated to Fixture native when they fit the controller limit.
+are migrated to Fixture native when they fit the controller limit. **Load from
+fixture** explicitly refreshes the controller and imports a reported Professional
+curve without silently replacing the Home Assistant copy. The card labels its
+current data as local, uploaded, or confirmed fixture readback.
 
 ### Native fixture schedules
 

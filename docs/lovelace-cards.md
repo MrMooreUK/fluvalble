@@ -32,8 +32,8 @@ module as a dashboard resource:
 
 The same JavaScript resource registers three custom cards:
 
-- `custom:fluvalble-schedule-card` shows the 24-hour channel schedule, HA mode,
-  physical preview controls, and the selected time slider.
+- `custom:fluvalble-schedule-card` shows the 24-hour channel schedule, schedule
+  mode and data source, physical preview controls, and the selected time slider.
 - `custom:fluvalble-spectrum-card` shows editable channel bars for the selected
   schedule time.
 - `custom:fluvalble-wavelength-card` shows a wavelength-style preview based on
@@ -163,6 +163,14 @@ light.
 Use **Apply Schedule** to save the current schedule. **Fixture native** uploads
 2-12 points once as the light's Professional schedule, then the controller
 follows its own clock. Manual saves the curve without activating it.
+
+Use **Load from fixture** to request fresh controller state and explicitly import
+its reported Professional curve into the editor. Loading does not save, activate,
+or overwrite the Home Assistant copy until **Apply Schedule** is selected. If the
+fixture reports an Auto sunrise/sunset schedule instead, the card leaves the
+current curve untouched because Auto data cannot be losslessly represented as a
+Professional curve. The subtitle identifies a Home Assistant copy, an uploaded
+curve awaiting readback, or confirmed fixture readback.
 
 Use **Play 24h preview** to loop through the schedule visually. Physical preview
 writes are throttled to 30-minute schedule intervals to avoid unnecessary BLE

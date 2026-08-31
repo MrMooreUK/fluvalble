@@ -382,13 +382,44 @@ def test_plant_pro_status_decodes_effect_and_fixture_schedules():
             "enabled": True,
         }
     ]
+    auto = {
+        "sunrise": (8, 0, 60),
+        "sunset": (20, 30, 45),
+        "sleep": (23, 15),
+        "day_levels": [80, 70, 60, 50, 40],
+        "night_levels": [0, 5, 0, 0, 0],
+    }
+    points = [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+    ]
     status_map = protocol.decode_cbor_update(protocol.spp_effect_schedule_packet(windows))
+    status_map.update(protocol.decode_cbor_update(protocol.spp_auto_schedule_packet(**auto)))
+    status_map.update(protocol.decode_cbor_update(protocol.spp_pro_schedule_packet(points)))
     status_map[protocol.SPP_EFFECT_KEY] = 4
     status = bytes((protocol.SPP_STATUS_HEADER,)) + protocol.cbor_map(status_map)
 
     assert device.decode_update_packet(status)
     assert device.values["effect"] == "Colour cycle"
+    assert device.values["native_auto_schedule"]["sunrise"] == "08:00"
+    assert device.values["native_pro_schedule"][1]["time"] == "12:30"
+    assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
+    assert device.diagnostics["native_schedule_readback_at"]
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+
+
+def test_facebd_schedule_readback_is_recorded_for_dashboard():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    points = [
+        {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+        {"minute": 1200, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+    ]
+    data = protocol.decode_cbor_map(protocol.wifi_pro_schedule_packet(points))
+
+    assert device._decode_wifi_update(data)
+    assert device.values["native_pro_schedule"][1]["minute"] == 1200
+    assert device.diagnostics["native_schedule_protocol"] == "facebd"
+    assert device.diagnostics["native_schedule_readback_at"]
 
 
 def test_plant_pro_switch_mode_and_channels_use_spp_packets():

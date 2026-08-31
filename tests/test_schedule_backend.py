@@ -10,6 +10,7 @@ import voluptuous as vol
 from custom_components.fluvalble import (
     DOMAIN,
     FluvalRuntimeData,
+    _async_schedule_payload,
     _async_load_schedule,
     _async_load_schedule_data,
     _async_migrate_legacy_auto_schedule,
@@ -18,6 +19,7 @@ from custom_components.fluvalble import (
     _validate_native_effect_windows,
     _validate_native_pro_points,
     _async_upload_native_schedule,
+    _native_schedule_readback,
     _validate_schedule_points,
     async_set_schedule_mode,
 )
@@ -351,3 +353,72 @@ def test_integration_has_no_recurring_ha_schedule_executor():
     source = inspect.getsource(integration)
     assert "async_track_time_interval" not in source
     assert "_async_run_auto_schedule" not in source
+
+
+def test_fixture_schedule_readback_normalizes_protocol_shapes():
+    device = _make_device()
+    device.values.update(
+        {
+            "mode": "professional",
+            "native_auto_schedule": {
+                "sunrise": {"hour": 8, "minute": 0, "ramp": 60},
+                "sunset": {"hour": 20, "minute": 30, "ramp": 45},
+                "sleep": {"hour": 23, "minute": 15},
+                "day_levels": [80, 70, 60, 50],
+                "night_levels": [0, 5, 0, 0],
+            },
+            "native_pro_schedule": [
+                {"time": "08:00", "levels": [10, 20, 30, 40, 50]},
+                {"minute": 750, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+            ],
+        }
+    )
+    device.diagnostics.update(
+        {
+            "native_schedule_protocol": "plant_pro",
+            "native_schedule_readback_at": "2026-08-31T18:00:00+00:00",
+        }
+    )
+
+    readback = _native_schedule_readback(device)
+
+    assert readback["available"] is True
+    assert readback["protocol"] == "plant_pro"
+    assert readback["auto"] == {
+        "sunrise": "08:00",
+        "sunrise_ramp": 60,
+        "sunset": "20:30",
+        "sunset_ramp": 45,
+        "sleep": "23:15",
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 5, 0, 0],
+    }
+    assert readback["professional"] == [
+        {"time": "08:00", "red": 10, "green": 20, "blue": 30, "white": 40, "channel_5": 50},
+        {"time": "12:30", "red": 1, "green": 2, "blue": 3, "white": 4, "channel_5": 0},
+    ]
+
+
+def test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch):
+    asyncio.run(_async_test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch))
+
+
+async def _async_test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch):
+    import custom_components.fluvalble as integration
+
+    device = _make_device()
+    device.async_refresh_state = AsyncMock(return_value=True)
+    device.values["native_pro_schedule"] = [
+        {"minute": 480, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40}
+    ]
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "native"}}}
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
+    hass = _FakeHass(device)
+
+    cached = await _async_schedule_payload(hass, "entry_1")
+    refreshed = await _async_schedule_payload(hass, "entry_1", refresh=True)
+
+    assert cached["refresh_ok"] is None
+    assert refreshed["refresh_ok"] is True
+    assert refreshed["fixture"]["professional"][0]["time"] == "08:00"
+    device.async_refresh_state.assert_awaited_once()
