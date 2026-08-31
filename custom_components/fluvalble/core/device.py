@@ -1270,14 +1270,6 @@ class Device:
                 protocol.SPP_MODE_KEY,
                 protocol.SPP_SWITCH_KEY,
                 *(protocol.SPP_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
-                protocol.SPP_AUTO_SUNRISE_KEY,
-                protocol.SPP_AUTO_SUNSET_KEY,
-                protocol.SPP_AUTO_SLEEP_KEY,
-                protocol.SPP_AUTO_DAY_LEVELS_KEY,
-                protocol.SPP_AUTO_NIGHT_LEVELS_KEY,
-                protocol.SPP_PRO_SCHEDULE_KEY,
-                protocol.SPP_EFFECT_KEY,
-                protocol.SPP_EFFECT_SCHEDULE_KEY,
             }
         else:
             supported_keys = {
@@ -1662,28 +1654,6 @@ class Device:
                 updated = True
         if present:
             self._channel_count_hint = 5 if present >= 5 else 4
-
-        if protocol.SPP_EFFECT_KEY in data and isinstance(data[protocol.SPP_EFFECT_KEY], int):
-            effect_code = data[protocol.SPP_EFFECT_KEY]
-            self.values["effect"] = plant_pro_effect_name(effect_code) if effect_code else None
-            updated = True
-
-        auto_schedule = protocol.decode_spp_auto_schedule(data)
-        if auto_schedule is not None:
-            self.diagnostics["plant_pro_auto_schedule"] = auto_schedule
-            updated = True
-
-        pro_schedule = protocol.decode_spp_pro_schedule(data)
-        if pro_schedule is not None:
-            self.diagnostics["plant_pro_pro_schedule"] = pro_schedule
-            updated = True
-
-        effect_schedule = protocol.decode_spp_effect_schedule(data)
-        if effect_schedule is not None:
-            for window in effect_schedule:
-                window["effect"] = plant_pro_effect_name(window["effect_id"])
-            self.diagnostics["plant_pro_effect_schedule"] = effect_schedule
-            updated = True
 
         if updated:
             for handler in self.updates_component:

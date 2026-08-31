@@ -102,6 +102,7 @@ def spp_all_zone_packet(values: Iterable[int]) -> bytes:
     return spp_command(packet)
 
 
+def spp_command(values: dict[int, bool | int]) -> bytes:
 def spp_effect_packet(effect_id: int) -> bytes:
     """Build a Plant Pro native-effect packet recovered from FluvalConnect."""
     if not 0 <= effect_id <= 4:

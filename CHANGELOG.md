@@ -12,17 +12,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   transport for discovery, power, mode, five-channel colour, and live state.
 - Plant Pro RTC synchronization using the FluvalConnect mesh clock command so
   fixture-owned schedules follow Home Assistant's local time.
-- Four Plant Pro native effects through Home Assistant's standard light effect
-  control, based on commands recovered from the FluvalConnect APK.
-- Plant Pro fixture-owned Auto and Pro schedules, plus seven timed native-effect
-  windows, with validated Home Assistant actions and diagnostics readback.
-
-### Documentation
-- Added a one-click HACS repository button and Plant Pro native schedule usage.
-
-### Credits
-- Plant Pro schedule protocol research and hardware validation by
-  [@cryystyy](https://github.com/cryystyy/fluval-plant-pro-4-homeassistant).
 
 ---
 
