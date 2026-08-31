@@ -4,7 +4,7 @@ import asyncio
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_RGBW_COLOR
+from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGBW_COLOR
 
 from custom_components.fluvalble import binary_sensor, button, light, select, sensor, switch
 from custom_components.fluvalble.core.device import Device
@@ -176,6 +176,39 @@ async def _async_test_light_internal_update_and_actions():
         }
     )
     device.async_set_switch.assert_awaited_once_with("led_on_off", False)
+
+
+def test_light_exposes_and_routes_classic_native_effects():
+    asyncio.run(_async_test_light_exposes_and_routes_classic_native_effects())
+
+
+async def _async_test_light_exposes_and_routes_classic_native_effects():
+    device = _make_device()
+    device.conn_info["service_uuids"] = ["00001002-0000-1000-8000-00805f9b34fb"]
+    device.async_set_effect = AsyncMock(return_value=True)
+    device.async_stop_effect = AsyncMock(return_value=True)
+    entity = light.FluvalLight(device, "light")
+
+    assert entity._attr_effect_list == [
+        "None",
+        "Thunderstorm",
+        "Lightning",
+        "Sun and lightning",
+        "Colour cycle",
+        "Mostly sunny",
+        "Partly sunny",
+        "Partly cloudy",
+        "Mostly cloudy",
+        "Full moon",
+        "Half moon",
+        "Crescent moon",
+    ]
+
+    await entity.async_turn_on(**{ATTR_EFFECT: "Lightning"})
+    device.async_set_effect.assert_awaited_once_with("Lightning")
+
+    await entity.async_turn_on(**{ATTR_EFFECT: "None"})
+    device.async_stop_effect.assert_awaited_once()
 
 
 def test_entity_unregisters_update_handler():

@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
+    ATTR_EFFECT,
     ATTR_RGB_COLOR,
     ATTR_RGBW_COLOR,
     ColorMode,
     LightEntity,
+    LightEntityFeature,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
@@ -15,6 +17,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core.device import Device
+from .core.effects import EFFECT_NONE
 from .core.entity import FluvalEntity
 
 PARALLEL_UPDATES = 0
@@ -52,6 +55,7 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     def __init__(self, device: Device, attr: str) -> None:
         super().__init__(device, attr)
+        self._update_effect_capabilities()
         if device.light_mode() == "rgb":
             self._attr_color_mode = ColorMode.RGB
             self._attr_supported_color_modes = {ColorMode.RGB}
@@ -64,6 +68,8 @@ class FluvalLight(FluvalEntity, LightEntity):
         self._attr_available = self.device.controls_available
         self._attr_is_on = bool(self.device.values.get("led_on_off"))
         self._attr_brightness = self.device.light_brightness_255() or None
+        self._attr_effect = self.device.values.get("effect")
+        self._update_effect_capabilities()
 
         if self.device.light_mode() == "rgb":
             self._attr_color_mode = ColorMode.RGB
@@ -81,6 +87,16 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn on the fixture and apply an optional colour or brightness."""
+        requested_effect = kwargs.get(ATTR_EFFECT)
+        if requested_effect == EFFECT_NONE:
+            await self.device.async_stop_effect()
+            self.internal_update()
+            return
+        if requested_effect is not None:
+            await self.device.async_set_effect(str(requested_effect))
+            self.internal_update()
+            return
+
         brightness = max(
             1,
             min(
@@ -121,6 +137,11 @@ class FluvalLight(FluvalEntity, LightEntity):
                 brightness=brightness,
             )
         self.internal_update()
+
+    def _update_effect_capabilities(self) -> None:
+        """Expose native effects only for positively identified classic lights."""
+        self._attr_effect_list = self.device.effect_list()
+        self._attr_supported_features = LightEntityFeature.EFFECT if self._attr_effect_list else 0
 
     def _requested_color(
         self,

@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 
+import pytest
+
 from custom_components.fluvalble.core import protocol
 
 
@@ -79,6 +81,19 @@ def test_old_clock_packet_shape():
     assert packet[6] == local.hour
     assert packet[7] == local.minute
     assert packet[8] == local.second
+
+
+def test_old_weather_effect_packet_uses_apk_command_and_checksum():
+    packet = protocol.old_weather_effect_packet(2)
+
+    assert packet[:3] == bytes((0x68, protocol.OLD_WEATHER_EFFECT, 2))
+    assert packet[-1] == packet[0] ^ packet[1] ^ packet[2]
+
+
+@pytest.mark.parametrize("effect_id", [0, 12])
+def test_old_weather_effect_packet_rejects_unknown_ids(effect_id):
+    with pytest.raises(ValueError):
+        protocol.old_weather_effect_packet(effect_id)
 
 
 def test_mesh_clock_packet_shape():
