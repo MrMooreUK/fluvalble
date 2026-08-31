@@ -95,7 +95,8 @@ class Client:
 
         self.ping_future: asyncio.Future | None = None
         self.ping_task: asyncio.Task | None = None
-        self.ping_time = 0
+        self.ping_time: float = 0.0
+        self._stopping = False
 
         self.send_data = None
         self.send_time = 0
@@ -113,6 +114,7 @@ class Client:
         self.wifi_facebd = False
         self.plant_pro_spp = False
         self.profile = "unresolved"
+        self._connection_lock = asyncio.Lock()
         self._command_lock = asyncio.Lock()
         self._state_update_event = asyncio.Event()
         self._observed_state: dict[int, object] = {}
@@ -254,40 +256,73 @@ class Client:
 
     async def _ensure_client(self):
         """Connect and subscribe to notifications if needed."""
-        if self.client and self.client.is_connected:
-            return self.client
+        async with self._connection_lock:
+            if self._stopping:
+                raise BleakError("Fluval BLE client is stopping")
+            if self.client and self.client.is_connected:
+                return self.client
 
-        last_error: Exception | None = None
-        for attempt in range(1, CONNECT_RETRIES + 1):
+            stale_client = self.client
+            self.client = None
+            if stale_client is not None:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(stale_client.disconnect(), timeout=5)
+
+            device = self._current_device()
             try:
-                device = self._current_device()
-                self.client = await establish_connection(
+                client = await establish_connection(
                     BleakClient,
                     device,
                     device.address,
+                    disconnected_callback=self._on_disconnected,
+                    max_attempts=CONNECT_RETRIES,
                     timeout=CONNECT_TIMEOUT,
                     ble_device_callback=self._current_device,
                 )
-                break
             except (TimeoutError, BleakError, EOFError) as err:
-                last_error = err
-                self.last_error = f"connect attempt {attempt} failed: {type(err).__name__}: {err}"
-                _LOGGER.debug("Fluval connect attempt %s failed", attempt, exc_info=err)
-                await self._safe_disconnect()
-                await asyncio.sleep(attempt)
-        else:
-            raise BleakError(f"Unable to connect to Fluval: {last_error}")
+                self.last_error = f"connect failed: {type(err).__name__}: {err}"
+                raise
 
-        await self._resolve_characteristics()
-        for uuid in self.notify_uuids:
-            with contextlib.suppress(BleakError):
-                await self.client.start_notify(uuid, self.notify_callback)
+            if self._stopping:
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(client.disconnect(), timeout=5)
+                raise BleakError("Fluval BLE client stopped while connecting")
 
+            self.client = client
+            try:
+                await self._resolve_characteristics()
+                for uuid in self.notify_uuids:
+                    with contextlib.suppress(BleakError):
+                        await client.start_notify(uuid, self.notify_callback)
+            except Exception:
+                self.client = None
+                with contextlib.suppress(Exception):
+                    await asyncio.wait_for(client.disconnect(), timeout=5)
+                raise
+
+            if self.status_callback:
+                self.status_callback(True)
+            self.last_error = None
+
+            return client
+
+    def _on_disconnected(self, client: BleakClient) -> None:
+        """Update state and restore an opted-in persistent connection."""
+        if client is not self.client:
+            return
+
+        self.client = None
         if self.status_callback:
-            self.status_callback(True)
-        self.last_error = None
+            self.status_callback(False)
 
-        return self.client
+        # Wake the heartbeat so it stops using the disconnected client.
+        if self.ping_future:
+            self.ping_future.cancel()
+
+        if self._stopping or self._active_time != 0:
+            return
+        if not self.ping_task or self.ping_task.done():
+            self.ping()
 
     async def ensure_connected(self) -> bool:
         """Connect far enough to resolve the live GATT profile."""
@@ -308,7 +343,10 @@ class Client:
 
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
-        self.ping_time = time.time() + self._active_time
+        if self._active_time == 0:
+            self.ping_time = float("inf")
+        else:
+            self.ping_time = time.time() + self._active_time
 
         if not self.ping_task:
             self.ping_task = asyncio.create_task(self._ping_loop())
@@ -348,6 +386,7 @@ class Client:
 
     async def _connect(self):
         """Connect to the Fluval and subscribe to notifications."""
+        connected = False
         try:
             client = await self._ensure_client()
 
@@ -365,6 +404,7 @@ class Client:
                     await self.ready_callback()
                 except Exception as err:  # pylint: disable=broad-except
                     _LOGGER.warning("Fluval post-connect callback failed", exc_info=err)
+            connected = True
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval initial connection failed", exc_info=err)
             if self.status_callback:
@@ -373,6 +413,9 @@ class Client:
             _LOGGER.warning("Unexpected Fluval initial connection error", exc_info=err)
             if self.status_callback:
                 self.status_callback(False)
+        finally:
+            if not self._stopping and (connected or self._active_time == 0):
+                self.ping()
 
     def send(self, data: bytes):
         """Send a packet to the Fluval."""
@@ -389,12 +432,16 @@ class Client:
     async def _ping_loop(self):
         """Ping the Fluval to keep connection."""
         loop = asyncio.get_event_loop()
-        while time.time() < self.ping_time:
+        while time.time() < self.ping_time and not self._stopping:
             try:
-                client = await self._ensure_client()
+                # Reconnect only after any command using the old link has
+                # finished its failure handling. This also makes the heartbeat
+                # the single owner of persistent reconnect cycles.
+                async with self._command_lock:
+                    client = await self._ensure_client()
 
                 # heartbeat loop
-                while time.time() < self.ping_time:
+                while time.time() < self.ping_time and not self._stopping and client is self.client:
                     if self.wake_read_uuid:
                         with contextlib.suppress(BleakError):
                             await client.read_gatt_char(self.wake_read_uuid)
@@ -413,17 +460,25 @@ class Client:
                         if task is not None and task.cancelling():
                             raise
 
-                await client.disconnect()
+                if self._stopping:
+                    break
+                if client is not self.client:
+                    continue
+
+                # Never let the idle deadline disconnect a command in flight.
+                async with self._command_lock:
+                    if time.time() < self.ping_time:
+                        continue
+                    await self._safe_disconnect()
             except TimeoutError:
                 pass
+            except asyncio.CancelledError:
+                raise
             except BleakError as e:
                 _LOGGER.debug("ping error", exc_info=e)
             except Exception as e:
                 _LOGGER.warning("ping error", exc_info=e)
-            finally:
-                self.client = None
-                if self.status_callback:
-                    self.status_callback(False)
+            if not self._stopping and time.time() < self.ping_time:
                 await asyncio.sleep(1)
 
         self.ping_task = None
@@ -621,13 +676,21 @@ class Client:
 
     async def _safe_disconnect(self):
         """Disconnect the underlying BLE client without masking the original error."""
-        if self.client:
+        client = self.client
+        self.client = None
+        if client:
             with contextlib.suppress(Exception):
-                await self.client.disconnect()
-            self.client = None
+                await asyncio.wait_for(client.disconnect(), timeout=5)
+        if self.status_callback:
+            self.status_callback(False)
 
     async def disconnect(self):
-        """Disconnect from the Fluval and stop background work."""
+        """Disconnect from the Fluval while keeping this client reusable."""
+        await self._async_disconnect(final=False)
+
+    async def _async_disconnect(self, *, final: bool) -> None:
+        """Disconnect and optionally prevent this client from being reused."""
+        self._stopping = True
         self.ping_time = 0
 
         if self.ping_future:
@@ -635,23 +698,25 @@ class Client:
 
         if self.ping_task:
             self.ping_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.ping_task
+            with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                await asyncio.wait_for(self.ping_task, timeout=3)
             self.ping_task = None
 
         if self.connect_task:
             self.connect_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await self.connect_task
+            with contextlib.suppress(asyncio.CancelledError, TimeoutError):
+                await asyncio.wait_for(self.connect_task, timeout=3)
+            self.connect_task = None
 
-        await self._safe_disconnect()
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(self._safe_disconnect(), timeout=6)
 
-        if self.status_callback:
-            self.status_callback(False)
+        if not final:
+            self._stopping = False
 
     async def stop(self):
-        """Compatibility wrapper for the integration unload path."""
-        await self.disconnect()
+        """Permanently stop background work during integration unload."""
+        await self._async_disconnect(final=True)
 
 
 def encrypt(data: bytearray) -> bytearray:

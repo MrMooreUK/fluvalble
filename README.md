@@ -114,6 +114,21 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 
+### Connection options
+
+Open the integration's **Configure** dialog to adjust its BLE connection behavior.
+The **Active connection window** accepts `0` for a persistent connection or
+`30`–`600` seconds for an idle timeout. Persistent mode provides the lowest
+command latency and reconnects immediately after an unexpected drop. A finite
+window releases the Bluetooth connection when idle so the official Fluval app
+or a Fluval gateway can connect. The backward-compatible default is `120`
+seconds.
+
+Plant Pro / 4.0 permits only one BLE central at a time. Persistent mode therefore
+prevents the official app or gateway from connecting while Home Assistant holds
+the connection, and it also continuously occupies one local-adapter or ESPHome
+proxy connection slot.
+
 ---
 
 ## Lovelace dashboard cards
@@ -255,8 +270,9 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 **BLE connection lifecycle:**
 - On load and reconnect, the integration asks HA for its best connectable BLE route. This includes local adapters and ESPHome Bluetooth proxies.
 - A keep-alive loop pings the light every 10 seconds to maintain the connection and flush any queued commands.
-- If the connection drops, the integration retries and refreshes the HA-selected route before reconnecting.
-- The connection is cleanly closed after 2 minutes of inactivity (no commands sent).
+- Persistent mode (`0`) keeps the session open and immediately starts one serialized reconnect cycle if the link drops.
+- Finite mode cleanly closes the connection after the configured idle window; the default remains 2 minutes.
+- Each reconnect uses a fresh BLE client and the current HA-selected route.
 
 ---
 
