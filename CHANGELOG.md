@@ -7,9 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.0.11] — 2026-08-31
+
 ### Added
 - APK-native weather effects for positively identified classic Fluval BLE
-  controllers, exposed through Home Assistant's standard light effect control.
+  controllers, exposed through Home Assistant's standard light effect control (#35).
+
+### Changed
+- Tightened Fluval BLE icon and logo to a flat bar-and-wave mark (#36).
 
 ---
 
