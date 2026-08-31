@@ -707,59 +707,6 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
     assert protocol.WIFI_AUTO_SUNRISE_KEY not in expected
 
 
-def test_led_channel_test_verifies_each_channel_and_restores_state(monkeypatch):
-    asyncio.run(_async_test_led_channel_test_verifies_each_channel_and_restores_state(monkeypatch))
-
-
-async def _async_test_led_channel_test_verifies_each_channel_and_restores_state(
-    monkeypatch,
-):
-    import custom_components.fluvalble.core.device as device_module
-
-    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
-    device.values.update(
-        {
-            "channel_1": 8,
-            "channel_2": 7,
-            "channel_3": 6,
-            "channel_4": 5,
-            "led_on_off": False,
-        }
-    )
-    device.client = MagicMock(
-        last_write_verified=True,
-        last_confirmed_state={protocol.WIFI_SWITCH_KEY: True},
-        last_verification_mismatches={},
-    )
-    device.async_set_switch = AsyncMock(return_value=True)
-    device.async_set_channels = AsyncMock(return_value=True)
-    monkeypatch.setattr(device_module, "CHANNEL_TEST_HOLD_SECONDS", 0)
-
-    assert await device.async_test_led_channels()
-
-    assert [result["channel"] for result in device.diagnostics["channel_test_results"]] == [
-        "Power",
-        "Red",
-        "Green",
-        "Blue",
-        "White",
-    ]
-    assert device.diagnostics["status"] == "channel_test_passed"
-    assert device.diagnostics["channel_test_restore_ok"] is True
-    assert device.channel_test_active is False
-    assert device.async_set_channels.await_count == 5
-    device.async_set_channels.assert_awaited_with(
-        {
-            "channel_1": 8,
-            "channel_2": 7,
-            "channel_3": 6,
-            "channel_4": 5,
-        },
-        force=True,
-    )
-    assert device.async_set_switch.await_count == 2
-
-
 def test_facebd_service_uuid_selects_facebd_protocol():
     device = _make_device()
 

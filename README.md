@@ -34,9 +34,8 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
 | **Bluetooth routing** | Works with local Bluetooth adapters and ESP32 boards running ESPHome Bluetooth Proxy. Home Assistant automatically selects the best connectable route on each connection. |
-| **Channel test** | A diagnostic button tests power and each physical LED channel, verifies the state returned by supported controllers, and restores the previous light state. |
 
-Entities are created per device around one native colour light, with mode, connection, and diagnostic controls alongside it. Everything updates from the device when it sends state, so the UI stays in sync.
+Entities are created per device around one native colour light, with mode and connection status alongside it. Everything updates from the device when it sends state, so the UI stays in sync.
 
 ---
 
@@ -114,6 +113,12 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 
+Redacted diagnostics can be downloaded from the integration or device page in
+Home Assistant. The report retains protocol, profile, connection, command, and
+schedule evidence while removing Bluetooth addresses, names, manufacturer and
+service payloads, paths, and registry identifiers. Creating the report does not
+disconnect, scan for, reconnect to, or send commands to the light.
+
 ### Connection options
 
 Open the integration's **Configure** dialog to adjust its BLE connection behavior.
@@ -160,7 +165,7 @@ schedules in the fixture itself. The integration provides actions under
 
 The action UI contains complete examples and field descriptions. These actions
 use the protocol identified by the live BLE connection. Fixture readback is
-shown in the Diagnostics entity attributes where the controller reports it.
+included in the downloadable diagnostics report where the controller reports it.
 
 ---
 
@@ -174,7 +179,7 @@ After setup you'll see one device with entities like:
 | **Switch** | LED | Turn the light on or off. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |
-| **Button** | Test LED Channels | Tests power and each supported channel, records verification details in Diagnostics, then restores the prior state. |
+| **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `switch.fluval_aabbccddeeff_led_on_off`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
 
@@ -253,11 +258,11 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | **Cannot connect / no entities** | Confirm the light is on and in BLE range. Check that HA has Bluetooth enabled and that the adapter can see other BLE devices. Verify the MAC address (no typos, correct format AA:BB:CC:DD:EE:FF). |
 | **My light isn't in the dropdown** | Ensure the light is on and advertising. Use "My device isn't in the list" and enter the MAC manually (from phone Bluetooth settings or the Fluval app). |
 | **Lamp connected but doesn't respond to actions** | Try the Fluval app first to confirm the light works. If the app works but HA doesn't, open an issue with your model and HA logs. |
-| **ESPHome proxy is online but commands are unreliable** | Check the proxy's Wi-Fi signal and place it closer to the light. The integration asks HA for the best connectable adapter or ESPHome proxy on reconnect; no adapter needs to be disabled manually. Run **Test LED Channels** and inspect the Diagnostics sensor for `verified`, `confirmed_state`, and any mismatches. |
+| **ESPHome proxy is online but commands are unreliable** | Check the proxy's Wi-Fi signal and place it closer to the light. The integration asks HA for the best connectable adapter or ESPHome proxy on reconnect; no adapter needs to be disabled manually. Download diagnostics from the Fluval integration or device page and include the report when opening an issue. |
 | **Switch doesn't turn light on/off** | Ensure the light model uses the same BLE command set. Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
 | **Entities show "unavailable"** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
 | **Colour or mode doesn't update** | Some firmware reports only its physical channel levels. Plant/Marine RGB is therefore an approximation when the colour was changed outside Home Assistant. |
-| **Colour control doesn't change the light** | Confirm the fixture works in the Fluval app, select Manual mode, and retry. If it still fails, run **Test LED Channels** and include the Diagnostics result with your model when opening an issue. |
+| **Colour control doesn't change the light** | Confirm the fixture works in the Fluval app, select Manual mode, and retry. If it still fails, download diagnostics from the Fluval integration or device page and include the report with your model when opening an issue. |
 
 If you have a different Fluval BLE model and the switch or other controls don't behave as expected, open an issue with your model name and (if possible) a note on what works in the official app.
 
