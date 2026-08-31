@@ -12,6 +12,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   for classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers using the
   FluvalConnect protocol layouts.
 
+### Changed
+- Replaced the Home Assistant minute-by-minute schedule executor with fixture-native
+  scheduling. Existing Auto curves are migrated once when they contain 2–12
+  points; larger saved curves remain available in Manual mode for editing.
+
 ### Added
 - Plant Pro / Plant 4.0 core BLE support using its native unencrypted SPP
   transport for discovery, power, mode, five-channel colour, and live state.

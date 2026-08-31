@@ -6,7 +6,6 @@ import asyncio
 import inspect
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
 from pathlib import Path
 import re
 from time import monotonic
@@ -22,7 +21,6 @@ from homeassistant.core import CoreState, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.storage import Store
-from homeassistant.helpers.event import async_track_time_interval
 from .core import (
     CONF_ACTIVE_TIME,
     CONF_PING_INTERVAL,
@@ -47,7 +45,7 @@ class FluvalRuntimeData:
 
     device: Device | None = None
     pending_add_entities: dict[Platform, Any] = field(default_factory=dict)
-    auto_schedule_lock: asyncio.Lock | None = field(default=None, repr=False)
+    background_tasks: set[asyncio.Task] = field(default_factory=set, repr=False)
 
 
 try:
@@ -79,9 +77,10 @@ WEBSOCKET_REGISTERED = "websocket_registered"
 STATIC_URL = "/fluvalble"
 STORAGE_KEY = "fluvalble_schedules"
 STORAGE_VERSION = 1
-STARTUP_SCHEDULE_RETRY_SECONDS = 5
-STARTUP_SCHEDULE_RETRY_COUNT = 12
-MAX_SCHEDULE_POINTS = 96
+LEGACY_SCHEDULE_MIGRATION_RETRY_SECONDS = 5
+LEGACY_SCHEDULE_MIGRATION_RETRY_COUNT = 12
+MAX_SCHEDULE_POINTS = 12
+MAX_NATIVE_PRO_SCHEDULE_POINTS = 12
 SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
 SCHEDULE_POINT_FIELDS = {"time", *SCHEDULE_CHANNELS}
 PLANT_PRO_CHANNELS = ("red", "blue", "cool_white", "warm_white", "amber")
@@ -168,8 +167,8 @@ def _validate_native_auto_schedule(value: object) -> dict[str, Any]:
 
 def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
     """Validate Plant Pro fixture-owned Pro schedule points."""
-    if not isinstance(value, list) or not 1 <= len(value) <= 20:
-        raise vol.Invalid("Plant Pro schedule must contain 1 to 20 points")
+    if not isinstance(value, list) or not 2 <= len(value) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
+        raise vol.Invalid(f"Native Professional schedule must contain 2 to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points")
     points = []
     for point in value:
         if not isinstance(point, dict) or set(point) != {"time", *PLANT_PRO_CHANNELS}:
@@ -257,7 +256,7 @@ SCHEDULE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional("entry_id"): str,
         vol.Optional("mac"): str,
         vol.Required("points"): _validate_schedule_points,
-        vol.Optional("mode"): vol.In(["manual", "auto", "native"]),
+        vol.Optional("mode"): vol.In(["manual", "native"]),
     }
 )
 
@@ -324,6 +323,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     hass.data[DOMAIN][entry.entry_id] = runtime
     last_discovery_log = 0.0
 
+    def create_runtime_task(coroutine) -> asyncio.Task:
+        """Create a task owned by this config entry and track it for unload."""
+        task = hass.async_create_task(coroutine)
+        runtime.background_tasks.add(task)
+        task.add_done_callback(runtime.background_tasks.discard)
+        return task
+
     def log_discovery_update(message: str, service_info, change) -> None:
         """Throttle noisy BLE advertisement debug logs."""
         nonlocal last_discovery_log
@@ -381,9 +387,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         runtime.pending_add_entities.clear()
 
         _LOGGER.info("Device %s ready", mac)
-        # A light can be rediscovered after an adapter recovery.  Re-apply an
-        # active HA schedule immediately rather than waiting for the next tick.
-        hass.async_create_task(_async_run_auto_schedule(hass, entry.entry_id))
         return device
 
     # Try Bluetooth cache first — instant entity setup if the light was just discovered.
@@ -433,24 +436,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         )
     )
 
-    @callback
-    def async_schedule_tick(_now) -> None:
-        """Queue periodic work safely when HA invokes this from a thread."""
-        hass.create_task(_async_run_auto_schedule(hass, entry.entry_id))
-
-    entry.async_on_unload(async_track_time_interval(hass, async_schedule_tick, timedelta(minutes=1)))
-    # Do not begin startup BLE work until all integrations have had their
-    # chance to load. A reload happens while HA is already running, so it can
-    # start immediately in that case.
     if hass.state is CoreState.running:
-        hass.async_create_task(_async_apply_startup_schedule(hass, entry.entry_id))
+        create_runtime_task(_async_migrate_legacy_auto_schedule(hass, entry.entry_id))
     else:
-        entry.async_on_unload(
-            hass.bus.async_listen_once(
-                EVENT_HOMEASSISTANT_STARTED,
-                lambda _event: hass.create_task(_async_apply_startup_schedule(hass, entry.entry_id)),
-            )
+        startup_listener_fired = False
+
+        @callback
+        def _migrate_legacy_schedule_once(_event) -> None:
+            nonlocal startup_listener_fired
+            startup_listener_fired = True
+            create_runtime_task(_async_migrate_legacy_auto_schedule(hass, entry.entry_id))
+
+        remove_startup_listener = hass.bus.async_listen_once(
+            EVENT_HOMEASSISTANT_STARTED,
+            _migrate_legacy_schedule_once,
         )
+
+        @callback
+        def _remove_pending_startup_listener() -> None:
+            if not startup_listener_fired:
+                remove_startup_listener()
+
+        entry.async_on_unload(_remove_pending_startup_listener)
 
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
@@ -612,14 +619,17 @@ def _register_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(
                 device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
             )
+        if mode == "manual" and not await _async_set_fixture_manual(hass, entry_id):
+            device = _device_for_entry(hass, entry_id)
+            raise HomeAssistantError(
+                device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
+            )
         await _async_save_schedule(
             hass,
             entry_id,
             call.data["points"],
             mode=mode,
         )
-        if call.data.get("mode") == "auto":
-            await _async_run_auto_schedule(hass, entry_id)
 
     async def async_set_native_auto_schedule(call: ServiceCall) -> None:
         device = get_device(call)
@@ -795,10 +805,15 @@ async def _async_save_schedule(
             handler()
 
 
+def _device_for_entry(hass: HomeAssistant, entry_id: str) -> Device | None:
+    """Return the currently loaded device for a config entry."""
+    return _runtime_device(hass.data.get(DOMAIN, {}).get(entry_id))
+
+
 async def async_set_schedule_mode(hass: HomeAssistant, entry_id: str, mode: str) -> None:
-    """Set the HA-owned schedule mode exposed in the device controls."""
-    if mode not in {"manual", "auto", "native"}:
-        raise HomeAssistantError(f"Unsupported HA schedule mode: {mode}")
+    """Set whether the saved curve is inactive or stored in the fixture."""
+    if mode not in {"manual", "native"}:
+        raise HomeAssistantError(f"Unsupported fixture schedule mode: {mode}")
 
     saved = await _async_load_schedule_data(hass, entry_id)
     points = saved.get("points") or []
@@ -807,9 +822,12 @@ async def async_set_schedule_mode(hass: HomeAssistant, entry_id: str, mode: str)
         raise HomeAssistantError(
             device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
         )
+    if mode == "manual" and not await _async_set_fixture_manual(hass, entry_id):
+        device = _device_for_entry(hass, entry_id)
+        raise HomeAssistantError(
+            device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
+        )
     await _async_save_schedule(hass, entry_id, points, mode=mode)
-    if mode == "auto":
-        await _async_run_auto_schedule(hass, entry_id)
 
 
 async def _async_upload_native_schedule(hass: HomeAssistant, entry_id: str, points: list[dict]) -> bool:
@@ -830,145 +848,54 @@ async def _async_upload_native_schedule(hass: HomeAssistant, entry_id: str, poin
     return ok
 
 
-async def _async_apply_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool:
-    """Apply the saved schedule for one entry when HA schedule mode is auto."""
-    runtime = hass.data.get(DOMAIN, {}).get(entry_id)
-    if not isinstance(runtime, FluvalRuntimeData):
-        return False
-
-    device = runtime.device
+async def _async_set_fixture_manual(hass: HomeAssistant, entry_id: str) -> bool:
+    """Disable the onboard schedule by selecting the fixture's Manual mode."""
+    device = _device_for_entry(hass, entry_id)
     if device is None:
         return False
+    if device.values.get("mode") == "manual":
+        return True
+    return await device.async_select_option("mode", "manual")
 
+
+async def _async_migrate_legacy_auto_schedule(hass: HomeAssistant, entry_id: str) -> None:
+    """Convert an old HA-executed Auto curve to a native fixture schedule."""
     saved = await _async_load_schedule_data(hass, entry_id)
-    device.schedule_mode = saved.get("mode", "manual")
     if saved.get("mode") != "auto":
-        device.diagnostics.update(
-            {
-                "auto_schedule_mode": saved.get("mode", "manual"),
-                "auto_schedule_last_result": ("fixture_native" if saved.get("mode") == "native" else "manual_mode"),
-            }
-        )
-        return True
-    if device.channel_test_active:
-        device.diagnostics.update(
-            {
-                "auto_schedule_mode": "auto",
-                "auto_schedule_last_result": "channel_test_active",
-            }
-        )
-        return True
-    if not saved.get("points"):
-        device.diagnostics.update(
-            {
-                "auto_schedule_mode": "auto",
-                "auto_schedule_last_result": "no_schedule",
-            }
-        )
-        return True
+        return
 
-    # Use HA local time through dt_util to respect the configured timezone.
-    from homeassistant.util import dt as dt_util  # noqa: PLC0415
-
-    local_now = dt_util.now()
-    minute = (local_now.hour * 60) + local_now.minute
-    points = device._normalize_schedule_points(saved["points"])  # noqa: SLF001
-    channels = device._interpolate_schedule(points, minute)  # noqa: SLF001
-    device.diagnostics.update(
-        {
-            "auto_schedule_mode": "auto",
-            "auto_schedule_last_run": local_now.isoformat(),
-            "auto_schedule_time": device._format_minute(minute),  # noqa: SLF001
-            "auto_schedule_target": channels,
-        }
-    )
-    # Local channel values are only a cache.  Do not let them prevent a
-    # recovery attempt after a dropped or stale Bluetooth connection.
-    last_seen = device.conn_info.get("last_seen")
-    is_recent = bool(
-        last_seen and (dt_util.utcnow() - last_seen).total_seconds() <= timedelta(minutes=5).total_seconds()
-    )
-    needs_recovery = not device.connected or not is_recent
-    if not needs_recovery and all(int(device.values.get(channel, -1)) == value for channel, value in channels.items()):
-        device.diagnostics.update(
-            {
-                "status": "auto_schedule_skipped",
-                "auto_schedule_last_result": "unchanged",
-            }
-        )
-        for handler in device.updates_connect:
-            handler()
-        return True
-
-    ok = await device.async_set_channels(channels, force=needs_recovery)
-    confirmation_required = bool(device.client is not None and device.client.raw_facebd)
-    verified = bool(not confirmation_required or (device.client is not None and device.client.last_write_verified))
-    applied = bool(ok and verified)
-    device.diagnostics.update(
-        {
-            "status": (
-                "auto_schedule_applied" if applied else ("auto_schedule_unverified" if ok else "auto_schedule_failed")
-            ),
-            "auto_schedule_last_result": ("applied" if applied else ("unverified" if ok else "failed")),
-            "auto_schedule_last_error": (
-                None
-                if applied
-                else (
-                    "The AquaSky did not confirm the requested channel state"
-                    if ok
-                    else device.diagnostics.get("last_error")
-                )
-            ),
-        }
-    )
-    for handler in device.updates_connect:
-        handler()
-    return applied
-
-
-async def _async_run_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool:
-    """Run the auto schedule without allowing a timer exception to be lost."""
-    runtime = hass.data.get(DOMAIN, {}).get(entry_id)
-    if not isinstance(runtime, FluvalRuntimeData):
-        return False
-    if runtime.auto_schedule_lock is None:
-        runtime.auto_schedule_lock = asyncio.Lock()
-    try:
-        async with runtime.auto_schedule_lock:
-            return await _async_apply_auto_schedule(hass, entry_id)
-    except Exception:  # noqa: BLE001
-        _LOGGER.exception("Unable to apply auto schedule for entry %s", entry_id)
-        runtime = hass.data.get(DOMAIN, {}).get(entry_id)
-        device = _runtime_device(runtime)
+    points = saved.get("points") or []
+    if not 2 <= len(points) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
+        await _async_save_schedule(hass, entry_id, points, mode="manual")
+        device = _device_for_entry(hass, entry_id)
         if device is not None:
             device.diagnostics.update(
                 {
-                    "status": "auto_schedule_failed",
-                    "auto_schedule_last_result": "exception",
-                    "auto_schedule_last_error": "Unexpected scheduler error; check the Home Assistant log",
+                    "native_schedule_last_result": "legacy_schedule_requires_edit",
+                    "last_error": f"Reduce the saved schedule to 2-{MAX_NATIVE_PRO_SCHEDULE_POINTS} points",
                 }
             )
-            for handler in device.updates_connect:
-                handler()
-        return False
+        _LOGGER.warning(
+            "Legacy Fluval schedule for entry %s has %s points; saved it as Manual because the fixture supports at most %s",
+            entry_id,
+            len(points),
+            MAX_NATIVE_PRO_SCHEDULE_POINTS,
+        )
+        return
 
-
-async def _async_apply_startup_schedule(hass: HomeAssistant, entry_id: str) -> None:
-    """Apply Auto mode once the Bluetooth device is available after startup."""
-    for attempt in range(STARTUP_SCHEDULE_RETRY_COUNT):
-        runtime = hass.data.get(DOMAIN, {}).get(entry_id)
-        device = _runtime_device(runtime)
+    for attempt in range(LEGACY_SCHEDULE_MIGRATION_RETRY_COUNT):
+        device = _device_for_entry(hass, entry_id)
         if device is not None:
-            device.diagnostics["auto_schedule_startup_attempt"] = attempt + 1
-            if await _async_run_auto_schedule(hass, entry_id):
+            device.diagnostics["native_schedule_migration_attempt"] = attempt + 1
+            if await _async_upload_native_schedule(hass, entry_id, points):
+                await _async_save_schedule(hass, entry_id, points, mode="native")
                 return
-        await asyncio.sleep(STARTUP_SCHEDULE_RETRY_SECONDS)
+        await asyncio.sleep(LEGACY_SCHEDULE_MIGRATION_RETRY_SECONDS)
 
     _LOGGER.warning(
-        "Fluval device for entry %s was not available after %s seconds; "
-        "the next one-minute Auto schedule tick will retry",
+        "Could not migrate legacy Fluval schedule for entry %s after %s seconds; it remains saved for a later retry",
         entry_id,
-        STARTUP_SCHEDULE_RETRY_SECONDS * STARTUP_SCHEDULE_RETRY_COUNT,
+        LEGACY_SCHEDULE_MIGRATION_RETRY_SECONDS * LEGACY_SCHEDULE_MIGRATION_RETRY_COUNT,
     )
 
 
@@ -983,6 +910,12 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
         runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
+        tasks = list(runtime.background_tasks)
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        runtime.background_tasks.clear()
         client = runtime.device.client
         if client is not None:
             try:

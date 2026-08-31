@@ -458,10 +458,7 @@ class Client:
         elif len(data) > 15:
             # The classic APK path chunks the complete plaintext frame to 15
             # bytes, then encrypts each slice independently.
-            payloads = [
-                encryption.encrypt(bytearray(data[offset : offset + 15]))
-                for offset in range(0, len(data), 15)
-            ]
+            payloads = [encryption.encrypt(bytearray(data[offset : offset + 15])) for offset in range(0, len(data), 15)]
         else:
             payloads = [protocol.encrypted_old_packet(data)]
 

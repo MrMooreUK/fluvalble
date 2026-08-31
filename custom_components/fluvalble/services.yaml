@@ -138,7 +138,7 @@ stop_preview:
 
 save_schedule:
   name: Save schedule
-  description: Save a Fluval 24-hour channel schedule and HA schedule mode for dashboard cards.
+  description: Save a Fluval 24-hour curve and optionally upload it to the fixture's native scheduler.
   fields:
     entry_id:
       name: Config entry ID
@@ -169,12 +169,11 @@ save_schedule:
         object:
     mode:
       name: Schedule mode
-      description: Manual saves only. Auto has Home Assistant apply values every minute. Native uploads 2-12 points once and lets the fixture run its own clock.
+      description: Manual saves the curve and disables the onboard scheduler. Native uploads 2-12 points once and lets the fixture run its own clock.
       selector:
         select:
           options:
             - manual
-            - auto
             - native
 
 set_native_auto_schedule:

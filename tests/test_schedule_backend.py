@@ -1,7 +1,7 @@
-"""Tests for saved schedules and the HA-managed auto scheduler."""
+"""Tests for saved schedules and fixture-native scheduling."""
 
 import asyncio
-from datetime import UTC, datetime
+import inspect
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -10,17 +10,14 @@ import voluptuous as vol
 from custom_components.fluvalble import (
     DOMAIN,
     FluvalRuntimeData,
-    _async_apply_auto_schedule,
-    _async_apply_startup_schedule,
     _async_load_schedule,
     _async_load_schedule_data,
-    _async_run_auto_schedule,
+    _async_migrate_legacy_auto_schedule,
     _async_save_schedule,
     _validate_native_auto_schedule,
     _validate_native_effect_windows,
     _validate_native_pro_points,
     _async_upload_native_schedule,
-    _validate_native_pro_schedule_points,
     _validate_schedule_points,
     async_set_schedule_mode,
 )
@@ -133,7 +130,15 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
                 "cool_white": 60,
                 "warm_white": 50,
                 "amber": 40,
-            }
+            },
+            {
+                "time": "20:00",
+                "red": 0,
+                "blue": 0,
+                "cool_white": 0,
+                "warm_white": 0,
+                "amber": 0,
+            },
         ]
     )
     windows = _validate_native_effect_windows(
@@ -147,7 +152,10 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
         ]
     )
 
-    assert points == [{"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]}]
+    assert points == [
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+    ]
     assert windows[0]["effect_id"] == 1
     assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
 
@@ -191,24 +199,20 @@ async def _async_test_save_schedule_preserves_existing_mode(monkeypatch):
 
 
 def test_control_schedule_mode_updates_the_saved_schedule(monkeypatch):
-    asyncio.run(_async_test_control_schedule_mode_updates_the_saved_schedule(monkeypatch))
+    asyncio.run(_async_test_removed_ha_auto_mode_is_rejected(monkeypatch))
 
 
-async def _async_test_control_schedule_mode_updates_the_saved_schedule(monkeypatch):
+async def _async_test_removed_ha_auto_mode_is_rejected(monkeypatch):
     import custom_components.fluvalble as integration
+    from homeassistant.exceptions import HomeAssistantError
 
     device = _make_device()
     hass = _FakeHass(device)
     _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "manual"}}}
     monkeypatch.setattr(integration, "Store", _MemoryStore)
-    run_auto_schedule = AsyncMock(return_value=True)
-    monkeypatch.setattr(integration, "_async_run_auto_schedule", run_auto_schedule)
 
-    await async_set_schedule_mode(hass, "entry_1", "auto")
-
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "auto"
-    assert device.schedule_mode == "auto"
-    run_auto_schedule.assert_awaited_once_with(hass, "entry_1")
+    with pytest.raises(HomeAssistantError, match="Unsupported fixture schedule mode"):
+        await async_set_schedule_mode(hass, "entry_1", "auto")
 
 
 def test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch):
@@ -258,13 +262,13 @@ async def _async_test_failed_native_mode_upload_does_not_replace_working_mode(mo
     device.command_error_message = MagicMock(return_value="write failed")
     hass = _FakeHass(device)
     points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "auto"}}}
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "manual"}}}
     monkeypatch.setattr(integration, "Store", _MemoryStore)
 
     with pytest.raises(HomeAssistantError, match="write failed"):
         await async_set_schedule_mode(hass, "entry_1", "native")
 
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "auto"
+    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "manual"
 
 
 def test_load_schedule_supports_legacy_list_records(monkeypatch):
@@ -284,226 +288,66 @@ async def _async_test_load_schedule_supports_legacy_list_records(monkeypatch):
     }
 
 
-def test_auto_schedule_ignores_manual_mode(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_ignores_manual_mode(monkeypatch))
+def test_manual_schedule_mode_disables_fixture_scheduler(monkeypatch):
+    asyncio.run(_async_test_manual_schedule_mode_disables_fixture_scheduler(monkeypatch))
 
 
-async def _async_test_auto_schedule_ignores_manual_mode(monkeypatch):
+async def _async_test_manual_schedule_mode_disables_fixture_scheduler(monkeypatch):
     import custom_components.fluvalble as integration
 
     device = _make_device()
-    device.async_set_channels = AsyncMock()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "manual"}}}
+    device.values["mode"] = "professional"
+    device.async_select_option = AsyncMock(return_value=True)
+    points = _schedule_points()
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "native"}}}
     monkeypatch.setattr(integration, "Store", _MemoryStore)
 
-    await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
+    await async_set_schedule_mode(_FakeHass(device), "entry_1", "manual")
 
-    device.async_set_channels.assert_not_called()
-    assert device.diagnostics["auto_schedule_last_result"] == "manual_mode"
-
-
-def test_auto_schedule_skips_unchanged_values(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_skips_unchanged_values(monkeypatch))
+    device.async_select_option.assert_awaited_once_with("mode", "manual")
+    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "manual"
 
 
-async def _async_test_auto_schedule_skips_unchanged_values(monkeypatch):
-    import homeassistant.util.dt as dt_util
+def test_legacy_auto_schedule_migrates_to_fixture(monkeypatch):
+    asyncio.run(_async_test_legacy_auto_schedule_migrates_to_fixture(monkeypatch))
+
+
+async def _async_test_legacy_auto_schedule_migrates_to_fixture(monkeypatch):
     import custom_components.fluvalble as integration
 
     device = _make_device()
-    device.values.update({"channel_1": 3, "channel_2": 0, "channel_3": 8, "channel_4": 0})
-    device.conn_info["last_seen"] = datetime(2026, 1, 1, 19, 0, tzinfo=UTC)
-    device.async_set_channels = AsyncMock()
-    handler = MagicMock()
-    device.updates_connect.append(handler)
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    dt_util.now.return_value = datetime(2026, 1, 1, 19, 0, tzinfo=UTC)
-    dt_util.utcnow.return_value = datetime(2026, 1, 1, 19, 0, tzinfo=UTC)
-
-    await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
-
-    device.async_set_channels.assert_not_called()
-    assert device.diagnostics["status"] == "auto_schedule_skipped"
-    assert device.diagnostics["auto_schedule_last_result"] == "unchanged"
-    handler.assert_called_once()
-
-
-def test_auto_schedule_applies_interpolated_values(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_applies_interpolated_values(monkeypatch))
-
-
-async def _async_test_auto_schedule_applies_interpolated_values(monkeypatch):
-    import homeassistant.util.dt as dt_util
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.async_set_channels = AsyncMock(return_value=True)
-    device.conn_info["last_seen"] = datetime(2026, 1, 1, 19, 30, tzinfo=UTC)
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    dt_util.now.return_value = datetime(2026, 1, 1, 19, 30, tzinfo=UTC)
-    dt_util.utcnow.return_value = datetime(2026, 1, 1, 19, 30, tzinfo=UTC)
-
-    await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
-
-    device.async_set_channels.assert_awaited_once_with(
-        {
-            "channel_1": 2,
-            "channel_2": 0,
-            "channel_3": 4,
-            "channel_4": 0,
-            "channel_5": 0,
-        },
-        force=False,
-    )
-    assert device.diagnostics["status"] == "auto_schedule_applied"
-    assert device.diagnostics["auto_schedule_time"] == "19:30"
-
-
-def test_auto_schedule_retries_when_cached_values_are_stale(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_retries_when_cached_values_are_stale(monkeypatch))
-
-
-async def _async_test_auto_schedule_retries_when_cached_values_are_stale(monkeypatch):
-    import homeassistant.util.dt as dt_util
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.connected = False
-    device.values.update({"channel_1": 3, "channel_2": 0, "channel_3": 8, "channel_4": 0})
-    device.async_set_channels = AsyncMock(return_value=True)
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    dt_util.now.return_value = datetime(2026, 1, 1, 19, 0, tzinfo=UTC)
-    dt_util.utcnow.return_value = datetime(2026, 1, 1, 19, 0, tzinfo=UTC)
-
-    await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
-
-    device.async_set_channels.assert_awaited_once_with(
-        {"channel_1": 3, "channel_2": 0, "channel_3": 8, "channel_4": 0, "channel_5": 0},
-        force=True,
-    )
-
-
-def test_auto_schedule_records_failed_writes(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_records_failed_writes(monkeypatch))
-
-
-async def _async_test_auto_schedule_records_failed_writes(monkeypatch):
-    import homeassistant.util.dt as dt_util
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.diagnostics["last_error"] = "No Fluval BLE write target accepted the command"
-    device.async_set_channels = AsyncMock(return_value=False)
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    dt_util.now.return_value = datetime(2026, 1, 1, 19, 30, tzinfo=UTC)
-
-    await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
-
-    assert device.diagnostics["status"] == "auto_schedule_failed"
-    assert device.diagnostics["auto_schedule_last_result"] == "failed"
-    assert device.diagnostics["auto_schedule_last_error"] == "No Fluval BLE write target accepted the command"
-
-
-def test_auto_schedule_retries_an_unverified_facebd_write(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_retries_an_unverified_facebd_write(monkeypatch))
-
-
-async def _async_test_auto_schedule_retries_an_unverified_facebd_write(
-    monkeypatch,
-):
-    import custom_components.fluvalble as integration
-    import homeassistant.util.dt as dt_util
-
-    device = _make_device()
-    device.client = MagicMock(raw_facebd=True, last_write_verified=False)
-    device.async_set_channels = AsyncMock(return_value=True)
-    _MemoryStore.data = {
-        "schedules": {
-            "entry_1": {
-                "points": _schedule_points(),
-                "mode": "auto",
-            }
-        }
-    }
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    dt_util.now.return_value = datetime(2026, 1, 1, 19, 30, tzinfo=UTC)
-    dt_util.utcnow.return_value = datetime(2026, 1, 1, 19, 30, tzinfo=UTC)
-
-    assert not await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
-
-    assert device.diagnostics["status"] == "auto_schedule_unverified"
-    assert device.diagnostics["auto_schedule_last_result"] == "unverified"
-    assert device.diagnostics["auto_schedule_last_error"] == "The AquaSky did not confirm the requested channel state"
-
-
-def test_auto_schedule_pauses_during_channel_test(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_pauses_during_channel_test(monkeypatch))
-
-
-async def _async_test_auto_schedule_pauses_during_channel_test(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.channel_test_active = True
-    device.async_set_channels = AsyncMock()
-    _MemoryStore.data = {
-        "schedules": {
-            "entry_1": {
-                "points": _schedule_points(),
-                "mode": "auto",
-            }
-        }
-    }
+    device.async_set_native_pro_schedule = AsyncMock(return_value=True)
+    points = _schedule_points()
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "auto"}}}
     monkeypatch.setattr(integration, "Store", _MemoryStore)
 
-    assert await _async_apply_auto_schedule(_FakeHass(device), "entry_1")
+    await _async_migrate_legacy_auto_schedule(_FakeHass(device), "entry_1")
 
-    device.async_set_channels.assert_not_awaited()
-    assert device.diagnostics["auto_schedule_last_result"] == "channel_test_active"
-
-
-def test_auto_schedule_records_unexpected_exception(monkeypatch):
-    asyncio.run(_async_test_auto_schedule_records_unexpected_exception(monkeypatch))
+    device.async_set_native_pro_schedule.assert_awaited_once_with(points, activate=True)
+    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "native"
 
 
-async def _async_test_auto_schedule_records_unexpected_exception(monkeypatch):
+def test_legacy_schedule_over_fixture_limit_becomes_manual(monkeypatch):
+    asyncio.run(_async_test_legacy_schedule_over_fixture_limit_becomes_manual(monkeypatch))
+
+
+async def _async_test_legacy_schedule_over_fixture_limit_becomes_manual(monkeypatch):
     import custom_components.fluvalble as integration
 
     device = _make_device()
-    monkeypatch.setattr(
-        integration,
-        "_async_apply_auto_schedule",
-        AsyncMock(side_effect=RuntimeError("storage unavailable")),
-    )
+    points = [{"time": f"{hour:02d}:00"} for hour in range(13)]
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "auto"}}}
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
 
-    await _async_run_auto_schedule(_FakeHass(device), "entry_1")
+    await _async_migrate_legacy_auto_schedule(_FakeHass(device), "entry_1")
 
-    assert device.diagnostics["status"] == "auto_schedule_failed"
-    assert device.diagnostics["auto_schedule_last_result"] == "exception"
+    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "manual"
+    assert device.diagnostics["native_schedule_last_result"] == "legacy_schedule_requires_edit"
 
 
-def test_startup_schedule_waits_for_the_bluetooth_device(monkeypatch):
-    asyncio.run(_async_test_startup_schedule_waits_for_the_bluetooth_device(monkeypatch))
-
-
-async def _async_test_startup_schedule_waits_for_the_bluetooth_device(monkeypatch):
+def test_integration_has_no_recurring_ha_schedule_executor():
     import custom_components.fluvalble as integration
 
-    hass = _FakeHass()
-    device = _make_device()
-    apply = AsyncMock(return_value=True)
-
-    async def make_device_available(_seconds):
-        hass.data[DOMAIN]["entry_1"].device = device
-
-    monkeypatch.setattr(integration, "_async_run_auto_schedule", apply)
-    monkeypatch.setattr(integration.asyncio, "sleep", make_device_available)
-
-    await _async_apply_startup_schedule(hass, "entry_1")
-
-    apply.assert_awaited_once_with(hass, "entry_1")
-    assert device.diagnostics["auto_schedule_startup_attempt"] == 2
+    source = inspect.getsource(integration)
+    assert "async_track_time_interval" not in source
+    assert "_async_run_auto_schedule" not in source

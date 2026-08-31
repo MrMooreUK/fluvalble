@@ -439,7 +439,10 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
         "day_levels": [80, 70, 60, 50, 40],
         "night_levels": [0, 5, 0, 0, 0],
     }
-    points = [{"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]}]
+    points = [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+    ]
     windows = [
         {
             "start_hour": 12,
@@ -463,11 +466,13 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
             day_levels=auto["day_levels"],
             night_levels=auto["night_levels"],
         ),
+        protocol.spp_mode_packet(1),
         protocol.spp_pro_schedule_packet(points),
+        protocol.spp_mode_packet(2),
         protocol.spp_effect_schedule_packet(windows),
     ]
-    assert device.diagnostics["plant_pro_auto_schedule"]["sunrise"] == "08:00"
-    assert device.diagnostics["plant_pro_pro_schedule"][0]["time"] == "12:30"
+    assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
+    assert device.diagnostics["native_pro_schedule_points"] == 2
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
 
 
@@ -491,6 +496,23 @@ def test_plant_pro_expected_state_uses_spp_keys():
 
 def test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
     asyncio.run(_async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet())
+
+
+def test_stopping_preview_reactivates_the_native_fixture_mode():
+    asyncio.run(_async_test_stopping_preview_reactivates_the_native_fixture_mode())
+
+
+async def _async_test_stopping_preview_reactivates_the_native_fixture_mode():
+    device = _make_device()
+    device.preview_restore_values = {"channel_1": 50}
+    device.preview_restore_mode = "professional"
+    device.async_select_option = AsyncMock(return_value=True)
+    device.async_set_channels = AsyncMock(return_value=True)
+
+    await device.async_stop_preview()
+
+    device.async_select_option.assert_awaited_once_with("mode", "professional")
+    device.async_set_channels.assert_not_awaited()
 
 
 async def _async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet():

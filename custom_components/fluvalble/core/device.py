@@ -163,6 +163,7 @@ class Device:
         }
         self.preview_task: asyncio.Task | None = None
         self.preview_restore_values: dict[str, int] | None = None
+        self.preview_restore_mode: str | None = None
         self._clock_synced = False
         self._clock_sync_lock = asyncio.Lock()
         # Preserve the exact colour HA requested while the decoded physical
@@ -603,7 +604,16 @@ class Device:
         """Store a protocol-native Professional schedule in the fixture."""
         if not await self._async_prepare_command():
             return False
-        normalized = self._normalize_schedule_points(points)
+        if points and all("time" not in point and "levels" in point for point in points):
+            normalized = [
+                {
+                    "minute": (int(point["hour"]) * 60) + int(point["minute"]),
+                    **{f"channel_{index}": int(level) for index, level in enumerate(point["levels"], start=1)},
+                }
+                for point in points
+            ]
+        else:
+            normalized = self._normalize_schedule_points(points)
         if not 2 <= len(normalized) <= 12:
             self._set_diagnostic_error(
                 "invalid_native_schedule",
@@ -888,6 +898,9 @@ class Device:
         """Preview a 24-hour schedule on the real light in compressed time."""
         await self.async_stop_preview()
         self.preview_restore_values = {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
+        self.preview_restore_mode = (
+            self.values.get("mode") if self.values.get("mode") in {"automatic", "professional"} else None
+        )
         self.preview_task = asyncio.create_task(self._async_preview_schedule(points, duration, step_seconds))
         return True
 
@@ -898,7 +911,12 @@ class Device:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.preview_task
         self.preview_task = None
-        if self.preview_restore_values:
+        restore_mode = self.preview_restore_mode
+        self.preview_restore_mode = None
+        if restore_mode is not None:
+            self.preview_restore_values = None
+            await self.async_select_option("mode", restore_mode)
+        elif self.preview_restore_values:
             restore_values = self.preview_restore_values
             self.preview_restore_values = None
             await self.async_set_channels(restore_values)
@@ -1655,9 +1673,7 @@ class Device:
             for index in range(len(channels), 5):
                 self.values[f"channel_{index + 1}"] = 0
         elif self.values["mode"] == "automatic":
-            auto_schedule = protocol.decode_old_auto_schedule(
-                data[2:-1], channel_count=self._resolved_channel_count()
-            )
+            auto_schedule = protocol.decode_old_auto_schedule(data[2:-1], channel_count=self._resolved_channel_count())
             if auto_schedule is not None:
                 self.values["native_auto_schedule"] = auto_schedule
                 self.diagnostics["native_auto_schedule"] = auto_schedule
