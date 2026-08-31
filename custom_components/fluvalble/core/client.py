@@ -25,6 +25,7 @@ COMMAND_GAP = 0.75
 POST_WRITE_STATE_DELAY = 0.8
 STATE_NOTIFY_TIMEOUT = 0.75
 UNVERIFIED_WRITE_COPIES = 2
+CHUNK_WRITE_GAP = 0.01
 
 # Hardware capture from AquaSky 3.0 establishes this FACEBD split:
 #   facebd01 = raw CBOR command writes
@@ -429,7 +430,6 @@ class Client:
 
     async def _write_packet(self, uuid: str, data: bytes):
         """Write a packet using the right wire format for the active profile."""
-        payload = data if self.raw_facebd else protocol.encrypted_old_packet(data)
         characteristic = self._get_characteristic(uuid)
         # Prefer write-without-response when available — matches ESPHome
         # fluval_ble_led and fixes Aquasky 2.0 lights that ignore response writes (#6).
@@ -440,15 +440,41 @@ class Client:
             response = True
         else:
             response = False
+        payloads: list[bytes | bytearray]
+        if self.raw_facebd:
+            # FluvalConnect packages raw FACEBD/SPP writes at MTU - 3. Native
+            # Pro schedules can exceed the default 20-byte ATT payload and
+            # must be delivered as consecutive chunks for the fixture to
+            # reassemble them.
+            chunk_size = 20
+            characteristic_limit = getattr(characteristic, "max_write_without_response_size", None)
+            if isinstance(characteristic_limit, int) and characteristic_limit > 0:
+                chunk_size = characteristic_limit
+            else:
+                mtu_size = getattr(self.client, "mtu_size", None)
+                if isinstance(mtu_size, int) and mtu_size > 3:
+                    chunk_size = mtu_size - 3
+            payloads = [data[offset : offset + chunk_size] for offset in range(0, len(data), chunk_size)]
+        elif len(data) > 15:
+            # The classic APK path chunks the complete plaintext frame to 15
+            # bytes, then encrypts each slice independently.
+            payloads = [encryption.encrypt(bytearray(data[offset : offset + 15])) for offset in range(0, len(data), 15)]
+        else:
+            payloads = [protocol.encrypted_old_packet(data)]
 
-        _LOGGER.debug(
-            "Writing Fluval packet to %s response=%s raw=%s encrypted=%s",
-            uuid,
-            response,
-            to_hex(data),
-            to_hex(payload),
-        )
-        await self.client.write_gatt_char(uuid, data=payload, response=response)
+        for index, payload in enumerate(payloads):
+            _LOGGER.debug(
+                "Writing Fluval packet to %s response=%s chunk=%s/%s raw=%s encrypted=%s",
+                uuid,
+                response,
+                index + 1,
+                len(payloads),
+                to_hex(data) if index == 0 else "(cont)",
+                to_hex(payload),
+            )
+            await self.client.write_gatt_char(uuid, data=payload, response=response)
+            if index + 1 < len(payloads):
+                await asyncio.sleep(CHUNK_WRITE_GAP)
 
     async def request_state(self, expected_state: dict[int, object] | None = None) -> bool:
         """Read current controller state and optionally verify requested values."""

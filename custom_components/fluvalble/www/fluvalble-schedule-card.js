@@ -28,7 +28,6 @@ class FluvalbleScheduleCard extends HTMLElement {
     this.store = getScheduleStore(this.config);
     this.previewMinute = this.previewMinute ?? this.store.selectedMinute;
     this._subscribeStore();
-    this.startAutoClock();
     this.attachShadow({ mode: "open" });
     this.render();
   }
@@ -81,10 +80,10 @@ class FluvalbleScheduleCard extends HTMLElement {
 
           <div class="actions">
             <label class="mode-control">
-              HA mode
+              Schedule mode
               <select id="schedule-mode">
-                <option value="manual" ${this.store.mode !== "auto" ? "selected" : ""}>Manual</option>
-                <option value="auto" ${this.store.mode === "auto" ? "selected" : ""}>Auto</option>
+                <option value="manual" ${this.store.mode === "manual" ? "selected" : ""}>Manual</option>
+                <option value="native" ${this.store.mode === "native" ? "selected" : ""}>Fixture native</option>
               </select>
             </label>
             <button id="apply">Apply Schedule</button>
@@ -135,15 +134,17 @@ class FluvalbleScheduleCard extends HTMLElement {
     });
     root.getElementById("schedule-mode").addEventListener("change", (event) => {
       setScheduleMode(this.config, event.target.value, this);
-      persistSchedule(this.config, this);
-      if (this.store.mode === "auto") {
-        // Saving Auto immediately starts the backend scheduler.  This card
-        // only follows its time cursor; it must not be the active scheduler.
-        this.syncToCurrentTime();
-      }
-      this.toast(`HA mode set to ${this.store.mode === "auto" ? "Auto" : "Manual"}`);
+      persistSchedule(this.config, this, true);
+      const labels = { manual: "Manual", native: "Fixture native" };
+      this.toast(`Schedule mode set to ${labels[this.store.mode] || "Manual"}`);
     });
     root.getElementById("apply").addEventListener("click", () => {
+      if (this.store.mode === "native") {
+        saveScheduleNow(this.config, this).then(() => {
+          this.toast("Schedule uploaded to the fixture");
+        });
+        return;
+      }
       const channels = interpolate(this.store.points, this.previewMinute);
       this.store.lastManualChannels = channels;
       this.applyChannels(channels).then(() => {
@@ -236,9 +237,9 @@ class FluvalbleScheduleCard extends HTMLElement {
     this.stopPreviewTimerOnly();
     const stopped = this.callService("stop_preview", targetData(this.config));
 
-    if ((this.store.previewRestoreMode || this.store.mode) === "auto") {
+    if ((this.store.previewRestoreMode || this.store.mode) === "native") {
       stopped.finally(() => {
-        this.syncToCurrentTime({ apply: true, force: true });
+        saveScheduleNow(this.config, this);
       });
       return;
     }
@@ -272,10 +273,7 @@ class FluvalbleScheduleCard extends HTMLElement {
       if (Array.isArray(result?.points) && result.points.length) {
         this.store.points = normalizePoints(result.points);
       }
-      this.store.mode = result?.mode || "manual";
-      if (this.store.mode === "auto") {
-        this.syncToCurrentTime({ notify: false });
-      }
+      this.store.mode = ["native", "auto"].includes(result?.mode) ? "native" : "manual";
       this.store.loaded = true;
       notifyScheduleStore(this.config, null);
       this.render();
@@ -301,40 +299,6 @@ class FluvalbleScheduleCard extends HTMLElement {
       cursor.setAttribute("x1", x);
       cursor.setAttribute("x2", x);
     }
-  }
-
-  syncToCurrentTime({ notify = true, apply = false, force = false } = {}) {
-    if (this.store.playing) return;
-    this.previewMinute = currentMinute();
-    if (notify) {
-      setSelectedMinute(this.config, this.previewMinute, this);
-    } else {
-      this.store.selectedMinute = this.previewMinute;
-    }
-    this.updateLocalTimeDisplay();
-
-    if (apply) {
-      const channels = interpolate(this.store.points, this.previewMinute);
-      const alreadyApplied = (
-        !force
-        && this.store.lastCurrentTimeApplyMinute === this.previewMinute
-        && sameChannels(this.store.lastCurrentTimeApplyChannels, channels)
-      );
-      if (!alreadyApplied) {
-        this.store.lastCurrentTimeApplyMinute = this.previewMinute;
-        this.store.lastCurrentTimeApplyChannels = channels;
-        this.applyChannels(channels);
-      }
-    }
-  }
-
-  startAutoClock() {
-    if (this._autoClock) return;
-    this._autoClock = setInterval(() => {
-      if (this.store?.mode === "auto" && !this.store.playing) {
-        this.syncToCurrentTime();
-      }
-    }, 30000);
   }
 
   _subscribeStore() {
@@ -692,7 +656,7 @@ function easedValue(from, to, progress) {
 
 function setScheduleMode(config, mode, source) {
   const store = getScheduleStore(config);
-  store.mode = mode === "auto" ? "auto" : "manual";
+  store.mode = mode === "native" ? "native" : "manual";
   notifyScheduleStore(config, source);
 }
 
@@ -705,19 +669,28 @@ function notifyScheduleStore(config, source) {
   }));
 }
 
-function persistSchedule(config, source) {
+function persistSchedule(config, source, force = false) {
   if (!source?._hass) return;
   const store = getScheduleStore(config);
+  if (store.mode === "native" && !force) return;
   clearTimeout(store.saveTimer);
   store.saveTimer = setTimeout(() => {
-    source._hass.callService("fluvalble", "save_schedule", {
-      ...targetData(config),
-      points: denormalizePoints(store.points),
-      mode: store.mode || "manual",
-    }).catch((error) => {
+    saveScheduleNow(config, source).catch((error) => {
       console.warn("Unable to save Fluval schedule", error);
     });
   }, 500);
+}
+
+function saveScheduleNow(config, source) {
+  if (!source?._hass) return Promise.resolve();
+  const store = getScheduleStore(config);
+  clearTimeout(store.saveTimer);
+  store.saveTimer = null;
+  return source._hass.callService("fluvalble", "save_schedule", {
+    ...targetData(config),
+    points: denormalizePoints(store.points),
+    mode: store.mode || "manual",
+  });
 }
 
 function denormalizePoints(points) {

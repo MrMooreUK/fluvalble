@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from typing import Any
 
@@ -17,7 +17,17 @@ WIFI_CLOCK_MS_KEY = 102
 WIFI_MODE_KEY = 103
 WIFI_SWITCH_KEY = 104
 WIFI_MANUAL_KEY = 109
-WIFI_CHANNEL_KEYS = (110, 111, 112, 113, 114)
+WIFI_CHANNEL_KEYS = (110, 111, 112, 113)
+WIFI_AUTO_SUNRISE_KEY = 114
+WIFI_AUTO_SUNSET_KEY = 115
+WIFI_AUTO_SLEEP_KEY = 116
+WIFI_AUTO_DAY_LEVELS_KEY = 117
+WIFI_AUTO_NIGHT_LEVELS_KEY = 118
+WIFI_AUTO_PREVIEW_KEY = 119
+WIFI_PRO_COUNT_KEY = 120
+WIFI_PRO_TIMES_KEY = 121
+WIFI_PRO_LEVELS_KEY = 122
+WIFI_SCHEDULED_EFFECT_KEY = 123
 
 SPP_COMMAND_HEADER = 0xD1
 SPP_STATUS_HEADER = 0xD2
@@ -41,8 +51,13 @@ OLD_READ_PARAMS = bytes((0x68, 0x05))
 OLD_MODE = 0x02
 OLD_SWITCH = 0x03
 OLD_ALL_ZONE = 0x04
+OLD_AUTO_SCHEDULE = 0x07
 OLD_WEATHER_EFFECT = 0x0A
+OLD_AUTO_PREVIEW = 0x0B
+OLD_AUTO_PREVIEW_STOP = 0x0C
 OLD_CLOCK = 0x0E
+OLD_PRO_SCHEDULE = 0x10
+OLD_SCHEDULED_EFFECT = 0x11
 
 # Mesh / Plant Pro clock opcode recovered from FluvalConnect.
 MESH_OPCODE_CLOCK = 0xCD
@@ -83,6 +98,97 @@ def wifi_timezone_packet(now: datetime | None = None) -> bytes:
 def mesh_clock_packet(now: datetime | None = None) -> bytes:
     """Build mesh/Plant Pro clock sync (0xCD + Y M D W h m s)."""
     return bytes((MESH_OPCODE_CLOCK,)) + _clock_payload(now)
+
+
+def wifi_auto_schedule_packet(
+    *,
+    sunrise: tuple[int, int, int],
+    sunset: tuple[int, int, int],
+    sleep: tuple[int, int] | None,
+    day_levels: Iterable[int],
+    night_levels: Iterable[int],
+) -> bytes:
+    """Build the FluvalConnect FACEBD native Auto schedule map.
+
+    Keys 114/115 contain start/end minutes, key 116 is the optional sleep
+    minute (65535 means disabled), and keys 117/118 contain channel levels.
+    The public schedule API expresses sunrise as start+ramp and sunset as
+    end+ramp, matching the mesh fixture API, so convert that representation to
+    the FACEBD controller's absolute minute pairs here.
+    """
+    sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
+    sunrise_end = min(1439, sunrise_start + _clamp_ramp(sunrise[2]))
+    sunset_end = _minute_of_day(sunset[0], sunset[1])
+    sunset_start = max(0, sunset_end - _clamp_ramp(sunset[2]))
+    sleep_minute = 0xFFFF if sleep is None else _minute_of_day(sleep[0], sleep[1])
+    return cbor_map(
+        {
+            WIFI_AUTO_SUNRISE_KEY: [sunrise_start, sunrise_end],
+            WIFI_AUTO_SUNSET_KEY: [sunset_start, sunset_end],
+            WIFI_AUTO_SLEEP_KEY: sleep_minute,
+            WIFI_AUTO_DAY_LEVELS_KEY: _level_bytes(day_levels, count=4),
+            WIFI_AUTO_NIGHT_LEVELS_KEY: _level_bytes(night_levels, count=4),
+        }
+    )
+
+
+def wifi_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: int = 4) -> bytes:
+    """Build the FluvalConnect FACEBD native Pro schedule map (keys 120-122)."""
+    normalized = _normalized_points(points, channel_count=channel_count)
+    times = [minute for minute, _levels in normalized]
+    levels = bytes(level for _minute, values in normalized for level in values)
+    return cbor_map(
+        {
+            WIFI_PRO_COUNT_KEY: len(normalized),
+            WIFI_PRO_TIMES_KEY: times,
+            WIFI_PRO_LEVELS_KEY: levels,
+        }
+    )
+
+
+def wifi_auto_preview_packet(minute: int | None) -> bytes:
+    """Build FACEBD native preview command; 1440 stops preview in the APK."""
+    return cbor_map({WIFI_AUTO_PREVIEW_KEY: 1440 if minute is None else int(minute) % 1440})
+
+
+def decode_wifi_auto_schedule(data: Mapping[int, Any]) -> dict[str, Any] | None:
+    """Decode FACEBD native Auto fields into the integration schedule shape."""
+    sunrise = _decode_minute_pair(data.get(WIFI_AUTO_SUNRISE_KEY), sunrise=True)
+    sunset = _decode_minute_pair(data.get(WIFI_AUTO_SUNSET_KEY), sunrise=False)
+    sleep = _decode_minute(data.get(WIFI_AUTO_SLEEP_KEY))
+    day_levels = _decode_levels(data.get(WIFI_AUTO_DAY_LEVELS_KEY), minimum=4)
+    night_levels = _decode_levels(data.get(WIFI_AUTO_NIGHT_LEVELS_KEY), minimum=4)
+    if all(value is None for value in (sunrise, sunset, sleep, day_levels, night_levels)):
+        return None
+    return {
+        "sunrise": sunrise,
+        "sunset": sunset,
+        "sleep": sleep,
+        "day_levels": day_levels,
+        "night_levels": night_levels,
+    }
+
+
+def decode_wifi_pro_schedule(data: Mapping[int, Any], *, channel_count: int = 4) -> list[dict[str, Any]] | None:
+    """Decode FACEBD count/times/levels fields into normalized Pro points."""
+    count = data.get(WIFI_PRO_COUNT_KEY)
+    times = data.get(WIFI_PRO_TIMES_KEY)
+    levels = data.get(WIFI_PRO_LEVELS_KEY)
+    if not isinstance(count, int) or not isinstance(times, list) or not isinstance(levels, bytes):
+        return None
+    if count < 0 or len(times) != count or len(levels) != count * channel_count:
+        return None
+    points: list[dict[str, Any]] = []
+    for index, minute in enumerate(times):
+        if not isinstance(minute, int) or not 0 <= minute < 1440:
+            return None
+        values = levels[index * channel_count : (index + 1) * channel_count]
+        if any(value > 100 for value in values):
+            return None
+        point: dict[str, Any] = {"minute": minute}
+        point.update({f"channel_{channel}": value for channel, value in enumerate(values, start=1)})
+        points.append(point)
+    return points
 
 
 def spp_switch_packet(is_on: bool) -> bytes:
@@ -185,6 +291,111 @@ def old_switch_packet(is_on: bool) -> bytes:
     return old_packet(bytes((0x68, OLD_SWITCH, 0x01 if is_on else 0x00)))
 
 
+def old_auto_schedule_packet(
+    *,
+    sunrise: tuple[int, int, int],
+    sunset: tuple[int, int, int],
+    sleep: tuple[int, int] | None,
+    day_levels: Iterable[int],
+    night_levels: Iterable[int],
+    channel_count: int,
+) -> bytes:
+    """Build classic ``6807`` Auto payload exactly as FluvalConnect exports it."""
+    if channel_count not in (4, 5):
+        raise ValueError("Classic Fluval schedules require four or five channels")
+    sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
+    sunrise_end = min(1439, sunrise_start + _clamp_ramp(sunrise[2]))
+    sunset_end = _minute_of_day(sunset[0], sunset[1])
+    sunset_start = max(0, sunset_end - _clamp_ramp(sunset[2]))
+    payload = bytearray((*_hour_minute(sunrise_start), *_hour_minute(sunrise_end)))
+    payload.extend(_level_bytes(day_levels, count=channel_count))
+    payload.extend((*_hour_minute(sunset_start), *_hour_minute(sunset_end)))
+    payload.extend(_level_bytes(night_levels, count=channel_count))
+    if sleep is not None:
+        payload.extend((1, *_time_bytes(sleep[0], sleep[1])))
+    return old_packet(bytes((0x68, OLD_AUTO_SCHEDULE)) + payload)
+
+
+def old_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: int) -> bytes:
+    """Build classic ``6810`` Pro payload (count + hour/minute/channel points)."""
+    if channel_count not in (4, 5):
+        raise ValueError("Classic Fluval schedules require four or five channels")
+    normalized = _normalized_points(points, channel_count=channel_count)
+    payload = bytearray((len(normalized),))
+    for minute, levels in normalized:
+        payload.extend((*_hour_minute(minute), *levels))
+    return old_packet(bytes((0x68, OLD_PRO_SCHEDULE)) + payload)
+
+
+def old_auto_preview_packet(levels: Iterable[int] | None) -> bytes:
+    """Build classic host-generated preview frame or the ``680C`` stop frame."""
+    if levels is None:
+        return old_packet(bytes((0x68, OLD_AUTO_PREVIEW_STOP)))
+    payload = bytearray((0x68, OLD_AUTO_PREVIEW))
+    for value in levels:
+        scaled = _clamp_percent(value) * 10
+        payload.extend(((scaled >> 8) & 0xFF, scaled & 0xFF))
+    return old_packet(payload)
+
+
+def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, Any] | None:
+    """Decode the body of a classic mode-1 ``6805`` response."""
+    base_length = channel_count * 2 + 9
+    if channel_count not in (4, 5) or len(body) < base_length or body[0] != 1:
+        return None
+    offset = 1
+    sunrise_start = _checked_minute(body[offset], body[offset + 1])
+    sunrise_end = _checked_minute(body[offset + 2], body[offset + 3])
+    if sunrise_start is None or sunrise_end is None:
+        return None
+    offset += 4
+    day_levels = list(body[offset : offset + channel_count])
+    offset += channel_count
+    sunset_start = _checked_minute(body[offset], body[offset + 1])
+    sunset_end = _checked_minute(body[offset + 2], body[offset + 3])
+    if sunset_start is None or sunset_end is None or any(level > 100 for level in day_levels):
+        return None
+    offset += 4
+    night_levels = list(body[offset : offset + channel_count])
+    if any(level > 100 for level in night_levels):
+        return None
+    offset += channel_count
+    sleep = None
+    if len(body) >= offset + 3 and body[offset]:
+        sleep_minute = _checked_minute(body[offset + 1], body[offset + 2])
+        if sleep_minute is None:
+            return None
+        sleep = {"hour": sleep_minute // 60, "minute": sleep_minute % 60}
+    return {
+        "sunrise": _ramp_dict(sunrise_start, max(0, sunrise_end - sunrise_start)),
+        "sunset": _ramp_dict(sunset_end, max(0, sunset_end - sunset_start)),
+        "sleep": sleep,
+        "day_levels": day_levels,
+        "night_levels": night_levels,
+    }
+
+
+def decode_old_pro_schedule(body: bytes, *, channel_count: int) -> list[dict[str, Any]] | None:
+    """Decode the body of a classic mode-2 ``6805`` response."""
+    if channel_count not in (4, 5) or len(body) < 2 or body[0] != 2:
+        return None
+    count = body[1]
+    stride = channel_count + 2
+    if len(body) < 2 + count * stride:
+        return None
+    points: list[dict[str, Any]] = []
+    for index in range(count):
+        offset = 2 + index * stride
+        minute = _checked_minute(body[offset], body[offset + 1])
+        levels = body[offset + 2 : offset + stride]
+        if minute is None or any(level > 100 for level in levels):
+            return None
+        point: dict[str, Any] = {"minute": minute}
+        point.update({f"channel_{channel}": level for channel, level in enumerate(levels, start=1)})
+        points.append(point)
+    return points
+
+
 def old_mode_packet(mode: int) -> bytes:
     """Build the old BLE mode packet."""
     return old_packet(bytes((0x68, OLD_MODE, mode & 0xFF)))
@@ -224,21 +435,15 @@ def encrypted_old_packet(packet: bytes) -> bytearray:
     return encryption.encrypt(encryption.add_crc(bytearray(packet)))
 
 
-def cbor_map(values: dict[int, bool | bytes | int]) -> bytes:
-    """Encode the tiny CBOR subset used by Fluval WiFi BLE light commands."""
+def cbor_map(values: Mapping[int, Any]) -> bytes:
+    """Encode the tiny CBOR subset used by Fluval WiFi/mesh BLE light commands."""
     if len(values) > 23:
         raise ValueError("CBOR helper only supports small maps")
 
     packet = bytearray((0xA0 | len(values),))
     for key, value in values.items():
         packet.extend(_cbor_uint(key))
-        if isinstance(value, bool):
-            packet.append(0xF5 if value else 0xF4)
-        elif isinstance(value, bytes):
-            packet.extend(_cbor_major(2, len(value)))
-            packet.extend(value)
-        else:
-            packet.extend(_cbor_int(value))
+        packet.extend(_cbor_value(value))
     return bytes(packet)
 
 
@@ -360,6 +565,10 @@ def _clamp_percent(value: int) -> int:
     return max(0, min(100, int(value)))
 
 
+def _time_bytes(hour: int, minute: int) -> bytes:
+    return bytes((max(0, min(23, int(hour))), max(0, min(59, int(minute)))))
+
+
 def _validate_time(value: tuple[int, int], label: str) -> tuple[int, int]:
     hour, minute = (int(item) for item in value)
     if not 0 <= hour <= 23 or not 0 <= minute <= 59:
@@ -380,6 +589,108 @@ def _validate_levels(values: Iterable[int], label: str) -> list[int]:
     if len(levels) != 5 or any(not 0 <= value <= 100 for value in levels):
         raise ValueError(f"Plant Pro {label} must contain five values from 0 to 100")
     return levels
+
+
+def _clamp_ramp(value: int) -> int:
+    return max(0, min(240, int(value)))
+
+
+def _minute_of_day(hour: int, minute: int) -> int:
+    return max(0, min(23, int(hour))) * 60 + max(0, min(59, int(minute)))
+
+
+def _hour_minute(minute: int) -> tuple[int, int]:
+    normalized = max(0, min(1439, int(minute)))
+    return normalized // 60, normalized % 60
+
+
+def _checked_minute(hour: int, minute: int) -> int | None:
+    if hour > 23 or minute > 59:
+        return None
+    return hour * 60 + minute
+
+
+def _ramp_dict(minute: int, ramp: int) -> dict[str, int]:
+    return {"hour": minute // 60, "minute": minute % 60, "ramp": ramp}
+
+
+def _decode_minute(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, int) or value == 0xFFFF:
+        return None
+    if not 0 <= value < 1440:
+        return None
+    return {"hour": value // 60, "minute": value % 60}
+
+
+def _decode_minute_pair(value: Any, *, sunrise: bool) -> dict[str, int] | None:
+    if not isinstance(value, list) or len(value) != 2:
+        return None
+    start, end = value
+    if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end < 1440:
+        return None
+    return _ramp_dict(start if sunrise else end, end - start)
+
+
+def _normalized_points(points: Iterable[dict[str, Any]], *, channel_count: int) -> list[tuple[int, list[int]]]:
+    normalized: list[tuple[int, list[int]]] = []
+    for point in points:
+        minute = int(point.get("minute", 0)) % 1440
+        levels = [_clamp_percent(int(point.get(f"channel_{index}", 0))) for index in range(1, channel_count + 1)]
+        normalized.append((minute, levels))
+    if len(normalized) > 255:
+        raise ValueError("Fluval Pro schedule supports at most 255 points")
+    return normalized
+
+
+def _level_bytes(values: Iterable[int], *, count: int = 5) -> bytes:
+    levels = [_clamp_percent(value) for value in values]
+    levels = [*levels[:count], *([0] * max(0, count - len(levels)))]
+    return bytes(levels[:count])
+
+
+def _decode_time_ramp(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, bytes) or len(value) < 3:
+        return None
+    hour, minute, ramp = value[:3]
+    if hour > 23 or minute > 59:
+        return None
+    return {"hour": hour, "minute": minute, "ramp": ramp}
+
+
+def _decode_sleep_time(value: Any) -> dict[str, int] | None:
+    if not isinstance(value, bytes) or len(value) < 2:
+        return None
+    hour, minute = value[:2]
+    if (hour, minute) == (0xFF, 0xFF):
+        return None
+    if hour > 23 or minute > 59:
+        return None
+    return {"hour": hour, "minute": minute}
+
+
+def _decode_levels(value: Any, *, minimum: int = 5) -> list[int] | None:
+    if not isinstance(value, bytes) or len(value) < minimum:
+        return None
+    levels = list(value)
+    if any(level > 100 for level in levels):
+        return None
+    return levels
+
+
+def _cbor_bytes(value: bytes) -> bytes:
+    return _cbor_major(2, len(value)) + value
+
+
+def _cbor_value(value: Any) -> bytes:
+    if isinstance(value, bool):
+        return bytes((0xF5 if value else 0xF4,))
+    if isinstance(value, bytes):
+        return _cbor_bytes(value)
+    if isinstance(value, (list, tuple)):
+        return _cbor_major(4, len(value)) + b"".join(_cbor_value(item) for item in value)
+    if isinstance(value, int):
+        return _cbor_int(value)
+    raise TypeError(f"Unsupported Fluval CBOR value: {type(value).__name__}")
 
 
 def _cbor_int(value: int) -> bytes:

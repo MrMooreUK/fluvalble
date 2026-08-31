@@ -4,7 +4,11 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.fluvalble.core import LAMP_PROFILE_PLANT, protocol
+from custom_components.fluvalble.core import (
+    LAMP_PROFILE_AQUASKY3,
+    LAMP_PROFILE_PLANT,
+)
+from custom_components.fluvalble.core import protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
     CHANNEL_NAMES_PLANT,
@@ -23,6 +27,13 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
             "model": model,
             **config,
         },
+    )
+
+
+def _facebd_client():
+    return SimpleNamespace(
+        raw_facebd=True,
+        command_write_uuid="facebd03-7261-6262-6974-696f74626c65",
     )
 
 
@@ -179,10 +190,16 @@ def test_aquasky_2_exposes_four_color_channels():
     assert device.numbers() == AQUASKY_NUMBERS
 
 
-def test_aquasky_3_name_exposes_five_channels():
+def test_aquasky_3_name_exposes_four_rgbw_channels():
     device = _make_device(name="AquaSky3.0_2F3176", model="AquaSky 3.0 Bluetooth LED")
 
-    assert device.numbers() == NUMBERS
+    assert device.numbers() == AQUASKY_NUMBERS
+
+
+def test_aquasky_3_profile_exposes_four_rgbw_channels():
+    device = _make_device(lamp_profile=LAMP_PROFILE_AQUASKY3)
+
+    assert device.numbers() == AQUASKY_NUMBERS
 
 
 def test_plant_profile_exposes_five_channels_with_plant_labels():
@@ -422,7 +439,10 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
         "day_levels": [80, 70, 60, 50, 40],
         "night_levels": [0, 5, 0, 0, 0],
     }
-    points = [{"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]}]
+    points = [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+    ]
     windows = [
         {
             "start_hour": 12,
@@ -446,11 +466,13 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
             day_levels=auto["day_levels"],
             night_levels=auto["night_levels"],
         ),
+        protocol.spp_mode_packet(1),
         protocol.spp_pro_schedule_packet(points),
+        protocol.spp_mode_packet(2),
         protocol.spp_effect_schedule_packet(windows),
     ]
-    assert device.diagnostics["plant_pro_auto_schedule"]["sunrise"] == "08:00"
-    assert device.diagnostics["plant_pro_pro_schedule"][0]["time"] == "12:30"
+    assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
+    assert device.diagnostics["native_pro_schedule_points"] == 2
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
 
 
@@ -474,6 +496,23 @@ def test_plant_pro_expected_state_uses_spp_keys():
 
 def test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
     asyncio.run(_async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet())
+
+
+def test_stopping_preview_reactivates_the_native_fixture_mode():
+    asyncio.run(_async_test_stopping_preview_reactivates_the_native_fixture_mode())
+
+
+async def _async_test_stopping_preview_reactivates_the_native_fixture_mode():
+    device = _make_device()
+    device.preview_restore_values = {"channel_1": 50}
+    device.preview_restore_mode = "professional"
+    device.async_select_option = AsyncMock(return_value=True)
+    device.async_set_channels = AsyncMock(return_value=True)
+
+    await device.async_stop_preview()
+
+    device.async_select_option.assert_awaited_once_with("mode", "professional")
+    device.async_set_channels.assert_not_awaited()
 
 
 async def _async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
@@ -634,7 +673,7 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
         protocol.WIFI_CHANNEL_KEYS[2]: 30,
         protocol.WIFI_CHANNEL_KEYS[3]: 40,
     }
-    assert protocol.WIFI_CHANNEL_KEYS[4] not in expected
+    assert protocol.WIFI_AUTO_SUNRISE_KEY not in expected
 
 
 def test_led_channel_test_verifies_each_channel_and_restores_state(monkeypatch):

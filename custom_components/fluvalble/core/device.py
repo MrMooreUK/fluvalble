@@ -163,6 +163,7 @@ class Device:
         }
         self.preview_task: asyncio.Task | None = None
         self.preview_restore_values: dict[str, int] | None = None
+        self.preview_restore_mode: str | None = None
         self._clock_synced = False
         self._clock_sync_lock = asyncio.Lock()
         # Preserve the exact colour HA requested while the decoded physical
@@ -250,17 +251,15 @@ class Device:
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
         if profile == LAMP_PROFILE_AQUASKY:
             return 4
-        if profile in (
-            LAMP_PROFILE_PLANT,
-            LAMP_PROFILE_PLANT_PRO,
-            LAMP_PROFILE_AQUASKY3,
-        ):
+        if profile == LAMP_PROFILE_AQUASKY3:
+            return 4
+        if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_PLANT_PRO):
             return 5
         if self._channel_count_hint in (4, 5):
             return self._channel_count_hint
-        if self.facebd or any(
-            str(uuid).lower().startswith("0000fff0") for uuid in self.conn_info.get("service_uuids", [])
-        ):
+        if self.facebd:
+            return 4
+        if self._uses_plant_pro_protocol():
             return 5
 
         model_l = (self.model or "").lower()
@@ -269,13 +268,8 @@ class Device:
 
         if any(token in combined for token in ("plant", "marine", "reef")):
             return 5
-        # AquaSky 3.x / FACEBD-era names are 5-channel; only classic 2.0 is 4.
+        # AquaSky controllers are RGBW. Plant/Marine fixtures remain 5-channel.
         if "aquasky" in combined:
-            if any(token in combined for token in ("3.0", "3_", "aquasky3", "3.0 bluetooth")):
-                return 5
-            if any(token in combined for token in ("2.0", "2_", "aquasky2")):
-                return 4
-            # Ambiguous "AquaSky" without version -> 4 (classic default).
             return 4
         return 5
 
@@ -546,55 +540,125 @@ class Device:
             handler()
         return True
 
-    async def async_set_native_auto_schedule(self, schedule: dict[str, Any]) -> bool:
-        """Store a Plant Pro Auto schedule in the fixture."""
-        if not await self._async_prepare_command() or not self._uses_plant_pro_protocol():
-            self._set_diagnostic_error(
-                "unsupported_transport",
-                "Native Auto schedules require a Plant Pro 4.0 controller",
-            )
+    async def async_set_native_auto_schedule(
+        self,
+        schedule: dict[str, Any],
+        *,
+        activate: bool = True,
+    ) -> bool:
+        """Store a protocol-native Auto schedule in the fixture."""
+        if not await self._async_prepare_command():
             return False
-        packet = protocol.spp_auto_schedule_packet(
-            sunrise=schedule["sunrise"],
-            sunset=schedule["sunset"],
-            sleep=schedule.get("sleep"),
-            day_levels=schedule["day_levels"],
-            night_levels=schedule["night_levels"],
-        )
+
+        if self._uses_wifi_protocol():
+            packet = protocol.wifi_auto_schedule_packet(
+                sunrise=schedule["sunrise"],
+                sunset=schedule["sunset"],
+                sleep=schedule.get("sleep"),
+                day_levels=schedule["day_levels"],
+                night_levels=schedule["night_levels"],
+            )
+            native_protocol = "facebd"
+        elif self._uses_plant_pro_protocol():
+            packet = protocol.spp_auto_schedule_packet(
+                sunrise=schedule["sunrise"],
+                sunset=schedule["sunset"],
+                sleep=schedule.get("sleep"),
+                day_levels=schedule["day_levels"],
+                night_levels=schedule["night_levels"],
+            )
+            native_protocol = "plant_pro"
+        else:
+            packet = protocol.old_auto_schedule_packet(
+                sunrise=schedule["sunrise"],
+                sunset=schedule["sunset"],
+                sleep=schedule.get("sleep"),
+                day_levels=schedule["day_levels"],
+                night_levels=schedule["night_levels"],
+                channel_count=self._resolved_channel_count(),
+            )
+            native_protocol = "classic"
+
         if not await self._async_send_packet(packet):
             return False
-        sunrise = schedule["sunrise"]
-        sunset = schedule["sunset"]
-        sleep = schedule.get("sleep")
-        self.diagnostics["plant_pro_auto_schedule"] = {
-            "sunrise": f"{sunrise[0]:02d}:{sunrise[1]:02d}",
-            "sunrise_ramp": sunrise[2],
-            "sunset": f"{sunset[0]:02d}:{sunset[1]:02d}",
-            "sunset_ramp": sunset[2],
-            "sleep": None if sleep is None else f"{sleep[0]:02d}:{sleep[1]:02d}",
-            "day_levels": list(schedule["day_levels"]),
-            "night_levels": list(schedule["night_levels"]),
-        }
+        if activate and not await self._async_send_packet(self._native_mode_packet("automatic")):
+            return False
+        if activate:
+            self.values["mode"] = "automatic"
+        self.diagnostics.update(
+            {
+                "status": "native_auto_schedule_submitted",
+                "native_schedule_protocol": native_protocol,
+                "native_auto_schedule_packet": packet.hex(),
+            }
+        )
         self._notify_diagnostics_throttled()
         return True
 
-    async def async_set_native_pro_schedule(self, points: list[dict[str, Any]]) -> bool:
-        """Store a Plant Pro multi-point Pro schedule in the fixture."""
-        if not await self._async_prepare_command() or not self._uses_plant_pro_protocol():
+    async def async_set_native_pro_schedule(
+        self,
+        points: list[dict[str, Any]],
+        *,
+        activate: bool = True,
+    ) -> bool:
+        """Store a protocol-native Professional schedule in the fixture."""
+        if not await self._async_prepare_command():
+            return False
+        if points and all("time" not in point and "levels" in point for point in points):
+            normalized = [
+                {
+                    "minute": (int(point["hour"]) * 60) + int(point["minute"]),
+                    **{f"channel_{index}": int(level) for index, level in enumerate(point["levels"], start=1)},
+                }
+                for point in points
+            ]
+        else:
+            normalized = self._normalize_schedule_points(points)
+        if not 2 <= len(normalized) <= 12:
             self._set_diagnostic_error(
-                "unsupported_transport",
-                "Native Pro schedules require a Plant Pro 4.0 controller",
+                "invalid_native_schedule",
+                "Native Professional schedules require 2 to 12 points",
             )
             return False
-        if not await self._async_send_packet(protocol.spp_pro_schedule_packet(points)):
+
+        if self._uses_wifi_protocol():
+            packet = protocol.wifi_pro_schedule_packet(
+                normalized,
+                channel_count=self._resolved_channel_count(),
+            )
+            native_protocol = "facebd"
+        elif self._uses_plant_pro_protocol():
+            spp_points = [
+                {
+                    "hour": point["minute"] // 60,
+                    "minute": point["minute"] % 60,
+                    "levels": [point.get(f"channel_{index}", 0) for index in range(1, 6)],
+                }
+                for point in normalized
+            ]
+            packet = protocol.spp_pro_schedule_packet(spp_points)
+            native_protocol = "plant_pro"
+        else:
+            packet = protocol.old_pro_schedule_packet(
+                normalized,
+                channel_count=self._resolved_channel_count(),
+            )
+            native_protocol = "classic"
+
+        if not await self._async_send_packet(packet):
             return False
-        self.diagnostics["plant_pro_pro_schedule"] = [
+        if activate and not await self._async_send_packet(self._native_mode_packet("professional")):
+            return False
+        if activate:
+            self.values["mode"] = "professional"
+        self.diagnostics.update(
             {
-                "time": f"{point['hour']:02d}:{point['minute']:02d}",
-                "levels": list(point["levels"]),
+                "status": "native_pro_schedule_submitted",
+                "native_schedule_protocol": native_protocol,
+                "native_pro_schedule_points": len(normalized),
+                "native_pro_schedule_packet": packet.hex(),
             }
-            for point in points
-        ]
+        )
         self._notify_diagnostics_throttled()
         return True
 
@@ -834,6 +898,9 @@ class Device:
         """Preview a 24-hour schedule on the real light in compressed time."""
         await self.async_stop_preview()
         self.preview_restore_values = {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
+        self.preview_restore_mode = (
+            self.values.get("mode") if self.values.get("mode") in {"automatic", "professional"} else None
+        )
         self.preview_task = asyncio.create_task(self._async_preview_schedule(points, duration, step_seconds))
         return True
 
@@ -844,7 +911,12 @@ class Device:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.preview_task
         self.preview_task = None
-        if self.preview_restore_values:
+        restore_mode = self.preview_restore_mode
+        self.preview_restore_mode = None
+        if restore_mode is not None:
+            self.preview_restore_values = None
+            await self.async_select_option("mode", restore_mode)
+        elif self.preview_restore_values:
             restore_values = self.preview_restore_values
             self.preview_restore_values = None
             await self.async_set_channels(restore_values)
@@ -1148,8 +1220,6 @@ class Device:
                 # FluvalConnect treats Plant Pro as a mesh light and writes the
                 # raw 0xCD + local date/time frame to its FFF2 SPP endpoint.
                 packets = [protocol.mesh_clock_packet()]
-            elif self._uses_mesh_protocol():
-                packets = [protocol.mesh_clock_packet()]
             else:
                 packets = [protocol.old_clock_packet()]
 
@@ -1170,17 +1240,13 @@ class Device:
                 handler()
             return True
 
-    def _uses_mesh_protocol(self) -> bool:
-        """Return true when advertisements expose the mesh fff0 service."""
-        return any(str(uuid).lower().startswith("0000fff0") for uuid in self.conn_info.get("service_uuids", []))
-
     def _uses_plant_pro_protocol(self) -> bool:
         """Return true for the live Plant Pro 4.0 SPP-over-BLE profile."""
         return bool(self.client is not None and getattr(self.client, "plant_pro_spp", False) is True)
 
     def _uses_wifi_protocol(self) -> bool:
         """Prefer the live GATT profile over advertisement heuristics."""
-        if self.client is not None and self.client.command_write_uuid:
+        if self.client is not None and getattr(self.client, "command_write_uuid", None):
             if self._uses_plant_pro_protocol():
                 self.facebd = False
                 return False
@@ -1196,6 +1262,15 @@ class Device:
                 return False
 
         return self.facebd
+
+    def _native_mode_packet(self, mode: str) -> bytes:
+        """Build the mode command for the active fixture protocol."""
+        mode_code = MODE_TO_CODE[mode]
+        if self._uses_wifi_protocol():
+            return protocol.wifi_mode_packet(mode_code)
+        if self._uses_plant_pro_protocol():
+            return protocol.spp_mode_packet(mode_code)
+        return protocol.old_mode_packet(mode_code)
 
     async def _async_prepare_command(self) -> bool:
         """Resolve the BLE device and connect far enough to know the protocol."""
@@ -1590,14 +1665,23 @@ class Device:
                 ((data[10] << 8) | (data[9] & 0xFF)),
                 ((data[12] << 8) | (data[11] & 0xFF)),
             ]
-            if len(data) > 14:
+            if self._resolved_channel_count() == 5 and len(data) > 14:
                 channels.append((data[14] << 8) | (data[13] & 0xFF))
             self._channel_count_hint = 5 if len(channels) >= 5 else 4
             for index, raw in enumerate(channels):
                 self.values[f"channel_{index + 1}"] = max(0, min(100, round(raw / 10)))
-        else:
-            for channel in NUMBERS:
-                self.values[channel] = 0
+            for index in range(len(channels), 5):
+                self.values[f"channel_{index + 1}"] = 0
+        elif self.values["mode"] == "automatic":
+            auto_schedule = protocol.decode_old_auto_schedule(data[2:-1], channel_count=self._resolved_channel_count())
+            if auto_schedule is not None:
+                self.values["native_auto_schedule"] = auto_schedule
+                self.diagnostics["native_auto_schedule"] = auto_schedule
+        elif self.values["mode"] == "professional":
+            pro_schedule = protocol.decode_old_pro_schedule(data[2:-1], channel_count=self._resolved_channel_count())
+            if pro_schedule is not None:
+                self.values["native_pro_schedule"] = pro_schedule
+                self.diagnostics["native_pro_schedule"] = pro_schedule
 
         _LOGGER.debug(
             "led: %s mode: %s channels: %s / %s / %s / %s / %s",
@@ -1635,6 +1719,26 @@ class Device:
                 updated = True
         if present:
             self._channel_count_hint = 5 if present >= 5 else 4
+
+        facebd_schedule_keys = (
+            protocol.WIFI_AUTO_SUNRISE_KEY,
+            protocol.WIFI_AUTO_SUNSET_KEY,
+            protocol.WIFI_AUTO_SLEEP_KEY,
+            protocol.WIFI_AUTO_DAY_LEVELS_KEY,
+            protocol.WIFI_AUTO_NIGHT_LEVELS_KEY,
+            protocol.WIFI_PRO_COUNT_KEY,
+            protocol.WIFI_PRO_TIMES_KEY,
+            protocol.WIFI_PRO_LEVELS_KEY,
+        )
+        if any(key in data for key in facebd_schedule_keys):
+            auto_schedule = protocol.decode_wifi_auto_schedule(data)
+            pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=self._resolved_channel_count())
+            if auto_schedule is not None:
+                self.values["native_auto_schedule"] = auto_schedule
+                self.diagnostics["native_auto_schedule"] = auto_schedule
+            if pro_schedule is not None:
+                self.values["native_pro_schedule"] = pro_schedule
+                self.diagnostics["native_pro_schedule"] = pro_schedule
 
         if updated:
             for handler in self.updates_component:

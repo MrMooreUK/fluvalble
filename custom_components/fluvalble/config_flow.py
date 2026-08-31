@@ -328,7 +328,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         LAMP_PROFILE_PLANT: "Plant / Marine 5-channel (Rose–Warm White)",
                         LAMP_PROFILE_PLANT_PRO: "Plant Pro / Plant 4.0 (Red–Amber)",
                         LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
-                        LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (5-channel)",
+                        LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (4-channel RGBW)",
                     }
                 ),
                 vol.Optional(

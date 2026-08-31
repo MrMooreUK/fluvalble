@@ -172,7 +172,6 @@ async def _async_test_light_internal_update_and_actions():
             "channel_2": 50,
             "channel_3": 0,
             "channel_4": 0,
-            "channel_5": 0,
         }
     )
     device.async_set_switch.assert_awaited_once_with("led_on_off", False)
