@@ -161,7 +161,8 @@ enabled, applying or previewing a schedule also sends the selected levels to the
 light.
 
 Use **Apply Schedule** to save the current schedule. **Fixture native** uploads
-2-12 points once as the light's Professional schedule, then the controller
+4-10 points for classic/OLD controllers or 4-12 points for FACEBD/MESH
+controllers once as the light's Professional schedule, then the controller
 follows its own clock. Manual saves the curve without activating it.
 
 Use **Load from fixture** to request fresh controller state and explicitly import

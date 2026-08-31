@@ -28,6 +28,8 @@ WIFI_PRO_COUNT_KEY = 120
 WIFI_PRO_TIMES_KEY = 121
 WIFI_PRO_LEVELS_KEY = 122
 WIFI_SCHEDULED_EFFECT_KEY = 123
+WIFI_MIN_PRO_POINTS = 4
+WIFI_MAX_PRO_POINTS = 12
 
 SPP_COMMAND_HEADER = 0xD1
 SPP_STATUS_HEADER = 0xD2
@@ -44,7 +46,8 @@ SPP_PRO_SCHEDULE_KEY = 13
 SPP_EFFECT_KEY = 14
 SPP_MANUAL_KEY = SPP_EFFECT_KEY
 SPP_EFFECT_SCHEDULE_KEY = 15
-SPP_MAX_PRO_POINTS = 20
+SPP_MIN_PRO_POINTS = 4
+SPP_MAX_PRO_POINTS = 12
 SPP_MAX_EFFECT_WINDOWS = 7
 
 OLD_READ_PARAMS = bytes((0x68, 0x05))
@@ -58,6 +61,8 @@ OLD_AUTO_PREVIEW_STOP = 0x0C
 OLD_CLOCK = 0x0E
 OLD_PRO_SCHEDULE = 0x10
 OLD_SCHEDULED_EFFECT = 0x11
+OLD_MIN_PRO_POINTS = 4
+OLD_MAX_PRO_POINTS = 10
 
 # Mesh / Plant Pro clock opcode recovered from FluvalConnect.
 MESH_OPCODE_CLOCK = 0xCD
@@ -135,6 +140,12 @@ def wifi_auto_schedule_packet(
 def wifi_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: int = 4) -> bytes:
     """Build the FluvalConnect FACEBD native Pro schedule map (keys 120-122)."""
     normalized = _normalized_points(points, channel_count=channel_count)
+    _validate_pro_point_count(
+        len(normalized),
+        minimum=WIFI_MIN_PRO_POINTS,
+        maximum=WIFI_MAX_PRO_POINTS,
+        label="FACEBD",
+    )
     times = [minute for minute, _levels in normalized]
     levels = bytes(level for _minute, values in normalized for level in values)
     return cbor_map(
@@ -243,8 +254,12 @@ def spp_auto_schedule_packet(
 def spp_pro_schedule_packet(points: Iterable[dict[str, Any]]) -> bytes:
     """Build the Plant Pro Pro-mode multi-point schedule in CBOR key 13."""
     normalized = list(points)
-    if not 1 <= len(normalized) <= SPP_MAX_PRO_POINTS:
-        raise ValueError(f"Plant Pro schedule requires 1-{SPP_MAX_PRO_POINTS} points")
+    _validate_pro_point_count(
+        len(normalized),
+        minimum=SPP_MIN_PRO_POINTS,
+        maximum=SPP_MAX_PRO_POINTS,
+        label="Plant Pro",
+    )
     blob = bytearray((len(normalized),))
     for point in normalized:
         hour, minute = _validate_time((point["hour"], point["minute"]), "point")
@@ -321,10 +336,22 @@ def old_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: 
     if channel_count not in (4, 5):
         raise ValueError("Classic Fluval schedules require four or five channels")
     normalized = _normalized_points(points, channel_count=channel_count)
+    _validate_pro_point_count(
+        len(normalized),
+        minimum=OLD_MIN_PRO_POINTS,
+        maximum=OLD_MAX_PRO_POINTS,
+        label="Classic Fluval",
+    )
     payload = bytearray((len(normalized),))
     for minute, levels in normalized:
         payload.extend((*_hour_minute(minute), *levels))
     return old_packet(bytes((0x68, OLD_PRO_SCHEDULE)) + payload)
+
+
+def _validate_pro_point_count(count: int, *, minimum: int, maximum: int, label: str) -> None:
+    """Enforce the Professional-schedule limits exposed by FluvalConnect."""
+    if not minimum <= count <= maximum:
+        raise ValueError(f"{label} schedule requires {minimum}-{maximum} points")
 
 
 def old_auto_preview_packet(levels: Iterable[int] | None) -> bytes:

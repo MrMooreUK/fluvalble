@@ -144,7 +144,8 @@ spectrum bar preview, and wavelength preview. See
 example YAML, usage notes, and preview safety guidance.
 
 The schedule card offers **Manual** and **Fixture native** modes. Fixture native
-uploads a 2–12 point Professional curve once; Manual disables the fixture's
+uploads an APK-supported Professional curve once: 4–10 points for classic/OLD
+controllers and 4–12 points for AquaSky 3.0/FACEBD and Plant Pro/MESH. Manual disables the fixture's
 onboard schedule. Saved schedules from the retired Home Assistant Auto executor
 are migrated to Fixture native when they fit the controller limit. **Load from
 fixture** explicitly refreshes the controller and imports a reported Professional
@@ -159,7 +160,8 @@ schedules in the fixture itself. The integration provides actions under
 
 - `fluvalble.set_native_auto_schedule` stores sunrise, sunset, optional sleep,
   ramp duration, and day/night channel levels.
-- `fluvalble.set_native_pro_schedule` stores 2–12 timed channel points.
+- `fluvalble.set_native_pro_schedule` stores 4–10 classic/OLD or 4–12
+  FACEBD/MESH timed channel points, matching FluvalConnect.
 - `fluvalble.set_native_effect_schedule` stores up to seven Plant Pro effect
   windows; passing an empty `windows` list clears them.
 

@@ -80,6 +80,7 @@ STORAGE_VERSION = 1
 LEGACY_SCHEDULE_MIGRATION_RETRY_SECONDS = 5
 LEGACY_SCHEDULE_MIGRATION_RETRY_COUNT = 12
 MAX_SCHEDULE_POINTS = 12
+MIN_NATIVE_PRO_SCHEDULE_POINTS = 4
 MAX_NATIVE_PRO_SCHEDULE_POINTS = 12
 SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
 SCHEDULE_POINT_FIELDS = {"time", *SCHEDULE_CHANNELS}
@@ -173,8 +174,14 @@ def _validate_native_auto_schedule(value: object) -> dict[str, Any]:
 
 def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
     """Validate Plant Pro fixture-owned Pro schedule points."""
-    if not isinstance(value, list) or not 2 <= len(value) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
-        raise vol.Invalid(f"Native Professional schedule must contain 2 to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points")
+    if (
+        not isinstance(value, list)
+        or not MIN_NATIVE_PRO_SCHEDULE_POINTS <= len(value) <= MAX_NATIVE_PRO_SCHEDULE_POINTS
+    ):
+        raise vol.Invalid(
+            "Native Professional schedule must contain "
+            f"{MIN_NATIVE_PRO_SCHEDULE_POINTS} to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points"
+        )
     points = []
     for point in value:
         if not isinstance(point, dict) or set(point) != {"time", *PLANT_PRO_CHANNELS}:
@@ -977,11 +984,14 @@ async def _async_upload_native_schedule(hass: HomeAssistant, entry_id: str, poin
     device = _device_for_entry(hass, entry_id)
     if device is None:
         return False
-    if not 2 <= len(points) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
+    if not MIN_NATIVE_PRO_SCHEDULE_POINTS <= len(points) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
         device.diagnostics.update(
             {
                 "native_schedule_last_result": "invalid_point_count",
-                "last_error": f"Fixture-native schedules require 2 to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points",
+                "last_error": (
+                    "Professional schedules require "
+                    f"{MIN_NATIVE_PRO_SCHEDULE_POINTS} to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points"
+                ),
             }
         )
         return False
@@ -1007,20 +1017,24 @@ async def _async_migrate_legacy_auto_schedule(hass: HomeAssistant, entry_id: str
         return
 
     points = saved.get("points") or []
-    if not 2 <= len(points) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
+    if not MIN_NATIVE_PRO_SCHEDULE_POINTS <= len(points) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
         await _async_save_schedule(hass, entry_id, points, mode="manual")
         device = _device_for_entry(hass, entry_id)
         if device is not None:
             device.diagnostics.update(
                 {
                     "native_schedule_last_result": "legacy_schedule_requires_edit",
-                    "last_error": f"Reduce the saved schedule to 2-{MAX_NATIVE_PRO_SCHEDULE_POINTS} points",
+                    "last_error": (
+                        "Reduce the saved schedule to "
+                        f"{MIN_NATIVE_PRO_SCHEDULE_POINTS}-{MAX_NATIVE_PRO_SCHEDULE_POINTS} points"
+                    ),
                 }
             )
         _LOGGER.warning(
-            "Legacy Fluval schedule for entry %s has %s points; saved it as Manual because the fixture supports at most %s",
+            "Legacy Fluval schedule for entry %s has %s points; saved it as Manual because FluvalConnect supports %s-%s",
             entry_id,
             len(points),
+            MIN_NATIVE_PRO_SCHEDULE_POINTS,
             MAX_NATIVE_PRO_SCHEDULE_POINTS,
         )
         return
@@ -1031,6 +1045,16 @@ async def _async_migrate_legacy_auto_schedule(hass: HomeAssistant, entry_id: str
             device.diagnostics["native_schedule_migration_attempt"] = attempt + 1
             if await _async_upload_native_schedule(hass, entry_id, points):
                 await _async_save_schedule(hass, entry_id, points, mode="native")
+                return
+            if device.diagnostics.get("status") == "invalid_native_schedule":
+                await _async_save_schedule(hass, entry_id, points, mode="manual")
+                device.diagnostics["native_schedule_last_result"] = "legacy_schedule_requires_edit"
+                _LOGGER.warning(
+                    "Legacy Fluval schedule for entry %s has %s points; saved it as Manual because %s",
+                    entry_id,
+                    len(points),
+                    device.diagnostics.get("last_error", "the fixture rejected its point count"),
+                )
                 return
         await asyncio.sleep(LEGACY_SCHEDULE_MIGRATION_RETRY_SECONDS)
 

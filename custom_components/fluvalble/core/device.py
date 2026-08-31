@@ -682,6 +682,14 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
+    def native_pro_schedule_limits(self) -> tuple[str, int, int]:
+        """Return the APK-defined Professional-schedule limits for this fixture."""
+        if self._uses_wifi_protocol():
+            return "facebd", protocol.WIFI_MIN_PRO_POINTS, protocol.WIFI_MAX_PRO_POINTS
+        if self._uses_plant_pro_protocol():
+            return "plant_pro", protocol.SPP_MIN_PRO_POINTS, protocol.SPP_MAX_PRO_POINTS
+        return "classic", protocol.OLD_MIN_PRO_POINTS, protocol.OLD_MAX_PRO_POINTS
+
     async def async_set_native_pro_schedule(
         self,
         points: list[dict[str, Any]],
@@ -689,8 +697,6 @@ class Device:
         activate: bool = True,
     ) -> bool:
         """Store a protocol-native Professional schedule in the fixture."""
-        if not await self._async_prepare_command():
-            return False
         if points and all("time" not in point and "levels" in point for point in points):
             normalized = [
                 {
@@ -701,20 +707,31 @@ class Device:
             ]
         else:
             normalized = self._normalize_schedule_points(points)
-        if not 2 <= len(normalized) <= 12:
+
+        if not protocol.SPP_MIN_PRO_POINTS <= len(normalized) <= protocol.SPP_MAX_PRO_POINTS:
             self._set_diagnostic_error(
                 "invalid_native_schedule",
-                "Native Professional schedules require 2 to 12 points",
+                f"Professional schedules require {protocol.SPP_MIN_PRO_POINTS} to {protocol.SPP_MAX_PRO_POINTS} points",
+            )
+            return False
+        if not await self._async_prepare_command():
+            return False
+
+        native_protocol, minimum, maximum = self.native_pro_schedule_limits()
+
+        if not minimum <= len(normalized) <= maximum:
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                f"{native_protocol} Professional schedules require {minimum} to {maximum} points",
             )
             return False
 
-        if self._uses_wifi_protocol():
+        if native_protocol == "facebd":
             packet = protocol.wifi_pro_schedule_packet(
                 normalized,
                 channel_count=self._resolved_channel_count(),
             )
-            native_protocol = "facebd"
-        elif self._uses_plant_pro_protocol():
+        elif native_protocol == "plant_pro":
             spp_points = [
                 {
                     "hour": point["minute"] // 60,
@@ -724,13 +741,11 @@ class Device:
                 for point in normalized
             ]
             packet = protocol.spp_pro_schedule_packet(spp_points)
-            native_protocol = "plant_pro"
         else:
             packet = protocol.old_pro_schedule_packet(
                 normalized,
                 channel_count=self._resolved_channel_count(),
             )
-            native_protocol = "classic"
 
         if not await self._async_send_packet(packet):
             return False

@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Corrected fixture-native Professional schedule validation to match the
+  FluvalConnect APK: 4–10 points for classic/OLD controllers and 4–12 for
+  AquaSky 3.0/FACEBD and Plant Pro/MESH controllers.
 - Replaced the active-session Connection binary sensor with Reachable, based on
   recent advertisements, successful connections, and successful commands. RSSI
   is now a measurement sensor with its advertisement timestamp exposed.
@@ -32,8 +35,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Remove stale registry entries for the retired Diagnostics, Refresh diagnostics,
   and Test LED channels entities during config-entry setup.
 - Replaced the Home Assistant minute-by-minute schedule executor with fixture-native
-  scheduling. Existing Auto curves are migrated once when they contain 2–12
-  points; larger saved curves remain available in Manual mode for editing.
+  scheduling. Existing Auto curves are migrated once when they fit the detected
+  controller's APK-defined point limits; other saved curves remain available in
+  Manual mode for editing.
 - BLE reconnects now replace stale clients, use one bounded connector retry
   cycle, and cannot race an in-flight command or integration unload.
 

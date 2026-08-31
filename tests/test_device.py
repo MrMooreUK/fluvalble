@@ -462,7 +462,9 @@ def test_plant_pro_status_decodes_effect_and_fixture_schedules():
     }
     points = [
         {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
         {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
     ]
     status_map = protocol.decode_cbor_update(protocol.spp_effect_schedule_packet(windows))
     status_map.update(protocol.decode_cbor_update(protocol.spp_auto_schedule_packet(**auto)))
@@ -473,7 +475,7 @@ def test_plant_pro_status_decodes_effect_and_fixture_schedules():
     assert device.decode_update_packet(status)
     assert device.values["effect"] == "Colour cycle"
     assert device.values["native_auto_schedule"]["sunrise"] == "08:00"
-    assert device.values["native_pro_schedule"][1]["time"] == "12:30"
+    assert device.values["native_pro_schedule"][2]["time"] == "12:30"
     assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
     assert device.diagnostics["native_schedule_readback_at"]
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
@@ -483,12 +485,14 @@ def test_facebd_schedule_readback_is_recorded_for_dashboard():
     device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
     points = [
         {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+        {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
         {"minute": 1200, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        {"minute": 1320, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
     ]
     data = protocol.decode_cbor_map(protocol.wifi_pro_schedule_packet(points))
 
     assert device._decode_wifi_update(data)
-    assert device.values["native_pro_schedule"][1]["minute"] == 1200
+    assert device.values["native_pro_schedule"][2]["minute"] == 1200
     assert device.diagnostics["native_schedule_protocol"] == "facebd"
     assert device.diagnostics["native_schedule_readback_at"]
 
@@ -543,7 +547,9 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
     }
     points = [
         {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
         {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
     ]
     windows = [
         {
@@ -574,8 +580,40 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
         protocol.spp_effect_schedule_packet(windows),
     ]
     assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
-    assert device.diagnostics["native_pro_schedule_points"] == 2
+    assert device.diagnostics["native_pro_schedule_points"] == 4
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+
+
+def test_native_pro_schedule_limits_follow_detected_apk_transport():
+    classic = _make_device()
+    facebd = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    facebd.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        wifi_facebd=True,
+        plant_pro_spp=False,
+    )
+    plant_pro = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    plant_pro.client = SimpleNamespace(wifi_facebd=False, plant_pro_spp=True)
+
+    assert classic.native_pro_schedule_limits() == ("classic", 4, 10)
+    assert facebd.native_pro_schedule_limits() == ("facebd", 4, 12)
+    assert plant_pro.native_pro_schedule_limits() == ("plant_pro", 4, 12)
+
+
+def test_invalid_classic_pro_schedule_is_rejected_after_transport_detection():
+    asyncio.run(_async_test_invalid_classic_pro_schedule_is_rejected_after_transport_detection())
+
+
+async def _async_test_invalid_classic_pro_schedule_is_rejected_after_transport_detection():
+    device = _make_device()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    points = [{"time": f"{hour:02d}:00", "red": 0, "green": 0, "blue": 0, "white": 0} for hour in range(11)]
+
+    assert not await device.async_set_native_pro_schedule(points)
+    device._async_prepare_command.assert_awaited_once()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == "classic Professional schedules require 4 to 10 points"
 
 
 def test_plant_pro_expected_state_uses_spp_keys():

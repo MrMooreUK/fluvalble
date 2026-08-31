@@ -100,16 +100,24 @@ def test_wifi_native_pro_schedule_matches_apk_cbor_shape():
     packet = protocol.wifi_pro_schedule_packet(
         [
             {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+            {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
             {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+            {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
         ]
     )
 
     decoded = protocol.decode_cbor_map(packet)
 
-    assert decoded == {120: 2, 121: [480, 750], 122: bytes([1, 2, 3, 4, 10, 20, 30, 40])}
+    assert decoded == {
+        120: 4,
+        121: [480, 600, 750, 1200],
+        122: bytes([1, 2, 3, 4, 5, 6, 7, 8, 10, 20, 30, 40, 0, 0, 0, 0]),
+    }
     assert protocol.decode_wifi_pro_schedule(decoded) == [
         {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+        {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
         {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
     ]
 
 
@@ -170,16 +178,53 @@ def test_classic_native_pro_schedule_matches_apk_6810_shape():
     packet = protocol.old_pro_schedule_packet(
         [
             {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+            {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
             {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+            {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
         ],
         channel_count=4,
     )
 
-    assert packet[:-1] == bytes.fromhex("68 10 02 08 00 01 02 03 04 0c 1e 0a 14 1e 28")
+    assert packet[:-1] == bytes.fromhex(
+        "68 10 04 08 00 01 02 03 04 0a 00 05 06 07 08 0c 1e 0a 14 1e 28 14 00 00 00 00 00"
+    )
     assert protocol.decode_old_pro_schedule(bytes((2,)) + packet[2:-1], channel_count=4) == [
         {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+        {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
         {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
     ]
+
+
+def test_native_pro_schedule_builders_enforce_apk_point_limits():
+    channel_points = [
+        {
+            "minute": index * 60,
+            "channel_1": index,
+            "channel_2": index,
+            "channel_3": index,
+            "channel_4": index,
+        }
+        for index in range(13)
+    ]
+    spp_points = [{"hour": index, "minute": 0, "levels": [index] * 5} for index in range(13)]
+
+    protocol.old_pro_schedule_packet(channel_points[:10], channel_count=4)
+    protocol.wifi_pro_schedule_packet(channel_points[:12])
+    protocol.spp_pro_schedule_packet(spp_points[:12])
+
+    with pytest.raises(ValueError, match="Classic Fluval schedule requires 4-10 points"):
+        protocol.old_pro_schedule_packet(channel_points[:3], channel_count=4)
+    with pytest.raises(ValueError, match="Classic Fluval schedule requires 4-10 points"):
+        protocol.old_pro_schedule_packet(channel_points[:11], channel_count=4)
+    with pytest.raises(ValueError, match="FACEBD schedule requires 4-12 points"):
+        protocol.wifi_pro_schedule_packet(channel_points[:3])
+    with pytest.raises(ValueError, match="FACEBD schedule requires 4-12 points"):
+        protocol.wifi_pro_schedule_packet(channel_points)
+    with pytest.raises(ValueError, match="Plant Pro schedule requires 4-12 points"):
+        protocol.spp_pro_schedule_packet(spp_points[:3])
+    with pytest.raises(ValueError, match="Plant Pro schedule requires 4-12 points"):
+        protocol.spp_pro_schedule_packet(spp_points)
 
 
 def test_mesh_clock_packet_shape():
@@ -258,14 +303,18 @@ def test_plant_pro_auto_schedule_round_trip():
 def test_plant_pro_pro_schedule_round_trip():
     points = [
         {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
         {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
     ]
     decoded = protocol.decode_cbor_update(protocol.spp_pro_schedule_packet(points))
 
-    assert decoded[protocol.SPP_PRO_SCHEDULE_KEY] == bytes((2, 8, 0, 0, 0, 0, 0, 0, 12, 30, 80, 70, 60, 50, 40))
+    assert decoded[protocol.SPP_PRO_SCHEDULE_KEY][0] == 4
     assert protocol.decode_spp_pro_schedule(decoded) == [
         {"time": "08:00", "levels": [0, 0, 0, 0, 0]},
+        {"time": "10:00", "levels": [20, 20, 20, 20, 20]},
         {"time": "12:30", "levels": [80, 70, 60, 50, 40]},
+        {"time": "20:00", "levels": [0, 0, 0, 0, 0]},
     ]
 
 

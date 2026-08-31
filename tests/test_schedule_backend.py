@@ -59,6 +59,8 @@ def _make_device():
 
 def _schedule_points():
     return [
+        {"time": "08:00", "red": 0, "green": 0, "blue": 0, "white": 0},
+        {"time": "12:00", "red": 10, "green": 10, "blue": 10, "white": 10},
         {"time": "19:00", "red": 3, "green": 0, "blue": 8, "white": 0},
         {"time": "20:00", "red": 0, "green": 0, "blue": 0, "white": 0},
     ]
@@ -126,6 +128,14 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
     points = _validate_native_pro_points(
         [
             {
+                "time": "08:00",
+                "red": 0,
+                "blue": 0,
+                "cool_white": 0,
+                "warm_white": 0,
+                "amber": 0,
+            },
+            {
                 "time": "12:30",
                 "red": 80,
                 "blue": 70,
@@ -135,6 +145,14 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
             },
             {
                 "time": "20:00",
+                "red": 0,
+                "blue": 0,
+                "cool_white": 0,
+                "warm_white": 0,
+                "amber": 0,
+            },
+            {
+                "time": "22:00",
                 "red": 0,
                 "blue": 0,
                 "cool_white": 0,
@@ -155,8 +173,10 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
     )
 
     assert points == [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
         {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
         {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 22, "minute": 0, "levels": [0, 0, 0, 0, 0]},
     ]
     assert windows[0]["effect_id"] == 1
     assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
