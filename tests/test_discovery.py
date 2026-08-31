@@ -32,6 +32,12 @@ def test_plant_nano_name_is_likely_fluval():
     assert is_likely_fluval("Plant Nano_123")
 
 
+def test_plant_pro_and_plant_4_names_are_likely_fluval():
+    assert is_likely_fluval("PlantPro_AABBCC")
+    assert is_likely_fluval("Plant Pro 4.0_AABBCC")
+    assert is_likely_fluval("Plant 4.0_AABBCC")
+
+
 def test_bare_plant_name_is_not_fluval():
     assert not is_likely_fluval("Plant Sensor")
     assert not is_likely_fluval("plant")
@@ -80,6 +86,12 @@ def test_detect_model_plant_not_aquasky():
 
 def test_detect_model_plant_nano():
     assert detect_model("Plant Nano_123", None) == "Plant Nano Bluetooth LED"
+
+
+def test_detect_model_plant_pro_and_plant_4():
+    assert detect_model("PlantPro_AABBCC", None) == "Plant Pro 4.0 Bluetooth LED"
+    assert detect_model("Plant Pro 4.0_AABBCC", None) == "Plant Pro 4.0 Bluetooth LED"
+    assert detect_model("Plant 4.0_AABBCC", None) == "Plant 4.0 Bluetooth LED"
 
 
 def test_detect_model_from_aquasky_name():

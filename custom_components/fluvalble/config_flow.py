@@ -28,6 +28,7 @@ from .core import (
     LAMP_PROFILE_AQUASKY3,
     LAMP_PROFILE_AUTO,
     LAMP_PROFILE_PLANT,
+    LAMP_PROFILE_PLANT_PRO,
 )
 from .core.discovery import discovery_metadata, is_likely_fluval
 
@@ -325,6 +326,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     {
                         LAMP_PROFILE_AUTO: "Auto-detect from BLE name / protocol",
                         LAMP_PROFILE_PLANT: "Plant / Marine 5-channel (Rose–Warm White)",
+                        LAMP_PROFILE_PLANT_PRO: "Plant Pro / Plant 4.0 (Red–Amber)",
                         LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
                         LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (5-channel)",
                     }

@@ -176,3 +176,106 @@ save_schedule:
             - manual
             - auto
             - professional
+
+set_native_auto_schedule:
+  name: Set Plant Pro Auto schedule
+  description: Store an Auto schedule directly in a Plant Pro 4.0 fixture. This is separate from the Home Assistant-managed schedule.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    schedule:
+      name: Auto schedule
+      description: Sunrise, sunset, optional sleep time, ramp minutes, and five-channel day/night levels.
+      required: true
+      example:
+        sunrise: "08:00"
+        sunrise_ramp: 60
+        sunset: "20:00"
+        sunset_ramp: 60
+        sleep: "23:00"
+        day:
+          red: 80
+          blue: 70
+          cool_white: 60
+          warm_white: 50
+          amber: 40
+        night:
+          red: 0
+          blue: 5
+          cool_white: 0
+          warm_white: 0
+          amber: 0
+      selector:
+        object:
+
+set_native_pro_schedule:
+  name: Set Plant Pro Pro schedule
+  description: Store up to 20 timed five-channel points directly in a Plant Pro 4.0 fixture.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    points:
+      name: Pro schedule points
+      description: One to 20 points containing time and all five Plant Pro channels.
+      required: true
+      example:
+        - time: "08:00"
+          red: 0
+          blue: 0
+          cool_white: 0
+          warm_white: 0
+          amber: 0
+        - time: "12:00"
+          red: 80
+          blue: 70
+          cool_white: 60
+          warm_white: 50
+          amber: 40
+      selector:
+        object:
+
+set_native_effect_schedule:
+  name: Set Plant Pro effect schedule
+  description: Store up to seven timed native-effect windows directly in a Plant Pro 4.0 fixture. An empty list clears all windows.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    windows:
+      name: Effect windows
+      description: Windows with start/end, effect, optional weekdays, and optional enabled state.
+      required: true
+      example:
+        - start: "12:00"
+          end: "12:10"
+          effect: Thunderstorm
+          weekdays:
+            - monday
+            - wednesday
+            - friday
+          enabled: true
+      selector:
+        object:

@@ -139,7 +139,7 @@ class FluvalLight(FluvalEntity, LightEntity):
         self.internal_update()
 
     def _update_effect_capabilities(self) -> None:
-        """Expose native effects only for positively identified classic lights."""
+        """Expose native effects only for positively identified controllers."""
         self._attr_effect_list = self.device.effect_list()
         self._attr_supported_features = LightEntityFeature.EFFECT if self._attr_effect_list else 0
 
