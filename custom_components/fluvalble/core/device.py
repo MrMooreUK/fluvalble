@@ -1041,27 +1041,12 @@ class Device:
                 )
                 return False
 
-            if self._uses_plant_pro_protocol():
-                if force and not await self.client.request_state():
-                    self._set_diagnostic_error(
-                        "state_refresh_failed",
-                        "Unable to refresh Plant Pro state",
-                    )
-                    return False
-                self._clock_synced = True
-                self.diagnostics.update(
-                    {
-                        "status": "state_refreshed",
-                        "state_refreshed_at": datetime.now(UTC).isoformat(),
-                        "last_error": None,
-                    }
-                )
-                for handler in self.updates_connect:
-                    handler()
-                return True
-
             if self._uses_wifi_protocol():
                 packets = [protocol.wifi_timezone_packet(), protocol.wifi_clock_packet()]
+            elif self._uses_plant_pro_protocol():
+                # FluvalConnect treats Plant Pro as a mesh light and writes the
+                # raw 0xCD + local date/time frame to its FFF2 SPP endpoint.
+                packets = [protocol.mesh_clock_packet()]
             elif self._uses_mesh_protocol():
                 packets = [protocol.mesh_clock_packet()]
             else:

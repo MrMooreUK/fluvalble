@@ -372,11 +372,11 @@ def test_plant_pro_expected_state_uses_spp_keys():
     }
 
 
-def test_plant_pro_clock_action_does_not_send_legacy_mesh_packet():
-    asyncio.run(_async_test_plant_pro_clock_action_does_not_send_mesh_packet())
+def test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
+    asyncio.run(_async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet())
 
 
-async def _async_test_plant_pro_clock_action_does_not_send_mesh_packet():
+async def _async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
     device = _make_device(
         name="PlantPro_AABBCC",
         model="Plant Pro 4.0 Bluetooth LED",
@@ -386,14 +386,15 @@ async def _async_test_plant_pro_clock_action_does_not_send_mesh_packet():
         plant_pro_spp=True,
         command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
         ensure_connected=AsyncMock(return_value=True),
-        request_state=AsyncMock(return_value=True),
     )
     device._async_send_packet = AsyncMock(return_value=True)
 
     assert await device.async_sync_clock(force=True)
-    device.client.request_state.assert_awaited_once()
-    device._async_send_packet.assert_not_awaited()
-    assert device.diagnostics["status"] == "state_refreshed"
+    device._async_send_packet.assert_awaited_once()
+    packet = device._async_send_packet.await_args.args[0]
+    assert packet[0] == protocol.MESH_OPCODE_CLOCK
+    assert len(packet) == 8
+    assert device.diagnostics["status"] == "clock_synced"
 
 
 def test_schedule_points_are_normalized_from_color_names():

@@ -34,7 +34,7 @@ OLD_ALL_ZONE = 0x04
 OLD_WEATHER_EFFECT = 0x0A
 OLD_CLOCK = 0x0E
 
-# Mesh clock opcode (full mesh command path is a later PR)
+# Mesh / Plant Pro clock opcode recovered from FluvalConnect.
 MESH_OPCODE_CLOCK = 0xCD
 
 
@@ -71,7 +71,7 @@ def wifi_timezone_packet(now: datetime | None = None) -> bytes:
 
 
 def mesh_clock_packet(now: datetime | None = None) -> bytes:
-    """Build mesh clock sync (opcode 0xCD + Y M D W h m s)."""
+    """Build mesh/Plant Pro clock sync (0xCD + Y M D W h m s)."""
     return bytes((MESH_OPCODE_CLOCK,)) + _clock_payload(now)
 
 
