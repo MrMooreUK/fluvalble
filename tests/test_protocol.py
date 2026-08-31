@@ -112,6 +112,44 @@ def test_mesh_clock_packet_shape():
     ]
 
 
+def test_plant_pro_switch_packets_match_reference_capture():
+    assert protocol.spp_switch_packet(True) == bytes.fromhex("d1 a1 02 f5")
+    assert protocol.spp_switch_packet(False) == bytes.fromhex("d1 a1 02 f4")
+
+
+def test_plant_pro_mode_packets_match_reference_capture():
+    assert protocol.spp_mode_packet(0) == bytes.fromhex("d1 a1 01 00")
+    assert protocol.spp_mode_packet(1) == bytes.fromhex("d1 a1 01 01")
+    assert protocol.spp_mode_packet(2) == bytes.fromhex("d1 a1 01 02")
+
+
+def test_plant_pro_all_zone_packet_matches_reference_capture():
+    packet = protocol.spp_all_zone_packet([100, 20, 30, 40, 50])
+
+    assert packet == bytes.fromhex("d1 a6 03 18 64 04 14 05 18 1e 06 18 28 07 18 32 0e 00")
+    assert protocol.decode_cbor_update(packet) == {
+        protocol.SPP_CHANNEL_KEYS[0]: 100,
+        protocol.SPP_CHANNEL_KEYS[1]: 20,
+        protocol.SPP_CHANNEL_KEYS[2]: 30,
+        protocol.SPP_CHANNEL_KEYS[3]: 40,
+        protocol.SPP_CHANNEL_KEYS[4]: 50,
+        protocol.SPP_MANUAL_KEY: 0,
+    }
+
+
+def test_plant_pro_status_strips_d2_header_and_skips_schedule_blobs():
+    status = bytes.fromhex(
+        "d2 aa 00 0e 01 00 02 f5 03 18 64 04 18 64 05 18 64 06 18 64 07 18 64 08 43 0d 00 a0 09 43 15 03 26"
+    )
+
+    decoded = protocol.decode_cbor_update(status)
+
+    assert decoded[protocol.SPP_MODE_KEY] == 0
+    assert decoded[protocol.SPP_SWITCH_KEY] is True
+    assert decoded[protocol.SPP_CHANNEL_KEYS[0]] == 100
+    assert decoded[8] == bytes.fromhex("0d00a0")
+
+
 def test_cbor_signed_timezone_offset():
     packet = protocol.cbor_map({protocol.WIFI_TZ_OFFSET_KEY: -150})
     decoded = protocol.decode_cbor_map(packet)

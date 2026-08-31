@@ -19,6 +19,7 @@ from . import (
     LAMP_PROFILE_AQUASKY3,
     LAMP_PROFILE_AUTO,
     LAMP_PROFILE_PLANT,
+    LAMP_PROFILE_PLANT_PRO,
 )
 from .client import Client
 from .discovery import (
@@ -48,6 +49,13 @@ CHANNEL_NAMES_PLANT = {
     "channel_3": "Cold White",
     "channel_4": "Pure White",
     "channel_5": "Warm White",
+}
+CHANNEL_NAMES_PLANT_PRO = {
+    "channel_1": "Red",
+    "channel_2": "Blue",
+    "channel_3": "Cool White",
+    "channel_4": "Warm White",
+    "channel_5": "Amber",
 }
 # Back-compat alias used by tests / schedule helpers
 CHANNEL_NAMES = CHANNEL_NAMES_AQUASKY
@@ -236,7 +244,11 @@ class Device:
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
         if profile == LAMP_PROFILE_AQUASKY:
             return 4
-        if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_AQUASKY3):
+        if profile in (
+            LAMP_PROFILE_PLANT,
+            LAMP_PROFILE_PLANT_PRO,
+            LAMP_PROFILE_AQUASKY3,
+        ):
             return 5
         if self._channel_count_hint in (4, 5):
             return self._channel_count_hint
@@ -264,19 +276,28 @@ class Device:
     def _channel_labels(self) -> dict[str, str]:
         """Return channel labels for the active lamp profile."""
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
+        if profile == LAMP_PROFILE_PLANT_PRO:
+            return CHANNEL_NAMES_PLANT_PRO
         if profile == LAMP_PROFILE_PLANT:
             return CHANNEL_NAMES_PLANT
         if profile in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
             return CHANNEL_NAMES_AQUASKY
         model_l = (self.model or "").lower()
         name_l = (self.name or "").lower()
+        if "plant pro" in model_l or "plantpro" in name_l or "plant pro" in name_l:
+            return CHANNEL_NAMES_PLANT_PRO
+        if "plant 4.0" in model_l or "plant 4.0" in name_l:
+            return CHANNEL_NAMES_PLANT_PRO
         if "plant" in model_l or "plant" in name_l or "marine" in model_l or "reef" in model_l:
             return CHANNEL_NAMES_PLANT
         return CHANNEL_NAMES_AQUASKY
 
     def uses_plant_spectrum(self) -> bool:
         """Return whether the fixture uses the five-channel Plant spectrum."""
-        return self._channel_labels() == CHANNEL_NAMES_PLANT
+        return self._channel_labels() in (
+            CHANNEL_NAMES_PLANT,
+            CHANNEL_NAMES_PLANT_PRO,
+        )
 
     def light_mode(self) -> str:
         """Return the native Home Assistant colour mode for this fixture."""
@@ -617,6 +638,8 @@ class Device:
         if self.values.get("mode") != "manual":
             if self._uses_wifi_protocol():
                 ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE["manual"]))
+            elif self._uses_plant_pro_protocol():
+                ok = await self._async_send_packet(protocol.spp_mode_packet(MODE_TO_CODE["manual"]))
             else:
                 ok = await self._async_send_packet(protocol.old_mode_packet(MODE_TO_CODE["manual"]))
             if not ok:
@@ -677,6 +700,18 @@ class Device:
             ok = await self._async_send_packet(protocol.wifi_all_zone_packet(self._channel_values()))
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
                 ok = await self._async_send_packet(protocol.wifi_switch_packet(False))
+                if ok:
+                    self.values["led_on_off"] = False
+        elif self._uses_plant_pro_protocol():
+            any_channel_on = any(self._channel_values())
+            if any_channel_on and (force_power or not self.values["led_on_off"]):
+                self.values["led_on_off"] = True
+                if not await self._async_send_packet(protocol.spp_switch_packet(True)):
+                    self.values = old_values
+                    return False
+            ok = await self._async_send_packet(protocol.spp_all_zone_packet(self._channel_values()))
+            if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
+                ok = await self._async_send_packet(protocol.spp_switch_packet(False))
                 if ok:
                     self.values["led_on_off"] = False
         else:
@@ -940,6 +975,8 @@ class Device:
 
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_switch_packet(value))
+        elif self._uses_plant_pro_protocol():
+            ok = await self._async_send_packet(protocol.spp_switch_packet(value))
         else:
             ok = await self._async_send_packet(protocol.old_switch_packet(value))
 
@@ -968,6 +1005,8 @@ class Device:
 
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE[option]))
+        elif self._uses_plant_pro_protocol():
+            ok = await self._async_send_packet(protocol.spp_mode_packet(MODE_TO_CODE[option]))
         else:
             ok = await self._async_send_packet(protocol.old_mode_packet(MODE_TO_CODE[option]))
 
@@ -1002,6 +1041,25 @@ class Device:
                 )
                 return False
 
+            if self._uses_plant_pro_protocol():
+                if force and not await self.client.request_state():
+                    self._set_diagnostic_error(
+                        "state_refresh_failed",
+                        "Unable to refresh Plant Pro state",
+                    )
+                    return False
+                self._clock_synced = True
+                self.diagnostics.update(
+                    {
+                        "status": "state_refreshed",
+                        "state_refreshed_at": datetime.now(UTC).isoformat(),
+                        "last_error": None,
+                    }
+                )
+                for handler in self.updates_connect:
+                    handler()
+                return True
+
             if self._uses_wifi_protocol():
                 packets = [protocol.wifi_timezone_packet(), protocol.wifi_clock_packet()]
             elif self._uses_mesh_protocol():
@@ -1030,9 +1088,16 @@ class Device:
         """Return true when advertisements expose the mesh fff0 service."""
         return any(str(uuid).lower().startswith("0000fff0") for uuid in self.conn_info.get("service_uuids", []))
 
+    def _uses_plant_pro_protocol(self) -> bool:
+        """Return true for the live Plant Pro 4.0 SPP-over-BLE profile."""
+        return bool(self.client is not None and getattr(self.client, "plant_pro_spp", False) is True)
+
     def _uses_wifi_protocol(self) -> bool:
         """Prefer the live GATT profile over advertisement heuristics."""
         if self.client is not None and self.client.command_write_uuid:
+            if self._uses_plant_pro_protocol():
+                self.facebd = False
+                return False
             if self.client.wifi_facebd:
                 self.facebd = True
                 return True
@@ -1109,16 +1174,23 @@ class Device:
         if self.client is None or not self.client.raw_facebd:
             return None
         try:
-            decoded = protocol.decode_cbor_map(packet)
+            decoded = protocol.decode_cbor_update(packet)
         except ValueError:
             return None
         if not decoded:
             return None
-        supported_keys = {
-            protocol.WIFI_MODE_KEY,
-            protocol.WIFI_SWITCH_KEY,
-            *(protocol.WIFI_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
-        }
+        if self._uses_plant_pro_protocol():
+            supported_keys = {
+                protocol.SPP_MODE_KEY,
+                protocol.SPP_SWITCH_KEY,
+                *(protocol.SPP_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
+            }
+        else:
+            supported_keys = {
+                protocol.WIFI_MODE_KEY,
+                protocol.WIFI_SWITCH_KEY,
+                *(protocol.WIFI_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
+            }
         return {key: value for key, value in decoded.items() if key in supported_keys}
 
     async def async_refresh_state(self) -> bool:
@@ -1378,6 +1450,16 @@ class Device:
 
     def decode_update_packet(self, data: bytes | bytearray) -> bool:
         """Decode the received Fluval packet and sort into values."""
+        if data and data[0] == protocol.SPP_STATUS_HEADER:
+            try:
+                cbor = protocol.decode_cbor_update(data)
+            except ValueError as err:
+                _LOGGER.debug("Ignoring unsupported Plant Pro CBOR packet", exc_info=err)
+                return False
+            if cbor is not None:
+                return self._decode_plant_pro_update(cbor)
+            return False
+
         is_cbor_map = bool(data and data[0] >> 5 == 5)
         if is_cbor_map:
             try:
@@ -1453,6 +1535,33 @@ class Device:
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.WIFI_CHANNEL_KEYS, strict=False):
+            if key in data and isinstance(data[key], int):
+                self.values[channel] = max(0, min(100, int(data[key])))
+                present += 1
+                updated = True
+        if present:
+            self._channel_count_hint = 5 if present >= 5 else 4
+
+        if updated:
+            for handler in self.updates_component:
+                handler()
+        return updated
+
+    def _decode_plant_pro_update(self, data: dict[int, Any]) -> bool:
+        """Decode a Plant Pro 4.0 D2 status map."""
+        updated = False
+        if protocol.SPP_MODE_KEY in data:
+            mode = data[protocol.SPP_MODE_KEY]
+            if isinstance(mode, int) and 0 <= mode < len(MODES):
+                self.values["mode"] = MODES[mode]
+                updated = True
+
+        if protocol.SPP_SWITCH_KEY in data:
+            self.values["led_on_off"] = bool(data[protocol.SPP_SWITCH_KEY])
+            updated = True
+
+        present = 0
+        for channel, key in zip(NUMBERS, protocol.SPP_CHANNEL_KEYS, strict=False):
             if key in data and isinstance(data[key], int):
                 self.values[channel] = max(0, min(100, int(data[key])))
                 present += 1

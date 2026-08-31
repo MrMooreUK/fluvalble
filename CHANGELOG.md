@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- Plant Pro / Plant 4.0 core BLE support using its native unencrypted SPP
+  transport for discovery, power, mode, five-channel colour, and live state.
+
 ---
 
 ## [0.0.11] — 2026-08-31

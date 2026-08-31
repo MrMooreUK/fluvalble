@@ -26,7 +26,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | Feature | Description |
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
-| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant and Marine spectra are translated to RGB. |
+| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant, Plant Pro, and Marine spectra are translated to RGB. |
 | **Classic weather effects** | Positively identified classic controllers expose the 11 native FluvalConnect weather effects, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
@@ -43,6 +43,7 @@ Entities are created per device around one native colour light, with mode, conne
 Designed for Fluval aquarium LED fixtures that use BLE (Bluetooth Low Energy), including series such as:
 
 - **Plant 3.0** (5 channels)
+- **Plant Pro / Plant 4.0** (5 channels)
 - **Reef 3.0** (5 channels)
 - **Aquasky 2.0 / 3.0** (4 channels)
 - **Marine 3.0** (5 channels)
@@ -126,7 +127,7 @@ After setup you'll see one device with entities like:
 
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
-| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGBW; Plant and Marine spectra use RGB translation. |
+| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGBW; Plant, Plant Pro, and Marine spectra use RGB translation. |
 | **Switch** | LED | Turn the light on or off. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |
@@ -221,7 +222,7 @@ If you have a different Fluval BLE model and the switch or other controls don't 
 
 ## How it works
 
-The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
+The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). Plant Pro / 4.0 controllers use the newer unencrypted `FFF0` SPP service with `D1` command and `D2` status CBOR frames. No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
 
 **BLE connection lifecycle:**
 - On load and reconnect, the integration asks HA for its best connectable BLE route. This includes local adapters and ESPHome Bluetooth proxies.
@@ -235,6 +236,7 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 
 - Original integration structure and BLE work by [@mrzottel](https://github.com/mrzottel).
 - Community reverse‑engineering of the Fluval BLE protocol (e.g. Planted Tank Forum, ESPHome/fluval projects).
+- Plant Pro / 4.0 SPP protocol research and hardware validation by [@cryystyy](https://github.com/cryystyy/fluval-plant-pro-4-homeassistant), used under the MIT License.
 - Licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) in this repo.
 
 ---

@@ -39,11 +39,9 @@ FACEBD_COMMAND_WRITE_UUIDS = (
     "facebd01-7261-6262-6974-696f74626c65",
     "facebd01-0000-1000-8000-00805f9b34fb",
 )
-LEGACY_COMMAND_WRITE_UUIDS = (
-    "00001001-0000-1000-8000-00805f9b34fb",
-    "0000fff2-0000-1000-8000-00805f9b34fb",
-)
-COMMAND_WRITE_UUIDS = FACEBD_COMMAND_WRITE_UUIDS + LEGACY_COMMAND_WRITE_UUIDS
+SPP_COMMAND_WRITE_UUIDS = ("0000fff2-0000-1000-8000-00805f9b34fb",)
+LEGACY_COMMAND_WRITE_UUIDS = ("00001001-0000-1000-8000-00805f9b34fb",)
+COMMAND_WRITE_UUIDS = FACEBD_COMMAND_WRITE_UUIDS + SPP_COMMAND_WRITE_UUIDS + LEGACY_COMMAND_WRITE_UUIDS
 NOTIFY_UUIDS = (
     "facebd02-7261-6262-6974-696f74626c65",
     "facebd02-0000-1000-8000-00805f9b34fb",
@@ -112,6 +110,7 @@ class Client:
         self.state_read_uuids: list[str] = []
         self.raw_facebd = False
         self.wifi_facebd = False
+        self.plant_pro_spp = False
         self.profile = "unresolved"
         self._command_lock = asyncio.Lock()
         self._state_update_event = asyncio.Event()
@@ -221,9 +220,16 @@ class Client:
         self.init_write_uuid = self._find_characteristic(INIT_WRITE_UUIDS, require_write=True, required=False)
         self.wake_read_uuid = self._find_characteristic(WAKE_READ_UUIDS, required=False)
         self.state_read_uuids = self._find_characteristics(WAKE_READ_UUIDS)
-        self.raw_facebd = self.command_write_uuid.lower().startswith("facebd")
-        self.wifi_facebd = self.command_write_uuid.lower().startswith("facebd01")
-        self.profile = "facebd_command" if self.wifi_facebd else "legacy_encrypted"
+        write_uuid = self.command_write_uuid.lower()
+        self.plant_pro_spp = write_uuid.startswith("0000fff2")
+        self.raw_facebd = write_uuid.startswith("facebd") or self.plant_pro_spp
+        self.wifi_facebd = write_uuid.startswith("facebd01")
+        if self.plant_pro_spp:
+            self.profile = "plant_pro_spp"
+        elif self.wifi_facebd:
+            self.profile = "facebd_command"
+        else:
+            self.profile = "legacy_encrypted"
         _LOGGER.debug(
             "Resolved Fluval GATT profile=%s writes=%s notifies=%s reads=%s init=%s wake=%s raw_facebd=%s",
             self.profile,
@@ -310,7 +316,7 @@ class Client:
         """Decode an update and signal waiters only for valid state packets."""
         if self.raw_facebd:
             try:
-                decoded = protocol.decode_cbor_map(data)
+                decoded = protocol.decode_cbor_update(data)
             except ValueError:
                 decoded = None
             if decoded:
@@ -326,7 +332,7 @@ class Client:
     def notify_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
         """Handle packets sent by the Fluval."""
         if self.raw_facebd:
-            _LOGGER.debug("Got FACEBD data: %s", to_hex(data))
+            _LOGGER.debug("Got raw Fluval data: %s", to_hex(data))
             self._dispatch_update(bytes(data))
             return
 
@@ -455,7 +461,12 @@ class Client:
             with contextlib.suppress(BleakError):
                 await client.read_gatt_char(self.wake_read_uuid)
 
-        if self.raw_facebd and self.notify_uuid:
+        if self.plant_pro_spp:
+            await self._write_packet(
+                self.command_write_uuid,
+                protocol.SPP_READ_PARAMS_PACKET,
+            )
+        elif self.raw_facebd and self.notify_uuid:
             # Read every available FACEBD state char. Some controllers return
             # only a wake byte on facebd81 and the real CBOR map on facebd80/02.
             for read_uuid in self.state_read_uuids or [self.notify_uuid]:
