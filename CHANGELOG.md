@@ -11,6 +11,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added transport-neutral fixture-native Auto and Professional schedule support
   for classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers using the
   FluvalConnect protocol layouts.
+- Added explicit fixture schedule refresh/readback to the dashboard card. Native
+  Professional curves are imported only when **Load from fixture** is selected,
+  and the card identifies local, uploaded, and fixture-confirmed data.
 
 ### Changed
 - Replaced the Home Assistant minute-by-minute schedule executor with fixture-native

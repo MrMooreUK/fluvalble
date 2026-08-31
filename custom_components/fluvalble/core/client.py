@@ -503,6 +503,8 @@ class Client:
                     continue
                 _LOGGER.debug("Read Fluval state from %s: %s", read_uuid, to_hex(data))
                 observed = self._dispatch_update(bytes(data)) or observed
+        elif self.init_write_uuid:
+            await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
 
         if observed and self._state_matches(expected_state):
             return True

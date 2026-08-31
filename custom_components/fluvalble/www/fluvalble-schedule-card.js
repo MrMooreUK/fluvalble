@@ -58,7 +58,7 @@ class FluvalbleScheduleCard extends HTMLElement {
           <div class="header">
             <div>
               <div class="title">${escapeHtml(this.config.title)}</div>
-              <div id="subtitle" class="subtitle">${time} preview</div>
+              <div id="subtitle" class="subtitle">${time} preview · ${scheduleSourceLabel(this.store)}</div>
             </div>
             <label class="toggle">
               <input id="physical" type="checkbox" ${this.config.physical_preview ? "checked" : ""}>
@@ -87,6 +87,7 @@ class FluvalbleScheduleCard extends HTMLElement {
               </select>
             </label>
             <button id="apply">Apply Schedule</button>
+            <button id="load-fixture">Load from fixture</button>
             <button id="flatten">Flatten Schedule</button>
             <button id="play">Play 24h preview</button>
             <button id="stop">Stop preview</button>
@@ -110,6 +111,7 @@ class FluvalbleScheduleCard extends HTMLElement {
         .mode-control { align-items: center; color: var(--secondary-text-color); display: flex; font-size: 13px; gap: 8px; }
         select { background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 6px; color: var(--primary-text-color); padding: 7px 10px; }
         button { background: var(--primary-color); border: 0; border-radius: 6px; color: var(--text-primary-color); cursor: pointer; padding: 8px 12px; }
+        button#load-fixture { background: var(--secondary-background-color); color: var(--primary-text-color); }
         button#flatten { background: var(--warning-color, #f0a000); color: var(--primary-text-color); }
         button#stop { background: var(--error-color); }
       </style>
@@ -150,6 +152,9 @@ class FluvalbleScheduleCard extends HTMLElement {
       this.applyChannels(channels).then(() => {
         this.toast(`Schedule applied for ${formatMinute(this.previewMinute)}`);
       });
+    });
+    root.getElementById("load-fixture").addEventListener("click", () => {
+      this.loadFixtureSchedule();
     });
     root.getElementById("flatten").addEventListener("click", () => {
       flattenSchedule(this.config, this);
@@ -273,7 +278,9 @@ class FluvalbleScheduleCard extends HTMLElement {
       if (Array.isArray(result?.points) && result.points.length) {
         this.store.points = normalizePoints(result.points);
       }
+      this.store.fixture = result?.fixture || null;
       this.store.mode = ["native", "auto"].includes(result?.mode) ? "native" : "manual";
+      this.store.scheduleSource = "local";
       this.store.loaded = true;
       notifyScheduleStore(this.config, null);
       this.render();
@@ -285,6 +292,43 @@ class FluvalbleScheduleCard extends HTMLElement {
     }
   }
 
+  async loadFixtureSchedule() {
+    if (!this._hass || this.store.loadingFixture) return;
+    this.store.loadingFixture = true;
+    try {
+      const result = await this._hass.callWS({
+        type: "fluvalble/get_schedule",
+        ...targetData(this.config),
+        refresh: true,
+      });
+      this.store.fixture = result?.fixture || null;
+      const points = this.store.fixture?.professional;
+      if (!Array.isArray(points) || !points.length) {
+        if (this.store.fixture?.auto) {
+          this.toast("The fixture reported an Auto schedule; only Professional curves can be loaded into this editor");
+        } else {
+          this.toast("No Professional schedule readback is available from the fixture");
+        }
+        return;
+      }
+      this.store.points = normalizePoints(points);
+      this.store.mode = "native";
+      this.store.scheduleSource = "fixture";
+      notifyScheduleStore(this.config, this);
+      this.render();
+      this.toast(
+        result.refresh_ok === false
+          ? "Loaded the last fixture readback; the live refresh did not complete"
+          : "Loaded the schedule confirmed by the fixture",
+      );
+    } catch (error) {
+      console.warn("Unable to load the Fluval fixture schedule", error);
+      this.toast("Unable to load a schedule from the fixture");
+    } finally {
+      this.store.loadingFixture = false;
+    }
+  }
+
   updateLocalTimeDisplay() {
     const root = this.shadowRoot;
     if (!root) return;
@@ -293,7 +337,7 @@ class FluvalbleScheduleCard extends HTMLElement {
     const subtitle = root.getElementById("subtitle");
     const cursor = root.getElementById("cursor");
     const timeInput = root.getElementById("time");
-    if (subtitle) subtitle.textContent = `${time} preview`;
+    if (subtitle) subtitle.textContent = `${time} preview · ${scheduleSourceLabel(this.store)}`;
     if (timeInput) timeInput.value = this.previewMinute;
     if (cursor) {
       cursor.setAttribute("x1", x);
@@ -549,6 +593,7 @@ function getScheduleStore(config) {
       points: normalizePoints(config.points || DEFAULT_POINTS),
       selectedMinute: 660,
       mode: "manual",
+      scheduleSource: "local",
     };
   }
   return window.__fluvalbleScheduleStores[key];
@@ -577,6 +622,7 @@ function firstScheduleMinute(points) {
 
 function updateSelectedChannels(config, values, source) {
   const store = getScheduleStore(config);
+  store.scheduleSource = "local";
   CHANNELS.forEach(([key]) => {
     if (key in values) {
       applyChannelRamp(store, key, clampPercent(values[key]));
@@ -588,6 +634,7 @@ function updateSelectedChannels(config, values, source) {
 
 function flattenSchedule(config, source) {
   const store = getScheduleStore(config);
+  store.scheduleSource = "local";
   store.points = store.points.map((point) => ({
     ...point,
     red: 0,
@@ -657,6 +704,7 @@ function easedValue(from, to, progress) {
 function setScheduleMode(config, mode, source) {
   const store = getScheduleStore(config);
   store.mode = mode === "native" ? "native" : "manual";
+  store.scheduleSource = "local";
   notifyScheduleStore(config, source);
 }
 
@@ -690,7 +738,17 @@ function saveScheduleNow(config, source) {
     ...targetData(config),
     points: denormalizePoints(store.points),
     mode: store.mode || "manual",
+  }).then(() => {
+    store.scheduleSource = store.mode === "native" ? "uploaded" : "local";
+    notifyScheduleStore(config, source);
+    if (source.shadowRoot) source.render();
   });
+}
+
+function scheduleSourceLabel(store) {
+  if (store.scheduleSource === "fixture") return "confirmed fixture readback";
+  if (store.scheduleSource === "uploaded") return "uploaded; awaiting fixture readback";
+  return "Home Assistant copy";
 }
 
 function denormalizePoints(points) {

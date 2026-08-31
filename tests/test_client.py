@@ -328,6 +328,29 @@ async def _async_test_plant_pro_request_state_writes_d0ff():
     assert gatt.writes[0][1] == protocol.SPP_READ_PARAMS_PACKET
 
 
+def test_classic_request_state_writes_existing_read_params_command():
+    asyncio.run(_async_test_classic_request_state_writes_existing_read_params_command())
+
+
+async def _async_test_classic_request_state_writes_existing_read_params_command():
+    client = _make_client()
+    client.client = _FakeGattClient(
+        [
+            _FakeCharacteristic(client_module.LEGACY_COMMAND_WRITE_UUIDS[0], ["write"]),
+            _FakeCharacteristic("00001002-0000-1000-8000-00805f9b34fb", ["notify"]),
+        ]
+    )
+    await client._resolve_characteristics()
+
+    async def write_and_confirm(_uuid, _data):
+        client._state_update_event.set()
+
+    client._write_packet = AsyncMock(side_effect=write_and_confirm)
+
+    assert await client.request_state()
+    client._write_packet.assert_awaited_once_with(client.init_write_uuid, protocol.old_read_params_packet())
+
+
 def test_device_provider_refreshes_adapter_route():
     old = SimpleNamespace(address="AA", name="old", details={"source": "local"})
     proxy = SimpleNamespace(address="AA", name="proxy", details={"source": "esphome"})

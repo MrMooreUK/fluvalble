@@ -240,6 +240,30 @@ class Device:
         for handler in self.updates_connect:
             handler()
 
+    def _record_native_schedule_readback(
+        self,
+        *,
+        protocol_name: str,
+        auto: dict[str, Any] | None = None,
+        professional: list[dict[str, Any]] | None = None,
+    ) -> bool:
+        """Store protocol-neutral fixture schedule readback."""
+        if auto is None and professional is None:
+            return False
+        if auto is not None:
+            self.values["native_auto_schedule"] = auto
+            self.diagnostics["native_auto_schedule"] = auto
+        if professional is not None:
+            self.values["native_pro_schedule"] = professional
+            self.diagnostics["native_pro_schedule"] = professional
+        self.diagnostics.update(
+            {
+                "native_schedule_protocol": protocol_name,
+                "native_schedule_readback_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        return True
+
     def numbers(self) -> list[str]:
         """List of numbers provided by the device."""
         if self._resolved_channel_count() == 4:
@@ -1674,14 +1698,10 @@ class Device:
                 self.values[f"channel_{index + 1}"] = 0
         elif self.values["mode"] == "automatic":
             auto_schedule = protocol.decode_old_auto_schedule(data[2:-1], channel_count=self._resolved_channel_count())
-            if auto_schedule is not None:
-                self.values["native_auto_schedule"] = auto_schedule
-                self.diagnostics["native_auto_schedule"] = auto_schedule
+            self._record_native_schedule_readback(protocol_name="classic", auto=auto_schedule)
         elif self.values["mode"] == "professional":
             pro_schedule = protocol.decode_old_pro_schedule(data[2:-1], channel_count=self._resolved_channel_count())
-            if pro_schedule is not None:
-                self.values["native_pro_schedule"] = pro_schedule
-                self.diagnostics["native_pro_schedule"] = pro_schedule
+            self._record_native_schedule_readback(protocol_name="classic", professional=pro_schedule)
 
         _LOGGER.debug(
             "led: %s mode: %s channels: %s / %s / %s / %s / %s",
@@ -1733,12 +1753,14 @@ class Device:
         if any(key in data for key in facebd_schedule_keys):
             auto_schedule = protocol.decode_wifi_auto_schedule(data)
             pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=self._resolved_channel_count())
-            if auto_schedule is not None:
-                self.values["native_auto_schedule"] = auto_schedule
-                self.diagnostics["native_auto_schedule"] = auto_schedule
-            if pro_schedule is not None:
-                self.values["native_pro_schedule"] = pro_schedule
-                self.diagnostics["native_pro_schedule"] = pro_schedule
+            updated = (
+                self._record_native_schedule_readback(
+                    protocol_name="facebd",
+                    auto=auto_schedule,
+                    professional=pro_schedule,
+                )
+                or updated
+            )
 
         if updated:
             for handler in self.updates_component:
@@ -1773,14 +1795,17 @@ class Device:
             updated = True
 
         auto_schedule = protocol.decode_spp_auto_schedule(data)
+        pro_schedule = protocol.decode_spp_pro_schedule(data)
+        if self._record_native_schedule_readback(
+            protocol_name="plant_pro",
+            auto=auto_schedule,
+            professional=pro_schedule,
+        ):
+            updated = True
         if auto_schedule is not None:
             self.diagnostics["plant_pro_auto_schedule"] = auto_schedule
-            updated = True
-
-        pro_schedule = protocol.decode_spp_pro_schedule(data)
         if pro_schedule is not None:
             self.diagnostics["plant_pro_pro_schedule"] = pro_schedule
-            updated = True
 
         effect_schedule = protocol.decode_spp_effect_schedule(data)
         if effect_schedule is not None:

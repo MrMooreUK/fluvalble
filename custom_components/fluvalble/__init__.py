@@ -697,6 +697,146 @@ def _register_services(hass: HomeAssistant) -> None:
     hass.data[DOMAIN][SERVICES_REGISTERED] = True
 
 
+def _format_fixture_minute(value: object) -> str | None:
+    """Return one fixture time value as HH:MM."""
+    if isinstance(value, str) and re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value):
+        return value
+    if isinstance(value, dict):
+        hour = value.get("hour")
+        minute = value.get("minute")
+        if isinstance(hour, int) and isinstance(minute, int) and 0 <= hour <= 23 and 0 <= minute <= 59:
+            return f"{hour:02d}:{minute:02d}"
+    return None
+
+
+def _normalize_fixture_auto_schedule(schedule: object) -> dict[str, Any] | None:
+    """Normalize classic, FACEBD, and Plant Pro Auto readback."""
+    if not isinstance(schedule, dict):
+        return None
+    sunrise = _format_fixture_minute(schedule.get("sunrise"))
+    sunset = _format_fixture_minute(schedule.get("sunset"))
+    if sunrise is None or sunset is None:
+        return None
+    sunrise_value = schedule.get("sunrise")
+    sunset_value = schedule.get("sunset")
+    try:
+        sunrise_ramp = int(
+            sunrise_value.get("ramp", 0) if isinstance(sunrise_value, dict) else schedule.get("sunrise_ramp", 0)
+        )
+        sunset_ramp = int(
+            sunset_value.get("ramp", 0) if isinstance(sunset_value, dict) else schedule.get("sunset_ramp", 0)
+        )
+    except (TypeError, ValueError):
+        return None
+    day_levels = schedule.get("day_levels")
+    night_levels = schedule.get("night_levels")
+    if (
+        not isinstance(day_levels, list)
+        or not isinstance(night_levels, list)
+        or not 4 <= len(day_levels) <= 5
+        or not 4 <= len(night_levels) <= 5
+    ):
+        return None
+    try:
+        normalized_day = [int(value) for value in day_levels]
+        normalized_night = [int(value) for value in night_levels]
+    except (TypeError, ValueError):
+        return None
+    if any(not 0 <= value <= 100 for value in (*normalized_day, *normalized_night)):
+        return None
+    return {
+        "sunrise": sunrise,
+        "sunrise_ramp": sunrise_ramp,
+        "sunset": sunset,
+        "sunset_ramp": sunset_ramp,
+        "sleep": _format_fixture_minute(schedule.get("sleep")),
+        "day_levels": normalized_day,
+        "night_levels": normalized_night,
+    }
+
+
+def _normalize_fixture_pro_schedule(schedule: object) -> list[dict[str, Any]] | None:
+    """Normalize native Professional readback for the schedule card."""
+    if not isinstance(schedule, list) or not schedule:
+        return None
+    points: list[dict[str, Any]] = []
+    for point in schedule:
+        if not isinstance(point, dict):
+            return None
+        time_value = point.get("time")
+        if time_value is None and isinstance(point.get("minute"), int):
+            minute = point["minute"]
+            if not 0 <= minute < 1440:
+                return None
+            time_value = f"{minute // 60:02d}:{minute % 60:02d}"
+        time_text = _format_fixture_minute(time_value)
+        if time_text is None:
+            return None
+        levels = point.get("levels")
+        try:
+            if isinstance(levels, list):
+                if not 4 <= len(levels) <= 5:
+                    return None
+                channel_values = [int(value) for value in levels]
+            else:
+                channel_values = [int(point.get(f"channel_{index}", 0)) for index in range(1, 6)]
+        except (TypeError, ValueError):
+            return None
+        if any(not 0 <= value <= 100 for value in channel_values):
+            return None
+        channel_values.extend([0] * (5 - len(channel_values)))
+        points.append(
+            {
+                "time": time_text,
+                "red": channel_values[0],
+                "green": channel_values[1],
+                "blue": channel_values[2],
+                "white": channel_values[3],
+                "channel_5": channel_values[4],
+            }
+        )
+    return points
+
+
+def _native_schedule_readback(device: Device | None) -> dict[str, Any]:
+    """Return protocol-neutral native schedule readback for the dashboard."""
+    if device is None:
+        return {
+            "available": False,
+            "mode": None,
+            "auto": None,
+            "professional": None,
+            "protocol": None,
+            "read_at": None,
+        }
+    auto = _normalize_fixture_auto_schedule(device.values.get("native_auto_schedule"))
+    professional = _normalize_fixture_pro_schedule(device.values.get("native_pro_schedule"))
+    return {
+        "available": auto is not None or professional is not None,
+        "mode": device.values.get("mode"),
+        "auto": auto,
+        "professional": professional,
+        "protocol": device.diagnostics.get("native_schedule_protocol"),
+        "read_at": device.diagnostics.get("native_schedule_readback_at"),
+    }
+
+
+async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh: bool = False) -> dict[str, Any]:
+    """Build the saved and fixture schedule payload for the dashboard."""
+    device = _device_for_entry(hass, entry_id)
+    refresh_ok = None
+    if refresh:
+        refresh_ok = bool(device is not None and await device.async_refresh_state())
+    saved = await _async_load_schedule_data(hass, entry_id)
+    return {
+        "entry_id": entry_id,
+        "points": saved.get("points"),
+        "mode": saved.get("mode", "manual"),
+        "fixture": _native_schedule_readback(device),
+        "refresh_ok": refresh_ok,
+    }
+
+
 def _register_websocket(hass: HomeAssistant) -> None:
     """Register websocket commands for Lovelace schedule loading."""
     if hass.data[DOMAIN].get(WEBSOCKET_REGISTERED):
@@ -707,6 +847,7 @@ def _register_websocket(hass: HomeAssistant) -> None:
             vol.Required("type"): "fluvalble/get_schedule",
             vol.Optional("entry_id"): str,
             vol.Optional("mac"): str,
+            vol.Optional("refresh", default=False): bool,
         }
     )
     @websocket_api.async_response
@@ -722,14 +863,9 @@ def _register_websocket(hass: HomeAssistant) -> None:
             connection.send_error(msg["id"], "not_found", str(err))
             return
 
-        saved = await _async_load_schedule_data(hass, entry_id)
         connection.send_result(
             msg["id"],
-            {
-                "entry_id": entry_id,
-                "points": saved.get("points"),
-                "mode": saved.get("mode", "manual"),
-            },
+            await _async_schedule_payload(hass, entry_id, refresh=msg.get("refresh", False)),
         )
 
     websocket_api.async_register_command(hass, websocket_get_schedule)
