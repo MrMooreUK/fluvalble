@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Retired the duplicate LED switch now that the native light entity provides
+  power control, and removed stale switch registry entries during config-entry
+  setup.
 - Replaced the recorder-backed diagnostics sensor and command-sending diagnostic
   buttons with Home Assistant's standard downloadable report. Collecting a
   report does not scan, connect, disconnect, refresh state, or send BLE commands.

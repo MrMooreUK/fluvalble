@@ -99,6 +99,7 @@ RETIRED_DIAGNOSTIC_SUFFIXES = (
     "_refresh_diagnostics",
     "_test_led_channels",
 )
+RETIRED_ENTITY_DOMAINS = frozenset({Platform.NUMBER.value, Platform.SWITCH.value})
 
 
 def _validate_schedule_points(points: object) -> list[dict]:
@@ -294,7 +295,6 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
     Platform.SELECT,
     Platform.SENSOR,
-    Platform.SWITCH,
     Platform.LIGHT,
 ]
 
@@ -321,7 +321,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     if entry.unique_id != desired_unique_id:
         hass.config_entries.async_update_entry(entry, unique_id=desired_unique_id)
 
-    _remove_retired_channel_entities(hass, entry)
+    _remove_retired_entities(hass, entry)
 
     runtime = FluvalRuntimeData()
     entry.runtime_data = runtime
@@ -369,7 +369,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
         # Retroactively add entities for platforms that set up before the
         # device was available (they stashed their add_entities callback).
-        from .switch import create_entities as switch_entities  # noqa: PLC0415
         from .binary_sensor import create_entities as sensor_entities  # noqa: PLC0415
         from .select import create_entities as select_entities  # noqa: PLC0415
         from .light import create_entities as light_entities  # noqa: PLC0415
@@ -377,7 +376,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         from .sensor import create_entities as diagnostics_entities  # noqa: PLC0415
 
         factories = {
-            Platform.SWITCH: switch_entities,
             Platform.BINARY_SENSOR: sensor_entities,
             Platform.SELECT: select_entities,
             Platform.LIGHT: light_entities,
@@ -471,7 +469,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
 
 @callback
-def _remove_retired_channel_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
+def _remove_retired_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Remove entities superseded by native light and diagnostics support."""
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
 
@@ -479,9 +477,10 @@ def _remove_retired_channel_entities(hass: HomeAssistant, entry: ConfigEntry) ->
     for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
         domain = str(getattr(entity, "domain", "") or str(entity.entity_id).partition(".")[0])
         unique_id = str(getattr(entity, "unique_id", ""))
-        retired_channel = domain == Platform.NUMBER.value and unique_id.endswith(RETIRED_CHANNEL_SUFFIXES)
+        retired_platform = domain in RETIRED_ENTITY_DOMAINS
+        retired_channel = unique_id.endswith(RETIRED_CHANNEL_SUFFIXES)
         retired_diagnostics = unique_id.endswith(RETIRED_DIAGNOSTIC_SUFFIXES)
-        if retired_channel or retired_diagnostics:
+        if retired_platform or retired_channel or retired_diagnostics:
             _LOGGER.info("Removing retired Fluval entity %s", entity.entity_id)
             registry.async_remove(entity.entity_id)
 

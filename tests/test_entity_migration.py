@@ -7,24 +7,30 @@ from unittest.mock import MagicMock
 
 from homeassistant.const import Platform
 
-from custom_components.fluvalble import PLATFORMS, _remove_retired_channel_entities
+from custom_components.fluvalble import PLATFORMS, _remove_retired_entities
 
 
-def test_number_platform_is_replaced_by_native_colour_light():
+def test_retired_platforms_are_replaced_by_native_colour_light():
     assert Platform.LIGHT in PLATFORMS
     assert Platform.NUMBER not in PLATFORMS
+    assert Platform.SWITCH not in PLATFORMS
 
 
-def test_retired_channel_and_diagnostic_entities_are_removed(monkeypatch):
+def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
     channel = SimpleNamespace(
         entity_id="number.fluval_channel_1",
         domain="number",
         unique_id="AABBCCDDEEFF_channel_1",
     )
-    unrelated = SimpleNamespace(
+    legacy_number = SimpleNamespace(
         entity_id="number.fluval_transition",
         domain="number",
         unique_id="AABBCCDDEEFF_transition",
+    )
+    legacy_switch = SimpleNamespace(
+        entity_id="switch.fluval_led",
+        domain="switch",
+        unique_id="AABBCCDDEEFF_led_on_off",
     )
     light = SimpleNamespace(
         entity_id="light.fluval_light",
@@ -50,7 +56,7 @@ def test_retired_channel_and_diagnostic_entities_are_removed(monkeypatch):
     entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
     entity_registry.async_get = MagicMock(return_value=registry)
     entity_registry.async_entries_for_config_entry = MagicMock(
-        return_value=[channel, unrelated, light, diagnostics, refresh, channel_test]
+        return_value=[channel, legacy_number, legacy_switch, light, diagnostics, refresh, channel_test]
     )
     monkeypatch.setitem(
         sys.modules,
@@ -58,13 +64,15 @@ def test_retired_channel_and_diagnostic_entities_are_removed(monkeypatch):
         entity_registry,
     )
 
-    _remove_retired_channel_entities(
+    _remove_retired_entities(
         MagicMock(),
         SimpleNamespace(entry_id="entry_1"),
     )
 
     assert [call.args[0] for call in registry.async_remove.call_args_list] == [
         channel.entity_id,
+        legacy_number.entity_id,
+        legacy_switch.entity_id,
         diagnostics.entity_id,
         refresh.entity_id,
         channel_test.entity_id,
