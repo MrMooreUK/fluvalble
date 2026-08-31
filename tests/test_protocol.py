@@ -14,7 +14,8 @@ def test_wifi_all_zone_packet_contains_manual_key_and_channel_values():
 
     assert decoded[protocol.WIFI_MANUAL_KEY] == 0
     assert decoded[protocol.WIFI_CHANNEL_KEYS[0]] == 10
-    assert decoded[protocol.WIFI_CHANNEL_KEYS[4]] == 50
+    assert decoded[protocol.WIFI_CHANNEL_KEYS[3]] == 40
+    assert protocol.WIFI_AUTO_SUNRISE_KEY not in decoded
 
 
 def test_wifi_values_are_clamped_to_percent_range():
@@ -68,6 +69,55 @@ def test_wifi_clock_and_timezone_packets():
     assert tz[protocol.WIFI_TZ_OFFSET_KEY] == 0
 
 
+def test_wifi_native_auto_schedule_matches_apk_cbor_shape():
+    packet = protocol.wifi_auto_schedule_packet(
+        sunrise=(8, 0, 60),
+        sunset=(21, 0, 45),
+        sleep=(22, 30),
+        day_levels=[80, 70, 60, 50],
+        night_levels=[0, 10, 0, 0],
+    )
+
+    decoded = protocol.decode_cbor_map(packet)
+
+    assert decoded == {
+        114: [480, 540],
+        115: [1215, 1260],
+        116: 1350,
+        117: bytes([80, 70, 60, 50]),
+        118: bytes([0, 10, 0, 0]),
+    }
+    assert protocol.decode_wifi_auto_schedule(decoded) == {
+        "sunrise": {"hour": 8, "minute": 0, "ramp": 60},
+        "sunset": {"hour": 21, "minute": 0, "ramp": 45},
+        "sleep": {"hour": 22, "minute": 30},
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 10, 0, 0],
+    }
+
+
+def test_wifi_native_pro_schedule_matches_apk_cbor_shape():
+    packet = protocol.wifi_pro_schedule_packet(
+        [
+            {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+            {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        ]
+    )
+
+    decoded = protocol.decode_cbor_map(packet)
+
+    assert decoded == {120: 2, 121: [480, 750], 122: bytes([1, 2, 3, 4, 10, 20, 30, 40])}
+    assert protocol.decode_wifi_pro_schedule(decoded) == [
+        {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+        {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+    ]
+
+
+def test_wifi_native_preview_uses_1440_to_stop():
+    assert protocol.decode_cbor_map(protocol.wifi_auto_preview_packet(750)) == {119: 750}
+    assert protocol.decode_cbor_map(protocol.wifi_auto_preview_packet(None)) == {119: 1440}
+
+
 def test_old_clock_packet_shape():
     moment = datetime(2026, 7, 19, 12, 30, 45, tzinfo=timezone.utc)
     local = moment.astimezone()
@@ -94,6 +144,42 @@ def test_old_weather_effect_packet_uses_apk_command_and_checksum():
 def test_old_weather_effect_packet_rejects_unknown_ids(effect_id):
     with pytest.raises(ValueError):
         protocol.old_weather_effect_packet(effect_id)
+
+
+def test_classic_native_auto_schedule_matches_apk_6807_shape():
+    packet = protocol.old_auto_schedule_packet(
+        sunrise=(8, 0, 60),
+        sunset=(21, 0, 45),
+        sleep=(22, 30),
+        day_levels=[80, 70, 60, 50],
+        night_levels=[0, 10, 0, 0],
+        channel_count=4,
+    )
+
+    assert packet[:-1] == bytes.fromhex("68 07 08 00 09 00 50 46 3c 32 14 0f 15 00 00 0a 00 00 01 16 1e")
+    assert protocol.decode_old_auto_schedule(bytes((1,)) + packet[2:-1], channel_count=4) == {
+        "sunrise": {"hour": 8, "minute": 0, "ramp": 60},
+        "sunset": {"hour": 21, "minute": 0, "ramp": 45},
+        "sleep": {"hour": 22, "minute": 30},
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 10, 0, 0],
+    }
+
+
+def test_classic_native_pro_schedule_matches_apk_6810_shape():
+    packet = protocol.old_pro_schedule_packet(
+        [
+            {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+            {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        ],
+        channel_count=4,
+    )
+
+    assert packet[:-1] == bytes.fromhex("68 10 02 08 00 01 02 03 04 0c 1e 0a 14 1e 28")
+    assert protocol.decode_old_pro_schedule(bytes((2,)) + packet[2:-1], channel_count=4) == [
+        {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+        {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+    ]
 
 
 def test_mesh_clock_packet_shape():

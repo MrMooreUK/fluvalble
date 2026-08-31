@@ -4,7 +4,11 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.fluvalble.core import LAMP_PROFILE_PLANT, protocol
+from custom_components.fluvalble.core import (
+    LAMP_PROFILE_AQUASKY3,
+    LAMP_PROFILE_PLANT,
+)
+from custom_components.fluvalble.core import protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
     CHANNEL_NAMES_PLANT,
@@ -23,6 +27,13 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
             "model": model,
             **config,
         },
+    )
+
+
+def _facebd_client():
+    return SimpleNamespace(
+        raw_facebd=True,
+        command_write_uuid="facebd03-7261-6262-6974-696f74626c65",
     )
 
 
@@ -179,10 +190,16 @@ def test_aquasky_2_exposes_four_color_channels():
     assert device.numbers() == AQUASKY_NUMBERS
 
 
-def test_aquasky_3_name_exposes_five_channels():
+def test_aquasky_3_name_exposes_four_rgbw_channels():
     device = _make_device(name="AquaSky3.0_2F3176", model="AquaSky 3.0 Bluetooth LED")
 
-    assert device.numbers() == NUMBERS
+    assert device.numbers() == AQUASKY_NUMBERS
+
+
+def test_aquasky_3_profile_exposes_four_rgbw_channels():
+    device = _make_device(lamp_profile=LAMP_PROFILE_AQUASKY3)
+
+    assert device.numbers() == AQUASKY_NUMBERS
 
 
 def test_plant_profile_exposes_five_channels_with_plant_labels():
@@ -634,7 +651,7 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
         protocol.WIFI_CHANNEL_KEYS[2]: 30,
         protocol.WIFI_CHANNEL_KEYS[3]: 40,
     }
-    assert protocol.WIFI_CHANNEL_KEYS[4] not in expected
+    assert protocol.WIFI_AUTO_SUNRISE_KEY not in expected
 
 
 def test_led_channel_test_verifies_each_channel_and_restores_state(monkeypatch):
