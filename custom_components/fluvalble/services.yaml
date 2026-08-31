@@ -169,7 +169,7 @@ save_schedule:
         object:
     mode:
       name: Schedule mode
-      description: Manual saves the curve and disables the onboard scheduler. Native uploads 2-12 points once and lets the fixture run its own clock.
+      description: Manual saves the curve and disables the onboard scheduler. Native uploads an APK-supported curve (4-10 classic/OLD; 4-12 FACEBD/MESH) and lets the fixture run its own clock.
       selector:
         select:
           options:
@@ -231,7 +231,7 @@ set_native_pro_schedule:
         text:
     points:
       name: Schedule points
-      description: Two to 12 points with time plus channel_1 through channel_5. AquaSky ignores channel_5; Plant Pro order is Red, Blue, Cool White, Warm White, Amber.
+      description: Four to 10 points for classic/OLD or four to 12 for FACEBD/MESH, with time plus channel_1 through channel_5. AquaSky ignores channel_5; Plant Pro order is Red, Blue, Cool White, Warm White, Amber.
       required: true
       example:
         - time: "08:00"
@@ -246,6 +246,18 @@ set_native_pro_schedule:
           cool_white: 60
           warm_white: 50
           amber: 40
+        - time: "20:00"
+          red: 20
+          blue: 20
+          cool_white: 10
+          warm_white: 10
+          amber: 5
+        - time: "22:00"
+          red: 0
+          blue: 0
+          cool_white: 0
+          warm_white: 0
+          amber: 0
       selector:
         object:
 
