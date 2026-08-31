@@ -1052,6 +1052,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
         runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
+        runtime.device.cancel_reachability_refresh()
         tasks = list(runtime.background_tasks)
         for task in tasks:
             task.cancel()

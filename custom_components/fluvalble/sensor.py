@@ -1,6 +1,6 @@
 """Sensor platform for Fluval Aquarium LED diagnostics."""
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorStateClass
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
@@ -48,6 +48,7 @@ class FluvalSensor(FluvalEntity, SensorEntity):
 
         if self.attr == "rssi":
             self._attr_device_class = SensorDeviceClass.SIGNAL_STRENGTH
+            self._attr_state_class = SensorStateClass.MEASUREMENT
             self._attr_native_unit_of_measurement = "dBm"
         elif self.attr == "last_seen":
             self._attr_device_class = SensorDeviceClass.TIMESTAMP

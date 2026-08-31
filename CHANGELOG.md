@@ -20,6 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Replaced the active-session Connection binary sensor with Reachable, based on
+  recent advertisements, successful connections, and successful commands. RSSI
+  is now a measurement sensor with its advertisement timestamp exposed.
 - Retired the duplicate LED switch now that the native light entity provides
   power control, and removed stale switch registry entries during config-entry
   setup.

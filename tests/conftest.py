@@ -226,11 +226,15 @@ def _stub_homeassistant():
         SIGNAL_STRENGTH = "signal_strength"
         TIMESTAMP = "timestamp"
 
+    class SensorStateClass(str, enum.Enum):
+        MEASUREMENT = "measurement"
+
     class _FakeSensorEntity(_FakeEntity):
         pass
 
     ha_sensor = types.ModuleType("homeassistant.components.sensor")
     ha_sensor.SensorDeviceClass = SensorDeviceClass
+    ha_sensor.SensorStateClass = SensorStateClass
     ha_sensor.SensorEntity = _FakeSensorEntity
 
     # ---- homeassistant.components.select ----
@@ -312,6 +316,7 @@ def _stub_homeassistant():
 
     # ---- homeassistant.helpers.event ----
     ha_event = types.ModuleType("homeassistant.helpers.event")
+    ha_event.async_track_point_in_time = MagicMock(return_value=MagicMock())
 
     # ---- homeassistant.util.dt ----
     ha_util = types.ModuleType("homeassistant.util")

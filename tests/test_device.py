@@ -1,6 +1,7 @@
 """Tests for Fluval device schedule and channel behavior."""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -15,6 +16,7 @@ from custom_components.fluvalble.core.device import (
     CHANNEL_NAMES_PLANT_PRO,
     Device,
     NUMBERS,
+    REACHABLE_SECONDS,
 )
 from custom_components.fluvalble.core.effects import PLANT_PRO_EFFECTS, WEATHER_EFFECTS
 
@@ -28,6 +30,75 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
             **config,
         },
     )
+
+
+def test_connection_attribute_uses_recent_activity_or_live_gatt():
+    device = _make_device()
+    device.connected = False
+    device.conn_info["last_seen"] = datetime.now(UTC)
+
+    assert device.is_reachable() is True
+    assert device.attribute("connection")["is_on"] is True
+    assert device.attribute("connection")["extra"]["gatt_connected"] is False
+
+    device.conn_info["last_seen"] = datetime.now(UTC) - timedelta(seconds=REACHABLE_SECONDS + 1)
+    assert device.is_reachable() is False
+    assert device.attribute("connection")["is_on"] is False
+
+    device.connected = True
+    assert device.is_reachable() is True
+    assert device.attribute("connection")["extra"]["gatt_connected"] is True
+
+
+def test_reachability_expiry_notifies_connection_entities():
+    device = _make_device()
+    handler = MagicMock()
+    device.register_update("connection", handler)
+    device.conn_info["last_seen"] = datetime.now(UTC) - timedelta(seconds=REACHABLE_SECONDS + 1)
+
+    device._on_reachability_expired(datetime.now(UTC))
+
+    handler.assert_called_once()
+    assert device.attribute("connection")["is_on"] is False
+
+
+def test_cancel_reachability_refresh_releases_timer():
+    device = _make_device()
+    cancel = MagicMock()
+    device._reachability_unsub = cancel
+
+    device.cancel_reachability_refresh()
+
+    cancel.assert_called_once()
+    assert device._reachability_unsub is None
+
+
+def test_activity_updates_last_seen_and_schedules_expiry(monkeypatch):
+    import custom_components.fluvalble.core.device as device_module
+
+    device = _make_device()
+    device.hass = MagicMock()
+    cancel = MagicMock()
+    track = MagicMock(return_value=cancel)
+    monkeypatch.setattr(device_module, "async_track_point_in_time", track)
+
+    device.touch_seen(rssi=-64)
+
+    assert device.conn_info["rssi"] == -64
+    assert device.conn_info["rssi_updated_at"] == device.conn_info["last_seen"]
+    track.assert_called_once()
+    assert device._reachability_unsub is cancel
+
+
+def test_expected_disconnect_remains_reachable_after_successful_connect():
+    device = _make_device()
+
+    device.set_connected(True)
+    connected_at = device.conn_info["last_seen"]
+    device.set_connected(False)
+
+    assert connected_at <= device.conn_info["last_seen"]
+    assert device.is_reachable() is True
 
 
 def _facebd_client():

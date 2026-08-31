@@ -3,14 +3,15 @@
 from collections.abc import Callable
 import asyncio
 import contextlib
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import logging
 from time import monotonic
 from typing import Any, TypedDict
 
 from bleak import AdvertisementData, BLEDevice, BleakError, BleakScanner
 from homeassistant.components import bluetooth
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_point_in_time
 
 from . import (
     CONF_LAMP_PROFILE,
@@ -36,6 +37,10 @@ from .effects import (
 from . import protocol
 
 _LOGGER = logging.getLogger(__name__)
+
+# An idle GATT disconnect is expected. Treat the fixture as reachable while
+# recent advertisement, connection, or successful command activity exists.
+REACHABLE_SECONDS = 300
 
 NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 SELECTS = ["mode", "schedule_mode"]
@@ -171,6 +176,7 @@ class Device:
         self._commanded_brightness: int | None = None
         self._commanded_channels: dict[str, int] | None = None
         self._effect_restore_channels: dict[str, int] | None = None
+        self._reachability_unsub: Callable[[], None] | None = None
 
         if device and advertisement:
             self.update_ble(device, advertisement)
@@ -190,12 +196,58 @@ class Device:
         """Return true when HA has enough BLE info to attempt commands."""
         return bool(self.client or self.conn_info.get("last_seen"))
 
+    def touch_seen(self, *, rssi: int | None = None, notify: bool = True) -> None:
+        """Record successful advertisement, connection, or command activity."""
+        self.conn_info["last_seen"] = datetime.now(UTC)
+        if rssi is not None:
+            self.conn_info["rssi"] = rssi
+            self.conn_info["rssi_updated_at"] = self.conn_info["last_seen"]
+        if notify:
+            for handler in self.updates_connect:
+                handler()
+        if not self.connected:
+            self._schedule_reachability_refresh()
+
+    def cancel_reachability_refresh(self) -> None:
+        """Cancel the pending reachability expiry callback."""
+        if self._reachability_unsub is not None:
+            self._reachability_unsub()
+            self._reachability_unsub = None
+
+    @callback
+    def _on_reachability_expired(self, _now: datetime) -> None:
+        """Refresh entities when the recent-activity window expires."""
+        self._reachability_unsub = None
+        for handler in self.updates_connect:
+            handler()
+
+    def _schedule_reachability_refresh(self) -> None:
+        """Schedule a one-shot refresh at the recent-activity expiry."""
+        if self.hass is None or self.connected:
+            return
+
+        self.cancel_reachability_refresh()
+        last_seen = self.conn_info.get("last_seen")
+        if not isinstance(last_seen, datetime):
+            return
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=UTC)
+
+        expiry = last_seen + timedelta(seconds=REACHABLE_SECONDS)
+        if expiry <= datetime.now(UTC):
+            self._on_reachability_expired(datetime.now(UTC))
+            return
+        self._reachability_unsub = async_track_point_in_time(
+            self.hass,
+            self._on_reachability_expired,
+            expiry,
+        )
+
     def update_ble(self, device: BLEDevice, advertisement: AdvertisementData):
         """Update BLE metadata."""
         self.address = device.address
         self.conn_info["mac"] = device.address
-        self.conn_info["last_seen"] = datetime.now(UTC)
-        self.conn_info["rssi"] = advertisement.rssi
+        self.touch_seen(rssi=advertisement.rssi, notify=False)
         self.conn_info["service_uuids"] = list(advertisement.service_uuids)
         self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisement.service_data.items()}
         self.facebd = self._uses_facebd_protocol(
@@ -215,16 +267,31 @@ class Device:
             handler()
 
     def set_connected(self, connected: bool):
-        """Set the connection status."""
+        """Set active GATT status while tracking fixture reachability."""
         self.connected = connected
-        if not connected:
+        if connected:
+            self.touch_seen(notify=False)
+            self.cancel_reachability_refresh()
+        else:
             # Allow clock sync again on the next successful connect (#8).
             self._clock_synced = False
+            self._schedule_reachability_refresh()
 
         for handler in self.updates_connect:
             handler()
         for handler in self.updates_component:
             handler()
+
+    def is_reachable(self) -> bool:
+        """Return whether the fixture has a live session or recent activity."""
+        if self.connected:
+            return True
+        last_seen = self.conn_info.get("last_seen")
+        if not isinstance(last_seen, datetime):
+            return False
+        if last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=UTC)
+        return (datetime.now(UTC) - last_seen).total_seconds() <= REACHABLE_SECONDS
 
     def _notify_diagnostics_throttled(self):
         """Notify diagnostic entities at most once per interval."""
@@ -742,7 +809,9 @@ class Device:
     def attribute(self, attr: str) -> Attribute:
         """Provide attributes to the entities like switches, numbers etc."""
         if attr == "connection":
-            return Attribute(is_on=self.connected, extra=self.conn_info)
+            extra = dict(self.conn_info)
+            extra["gatt_connected"] = self.connected
+            return Attribute(is_on=self.is_reachable(), extra=extra)
         if attr.startswith("channel_"):
             return Attribute(min=0, max=100, step=1, value=self.values[attr])
         if attr == "mode":
@@ -755,6 +824,7 @@ class Device:
             return Attribute(
                 value=self.conn_info.get("rssi"),
                 native_unit_of_measurement="dBm",
+                extra={"last_advertisement": self.conn_info.get("rssi_updated_at")},
             )
         if attr == "last_seen":
             return Attribute(value=self.conn_info.get("last_seen"))
@@ -1230,6 +1300,7 @@ class Device:
             }
         )
 
+        self.touch_seen(notify=False)
         for handler in self.updates_component:
             handler()
         for handler in self.updates_connect:
@@ -1424,11 +1495,9 @@ class Device:
         """Populate metadata from a directly resolved BLEDevice."""
         self.address = device.address
         self.conn_info["mac"] = device.address
-        self.conn_info["last_seen"] = datetime.now(UTC)
-
         details = device.details if isinstance(device.details, dict) else {}
         props = details.get("props", {})
-        self.conn_info["rssi"] = props.get("RSSI", self.conn_info.get("rssi"))
+        self.touch_seen(rssi=props.get("RSSI"), notify=False)
 
         service_uuids = list(props.get("UUIDs", self.conn_info.get("service_uuids", [])))
         self.conn_info["service_uuids"] = service_uuids
