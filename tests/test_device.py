@@ -12,7 +12,7 @@ from custom_components.fluvalble.core.device import (
     Device,
     NUMBERS,
 )
-from custom_components.fluvalble.core.effects import WEATHER_EFFECTS
+from custom_components.fluvalble.core.effects import PLANT_PRO_EFFECTS, WEATHER_EFFECTS
 
 
 def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config):
@@ -45,6 +45,12 @@ def test_classic_effects_require_positive_transport_evidence():
     assert unknown.effect_list() == []
     assert classic.effect_list() == ["None", *WEATHER_EFFECTS]
     assert facebd.effect_list() == []
+
+
+def test_plant_pro_identity_exposes_only_plant_pro_effects():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+
+    assert device.effect_list() == ["None", *PLANT_PRO_EFFECTS]
 
 
 def test_native_weather_effect_uses_apk_packet():
@@ -83,6 +89,29 @@ async def _async_test_native_weather_effect_uses_apk_packet():
         "channel_3": 30,
         "channel_4": 40,
     }
+
+
+def test_plant_pro_native_effect_uses_key_14_packet():
+    asyncio.run(_async_test_plant_pro_native_effect_uses_key_14_packet())
+
+
+async def _async_test_plant_pro_native_effect_uses_key_14_packet():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = SimpleNamespace(
+        plant_pro_spp=True,
+        command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
+    )
+    device.values.update({"mode": "automatic", "led_on_off": False})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_effect("Sun and lightning")
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.spp_mode_packet(0),
+        protocol.spp_switch_packet(True),
+        protocol.spp_effect_packet(3),
+    ]
+    assert device.values["effect"] == "Sun and lightning"
 
 
 def test_native_weather_effect_rejects_nonclassic_transport():
@@ -323,6 +352,28 @@ def test_plant_pro_status_packet_updates_power_mode_and_all_channels():
     assert device._channel_count_hint == 5
 
 
+def test_plant_pro_status_decodes_effect_and_fixture_schedules():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 1,
+            "weekdays": [True] * 7,
+            "enabled": True,
+        }
+    ]
+    status_map = protocol.decode_cbor_update(protocol.spp_effect_schedule_packet(windows))
+    status_map[protocol.SPP_EFFECT_KEY] = 4
+    status = bytes((protocol.SPP_STATUS_HEADER,)) + protocol.cbor_map(status_map)
+
+    assert device.decode_update_packet(status)
+    assert device.values["effect"] == "Colour cycle"
+    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+
+
 def test_plant_pro_switch_mode_and_channels_use_spp_packets():
     asyncio.run(_async_test_plant_pro_commands_use_spp_packets())
 
@@ -355,6 +406,54 @@ async def _async_test_plant_pro_commands_use_spp_packets():
     device._async_send_packet.assert_awaited_once_with(protocol.spp_all_zone_packet([75, 0, 0, 0, 0]))
 
 
+def test_plant_pro_native_schedule_actions_write_fixture_packets():
+    asyncio.run(_async_test_plant_pro_native_schedule_actions_write_fixture_packets())
+
+
+async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = SimpleNamespace(plant_pro_spp=True)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    auto = {
+        "sunrise": (8, 0, 60),
+        "sunset": (20, 30, 45),
+        "sleep": (23, 15),
+        "day_levels": [80, 70, 60, 50, 40],
+        "night_levels": [0, 5, 0, 0, 0],
+    }
+    points = [{"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]}]
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 1,
+            "weekdays": [True] * 7,
+            "enabled": True,
+        }
+    ]
+
+    assert await device.async_set_native_auto_schedule(auto)
+    assert await device.async_set_native_pro_schedule(points)
+    assert await device.async_set_native_effect_schedule(windows)
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.spp_auto_schedule_packet(
+            sunrise=auto["sunrise"],
+            sunset=auto["sunset"],
+            sleep=auto["sleep"],
+            day_levels=auto["day_levels"],
+            night_levels=auto["night_levels"],
+        ),
+        protocol.spp_pro_schedule_packet(points),
+        protocol.spp_effect_schedule_packet(windows),
+    ]
+    assert device.diagnostics["plant_pro_auto_schedule"]["sunrise"] == "08:00"
+    assert device.diagnostics["plant_pro_pro_schedule"][0]["time"] == "12:30"
+    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+
+
 def test_plant_pro_expected_state_uses_spp_keys():
     device = _make_device(
         name="PlantPro_AABBCC",
@@ -369,6 +468,7 @@ def test_plant_pro_expected_state_uses_spp_keys():
         protocol.SPP_CHANNEL_KEYS[2]: 30,
         protocol.SPP_CHANNEL_KEYS[3]: 40,
         protocol.SPP_CHANNEL_KEYS[4]: 50,
+        protocol.SPP_EFFECT_KEY: 0,
     }
 
 

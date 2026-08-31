@@ -16,6 +16,9 @@ from custom_components.fluvalble import (
     _async_load_schedule_data,
     _async_run_auto_schedule,
     _async_save_schedule,
+    _validate_native_auto_schedule,
+    _validate_native_effect_windows,
+    _validate_native_pro_points,
     _validate_schedule_points,
     async_set_schedule_mode,
 )
@@ -86,6 +89,65 @@ def test_schedule_validator_normalizes_missing_channels():
         "white": 0,
         "channel_5": 0,
     }
+
+
+def test_native_auto_schedule_validator_normalizes_fixture_payload():
+    schedule = _validate_native_auto_schedule(
+        {
+            "sunrise": "08:00",
+            "sunrise_ramp": 60,
+            "sunset": "20:30",
+            "sunset_ramp": 45,
+            "sleep": "23:15",
+            "day": {
+                "red": 80,
+                "blue": 70,
+                "cool_white": 60,
+                "warm_white": 50,
+                "amber": 40,
+            },
+            "night": {
+                "red": 0,
+                "blue": 5,
+                "cool_white": 0,
+                "warm_white": 0,
+                "amber": 0,
+            },
+        }
+    )
+
+    assert schedule["sunrise"] == (8, 0, 60)
+    assert schedule["sunset"] == (20, 30, 45)
+    assert schedule["day_levels"] == [80, 70, 60, 50, 40]
+
+
+def test_native_pro_and_effect_validators_normalize_service_objects():
+    points = _validate_native_pro_points(
+        [
+            {
+                "time": "12:30",
+                "red": 80,
+                "blue": 70,
+                "cool_white": 60,
+                "warm_white": 50,
+                "amber": 40,
+            }
+        ]
+    )
+    windows = _validate_native_effect_windows(
+        [
+            {
+                "start": "12:00",
+                "end": "12:10",
+                "effect": "Thunderstorm",
+                "weekdays": ["monday", "wednesday", "friday"],
+            }
+        ]
+    )
+
+    assert points == [{"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]}]
+    assert windows[0]["effect_id"] == 1
+    assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
 
 
 def test_save_and_load_schedule_data(monkeypatch):

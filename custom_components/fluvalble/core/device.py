@@ -26,7 +26,13 @@ from .discovery import (
     CONF_MODEL,
     detect_model,
 )
-from .effects import effect_id, effect_list as classic_effect_list
+from .effects import (
+    effect_id,
+    effect_list as classic_effect_list,
+    plant_pro_effect_id,
+    plant_pro_effect_list,
+    plant_pro_effect_name,
+)
 from . import protocol
 
 _LOGGER = logging.getLogger(__name__)
@@ -457,8 +463,19 @@ class Device:
         )
 
     def effect_list(self) -> list[str]:
-        """Return effects only when the classic transport is positively identified."""
+        """Return effects supported by the positively identified controller."""
+        if self.supports_plant_pro_effects():
+            return plant_pro_effect_list()
         return classic_effect_list() if self.supports_classic_effects() else []
+
+    def supports_plant_pro_effects(self) -> bool:
+        """Return whether available evidence identifies a Plant Pro controller."""
+        if self._uses_plant_pro_protocol():
+            return True
+        if self.lamp_profile == LAMP_PROFILE_PLANT_PRO:
+            return True
+        identity = f"{self.name} {self.model}".lower().replace(" ", "")
+        return "plantpro" in identity or "plant4.0" in identity
 
     def _channel_snapshot(self) -> dict[str, int]:
         """Return the current supported static channel values."""
@@ -479,14 +496,16 @@ class Device:
         self._effect_restore_channels = None
 
     async def async_set_effect(self, effect: str) -> bool:
-        """Start one APK-native effect on a positively identified classic light."""
-        effect_code = effect_id(effect)
-        if effect_code is None:
-            return False
+        """Start one APK-native effect on a supported Fluval controller."""
         if not await self._async_prepare_command():
             _LOGGER.warning("Cannot set Fluval effect before BLE device is available")
             return False
-        if not self.supports_classic_effects():
+
+        plant_pro = self._uses_plant_pro_protocol()
+        effect_code = plant_pro_effect_id(effect) if plant_pro else effect_id(effect)
+        if effect_code is None:
+            return False
+        if not plant_pro and not self.supports_classic_effects():
             _LOGGER.warning(
                 "Classic weather effects are not valid for Fluval transport %s",
                 self.client.command_write_uuid if self.client else None,
@@ -502,10 +521,16 @@ class Device:
 
         packets: list[bytes] = []
         if self.values.get("mode") != "manual":
-            packets.append(protocol.old_mode_packet(MODE_TO_CODE["manual"]))
+            packets.append(
+                protocol.spp_mode_packet(MODE_TO_CODE["manual"])
+                if plant_pro
+                else protocol.old_mode_packet(MODE_TO_CODE["manual"])
+            )
         if not self.values.get("led_on_off"):
-            packets.append(protocol.old_switch_packet(True))
-        packets.append(protocol.old_weather_effect_packet(effect_code))
+            packets.append(protocol.spp_switch_packet(True) if plant_pro else protocol.old_switch_packet(True))
+        packets.append(
+            protocol.spp_effect_packet(effect_code) if plant_pro else protocol.old_weather_effect_packet(effect_code)
+        )
 
         for packet in packets:
             if not await self._async_send_packet(packet):
@@ -519,6 +544,82 @@ class Device:
         self.clear_commanded_light()
         for handler in self.updates_component:
             handler()
+        return True
+
+    async def async_set_native_auto_schedule(self, schedule: dict[str, Any]) -> bool:
+        """Store a Plant Pro Auto schedule in the fixture."""
+        if not await self._async_prepare_command() or not self._uses_plant_pro_protocol():
+            self._set_diagnostic_error(
+                "unsupported_transport",
+                "Native Auto schedules require a Plant Pro 4.0 controller",
+            )
+            return False
+        packet = protocol.spp_auto_schedule_packet(
+            sunrise=schedule["sunrise"],
+            sunset=schedule["sunset"],
+            sleep=schedule.get("sleep"),
+            day_levels=schedule["day_levels"],
+            night_levels=schedule["night_levels"],
+        )
+        if not await self._async_send_packet(packet):
+            return False
+        sunrise = schedule["sunrise"]
+        sunset = schedule["sunset"]
+        sleep = schedule.get("sleep")
+        self.diagnostics["plant_pro_auto_schedule"] = {
+            "sunrise": f"{sunrise[0]:02d}:{sunrise[1]:02d}",
+            "sunrise_ramp": sunrise[2],
+            "sunset": f"{sunset[0]:02d}:{sunset[1]:02d}",
+            "sunset_ramp": sunset[2],
+            "sleep": None if sleep is None else f"{sleep[0]:02d}:{sleep[1]:02d}",
+            "day_levels": list(schedule["day_levels"]),
+            "night_levels": list(schedule["night_levels"]),
+        }
+        self._notify_diagnostics_throttled()
+        return True
+
+    async def async_set_native_pro_schedule(self, points: list[dict[str, Any]]) -> bool:
+        """Store a Plant Pro multi-point Pro schedule in the fixture."""
+        if not await self._async_prepare_command() or not self._uses_plant_pro_protocol():
+            self._set_diagnostic_error(
+                "unsupported_transport",
+                "Native Pro schedules require a Plant Pro 4.0 controller",
+            )
+            return False
+        if not await self._async_send_packet(protocol.spp_pro_schedule_packet(points)):
+            return False
+        self.diagnostics["plant_pro_pro_schedule"] = [
+            {
+                "time": f"{point['hour']:02d}:{point['minute']:02d}",
+                "levels": list(point["levels"]),
+            }
+            for point in points
+        ]
+        self._notify_diagnostics_throttled()
+        return True
+
+    async def async_set_native_effect_schedule(self, windows: list[dict[str, Any]]) -> bool:
+        """Store Plant Pro timed native-effect windows in the fixture."""
+        if not await self._async_prepare_command() or not self._uses_plant_pro_protocol():
+            self._set_diagnostic_error(
+                "unsupported_transport",
+                "Timed native effects require a Plant Pro 4.0 controller",
+            )
+            return False
+        if not await self._async_send_packet(protocol.spp_effect_schedule_packet(windows)):
+            return False
+        self.diagnostics["plant_pro_effect_schedule"] = [
+            {
+                "enabled": bool(window.get("enabled", True)),
+                "weekdays": list(window["weekdays"]),
+                "start": f"{window['start_hour']:02d}:{window['start_minute']:02d}",
+                "end": f"{window['end_hour']:02d}:{window['end_minute']:02d}",
+                "effect_id": window["effect_id"],
+                "effect": plant_pro_effect_name(window["effect_id"]),
+            }
+            for window in windows
+        ]
+        self._notify_diagnostics_throttled()
         return True
 
     async def async_stop_effect(self) -> bool:

@@ -31,6 +31,7 @@ from .core import (
     DOMAIN,
 )
 from .core.device import Device
+from .core.effects import PLANT_PRO_EFFECTS
 
 try:
     from homeassistant.config_entries import ConfigEntryState
@@ -69,6 +70,9 @@ SERVICE_SET_CHANNELS = "set_channels"
 SERVICE_PREVIEW_SCHEDULE = "preview_schedule"
 SERVICE_STOP_PREVIEW = "stop_preview"
 SERVICE_SAVE_SCHEDULE = "save_schedule"
+SERVICE_SET_NATIVE_AUTO_SCHEDULE = "set_native_auto_schedule"
+SERVICE_SET_NATIVE_PRO_SCHEDULE = "set_native_pro_schedule"
+SERVICE_SET_NATIVE_EFFECT_SCHEDULE = "set_native_effect_schedule"
 SERVICES_REGISTERED = "services_registered"
 STATIC_REGISTERED = "static_registered"
 WEBSOCKET_REGISTERED = "websocket_registered"
@@ -80,6 +84,16 @@ STARTUP_SCHEDULE_RETRY_COUNT = 12
 MAX_SCHEDULE_POINTS = 96
 SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
 SCHEDULE_POINT_FIELDS = {"time", *SCHEDULE_CHANNELS}
+PLANT_PRO_CHANNELS = ("red", "blue", "cool_white", "warm_white", "amber")
+PLANT_PRO_WEEKDAYS = (
+    "monday",
+    "tuesday",
+    "wednesday",
+    "thursday",
+    "friday",
+    "saturday",
+    "sunday",
+)
 RETIRED_CHANNEL_SUFFIXES = tuple(f"_channel_{index}" for index in range(1, 6))
 
 
@@ -105,6 +119,106 @@ def _validate_schedule_points(points: object) -> list[dict]:
         validated.append(validated_point)
 
     return validated
+
+
+def _validate_time(value: object, label: str) -> tuple[int, int]:
+    """Validate one user-facing 24-hour time and return its numeric parts."""
+    if not isinstance(value, str) or re.fullmatch(r"(?:[01]\d|2[0-3]):[0-5]\d", value) is None:
+        raise vol.Invalid(f"{label} must use HH:MM in the 24-hour range")
+    hour, minute = value.split(":")
+    return int(hour), int(minute)
+
+
+def _validate_plant_pro_levels(value: object, label: str) -> list[int]:
+    """Validate and order one Plant Pro five-channel level object."""
+    if not isinstance(value, dict) or set(value) != set(PLANT_PRO_CHANNELS):
+        raise vol.Invalid(f"{label} must contain exactly {', '.join(PLANT_PRO_CHANNELS)}")
+    levels = []
+    for channel in PLANT_PRO_CHANNELS:
+        level = value[channel]
+        if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100:
+            raise vol.Invalid(f"{label}.{channel} must be an integer from 0 to 100")
+        levels.append(level)
+    return levels
+
+
+def _validate_native_auto_schedule(value: object) -> dict[str, Any]:
+    """Validate a fixture-owned Plant Pro Auto schedule."""
+    required = {"sunrise", "sunrise_ramp", "sunset", "sunset_ramp", "day", "night"}
+    optional = {"sleep"}
+    if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - optional:
+        raise vol.Invalid("Auto schedule fields are incomplete or unsupported")
+    sunrise = _validate_time(value["sunrise"], "sunrise")
+    sunset = _validate_time(value["sunset"], "sunset")
+    sleep = None if value.get("sleep") in (None, "") else _validate_time(value["sleep"], "sleep")
+    ramps = []
+    for label in ("sunrise_ramp", "sunset_ramp"):
+        ramp = value[label]
+        if isinstance(ramp, bool) or not isinstance(ramp, int) or not 0 <= ramp <= 240:
+            raise vol.Invalid(f"{label} must be an integer from 0 to 240 minutes")
+        ramps.append(ramp)
+    return {
+        "sunrise": (*sunrise, ramps[0]),
+        "sunset": (*sunset, ramps[1]),
+        "sleep": sleep,
+        "day_levels": _validate_plant_pro_levels(value["day"], "day"),
+        "night_levels": _validate_plant_pro_levels(value["night"], "night"),
+    }
+
+
+def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
+    """Validate Plant Pro fixture-owned Pro schedule points."""
+    if not isinstance(value, list) or not 1 <= len(value) <= 20:
+        raise vol.Invalid("Plant Pro schedule must contain 1 to 20 points")
+    points = []
+    for point in value:
+        if not isinstance(point, dict) or set(point) != {"time", *PLANT_PRO_CHANNELS}:
+            raise vol.Invalid("Each Plant Pro point must contain time and all five channels")
+        hour, minute = _validate_time(point["time"], "point time")
+        levels = _validate_plant_pro_levels(
+            {channel: point[channel] for channel in PLANT_PRO_CHANNELS},
+            "point",
+        )
+        points.append({"hour": hour, "minute": minute, "levels": levels})
+    return points
+
+
+def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
+    """Validate Plant Pro fixture-owned timed effect windows."""
+    if not isinstance(value, list) or len(value) > 7:
+        raise vol.Invalid("Plant Pro supports at most seven timed effect windows")
+    windows = []
+    supported = {"start", "end", "effect", "weekdays", "enabled"}
+    for window in value:
+        if not isinstance(window, dict) or not {"start", "end", "effect"}.issubset(window):
+            raise vol.Invalid("Each effect window requires start, end, and effect")
+        if set(window) - supported:
+            raise vol.Invalid("Effect window contains unsupported fields")
+        start_hour, start_minute = _validate_time(window["start"], "effect start")
+        end_hour, end_minute = _validate_time(window["end"], "effect end")
+        effect = window["effect"]
+        if effect not in PLANT_PRO_EFFECTS:
+            raise vol.Invalid(f"effect must be one of {', '.join(PLANT_PRO_EFFECTS)}")
+        weekdays = window.get("weekdays", list(PLANT_PRO_WEEKDAYS))
+        if not isinstance(weekdays, list) or any(day not in PLANT_PRO_WEEKDAYS for day in weekdays):
+            raise vol.Invalid("weekdays must contain valid lowercase weekday names")
+        if len(set(weekdays)) != len(weekdays):
+            raise vol.Invalid("weekdays must not contain duplicates")
+        enabled = window.get("enabled", True)
+        if not isinstance(enabled, bool):
+            raise vol.Invalid("enabled must be true or false")
+        windows.append(
+            {
+                "start_hour": start_hour,
+                "start_minute": start_minute,
+                "end_hour": end_hour,
+                "end_minute": end_minute,
+                "effect_id": PLANT_PRO_EFFECTS[effect],
+                "weekdays": [day in weekdays for day in PLANT_PRO_WEEKDAYS],
+                "enabled": enabled,
+            }
+        )
+    return windows
 
 
 CHANNEL_SERVICE_SCHEMA = vol.Schema(
@@ -144,6 +258,30 @@ SCHEDULE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional("mac"): str,
         vol.Required("points"): _validate_schedule_points,
         vol.Optional("mode"): vol.In(["manual", "auto", "professional"]),
+    }
+)
+
+NATIVE_AUTO_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): str,
+        vol.Optional("mac"): str,
+        vol.Required("schedule"): _validate_native_auto_schedule,
+    }
+)
+
+NATIVE_PRO_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): str,
+        vol.Optional("mac"): str,
+        vol.Required("points"): _validate_native_pro_points,
+    }
+)
+
+NATIVE_EFFECT_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): str,
+        vol.Optional("mac"): str,
+        vol.Required("windows"): _validate_native_effect_windows,
     }
 )
 
@@ -477,6 +615,27 @@ def _register_services(hass: HomeAssistant) -> None:
         if call.data.get("mode") == "auto":
             await _async_run_auto_schedule(hass, entry_id)
 
+    async def async_set_native_auto_schedule(call: ServiceCall) -> None:
+        device = get_device(call)
+        if not await device.async_set_native_auto_schedule(call.data["schedule"]):
+            raise HomeAssistantError(
+                device.diagnostics.get("last_error") or "Unable to store the Plant Pro Auto schedule"
+            )
+
+    async def async_set_native_pro_schedule(call: ServiceCall) -> None:
+        device = get_device(call)
+        if not await device.async_set_native_pro_schedule(call.data["points"]):
+            raise HomeAssistantError(
+                device.diagnostics.get("last_error") or "Unable to store the Plant Pro Pro schedule"
+            )
+
+    async def async_set_native_effect_schedule(call: ServiceCall) -> None:
+        device = get_device(call)
+        if not await device.async_set_native_effect_schedule(call.data["windows"]):
+            raise HomeAssistantError(
+                device.diagnostics.get("last_error") or "Unable to store the Plant Pro effect schedule"
+            )
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_CHANNELS,
@@ -500,6 +659,24 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_SAVE_SCHEDULE,
         async_save_schedule,
         schema=SCHEDULE_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_NATIVE_AUTO_SCHEDULE,
+        async_set_native_auto_schedule,
+        schema=NATIVE_AUTO_SCHEDULE_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_NATIVE_PRO_SCHEDULE,
+        async_set_native_pro_schedule,
+        schema=NATIVE_PRO_SCHEDULE_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_NATIVE_EFFECT_SCHEDULE,
+        async_set_native_effect_schedule,
+        schema=NATIVE_EFFECT_SCHEDULE_SERVICE_SCHEMA,
     )
     hass.data[DOMAIN][SERVICES_REGISTERED] = True
 
