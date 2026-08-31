@@ -51,8 +51,5 @@ class FluvalSensor(FluvalEntity, SensorEntity):
             self._attr_native_unit_of_measurement = "dBm"
         elif self.attr == "last_seen":
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
-        elif self.attr == "diagnostics":
-            self._attr_device_class = None
-
         if self.hass:
             self._async_write_ha_state()

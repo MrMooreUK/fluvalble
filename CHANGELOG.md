@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added standard Home Assistant config-entry and device diagnostics downloads
+  with recursive redaction and non-disruptive runtime snapshots.
 - Added transport-neutral fixture-native Auto and Professional schedule support
   for classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers using the
   FluvalConnect protocol layouts.
@@ -18,6 +20,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Replaced the recorder-backed diagnostics sensor and command-sending diagnostic
+  buttons with Home Assistant's standard downloadable report. Collecting a
+  report does not scan, connect, disconnect, refresh state, or send BLE commands.
+- Remove stale registry entries for the retired Diagnostics, Refresh diagnostics,
+  and Test LED channels entities during config-entry setup.
 - Replaced the Home Assistant minute-by-minute schedule executor with fixture-native
   scheduling. Existing Auto curves are migrated once when they contain 2–12
   points; larger saved curves remain available in Manual mode for editing.

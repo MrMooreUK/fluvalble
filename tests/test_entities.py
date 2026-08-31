@@ -2,11 +2,12 @@
 
 import asyncio
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGBW_COLOR
 
-from custom_components.fluvalble import binary_sensor, button, light, select, sensor, switch
+from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor, switch
 from custom_components.fluvalble.core.device import Device
 
 
@@ -40,8 +41,8 @@ def test_create_entities_for_platforms():
 
     assert len(switch.create_entities(device)) == 1
     assert len(select.create_entities(device)) == 2
-    assert len(sensor.create_entities(device)) == 3
-    assert len(button.create_entities(device)) == 3
+    assert len(sensor.create_entities(device)) == 2
+    assert len(button.create_entities(device)) == 1
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
 
@@ -109,45 +110,83 @@ def test_diagnostic_entities_update_from_device_attributes():
     connection = binary_sensor.FluvalSensor(device, "connection")
     rssi = sensor.FluvalSensor(device, "rssi")
     last_seen = sensor.FluvalSensor(device, "last_seen")
-    diagnostics = sensor.FluvalSensor(device, "diagnostics")
 
     connection.internal_update()
     rssi.internal_update()
     last_seen.internal_update()
-    diagnostics.internal_update()
 
     assert connection._attr_is_on is True
     assert rssi._attr_native_value == -70
     assert last_seen._attr_native_value == device.conn_info["last_seen"]
-    assert diagnostics._attr_native_value == "ok"
 
 
-def test_diagnostics_button_presses_device_collector():
-    asyncio.run(_async_test_diagnostics_button_presses_device_collector())
+def test_downloadable_diagnostics_redact_identifiers_but_keep_protocol_fields():
+    report = diagnostics._redact_diagnostics(
+        {
+            "configured_mac": "AA:BB:CC:DD:EE:FF",
+            "name": "PlantPro_AABBCC",
+            "connection_info": {
+                "mac": "AA:BB:CC:DD:EE:FF",
+                "service_uuids": ["0000fff0-0000-1000-8000-00805f9b34fb"],
+                "manufacturer_data": {"12592": "secret"},
+            },
+            "channel_count": 4,
+        }
+    )
+
+    assert report["configured_mac"] == diagnostics.REDACTED
+    assert report["name"] == diagnostics.REDACTED
+    assert report["connection_info"]["mac"] == diagnostics.REDACTED
+    assert report["connection_info"]["manufacturer_data"] == diagnostics.REDACTED
+    assert report["connection_info"]["service_uuids"] == ["0000fff0-0000-1000-8000-00805f9b34fb"]
+    assert report["channel_count"] == 4
 
 
-async def _async_test_diagnostics_button_presses_device_collector():
+def test_downloadable_diagnostics_do_not_touch_ble():
+    asyncio.run(_async_test_downloadable_diagnostics_do_not_touch_ble())
+
+
+async def _async_test_downloadable_diagnostics_do_not_touch_ble():
     device = _make_device()
-    device.async_collect_diagnostics = AsyncMock(return_value={"status": "ok"})
-    entity = button.FluvalDiagnosticsButton(device, "refresh_diagnostics")
+    device.hass = None
+    client = MagicMock(
+        profile="classic",
+        wifi_facebd=False,
+        plant_pro_spp=False,
+        raw_facebd=False,
+        command_write_uuid="00001001-0000-1000-8000-00805f9b34fb",
+        notify_uuids=["00001002-0000-1000-8000-00805f9b34fb"],
+        last_error=None,
+        last_write_targets=[],
+        last_write_verified=True,
+    )
+    client.disconnect = AsyncMock()
+    client.request_state = AsyncMock()
+    device.client = client
+    entry = SimpleNamespace(
+        entry_id="private-entry-id",
+        title="Kitchen Aquarium",
+        unique_id="AA:BB:CC:DD:EE:FF",
+        data={"mac": "AA:BB:CC:DD:EE:FF"},
+        options={"active_time": 0},
+        runtime_data=SimpleNamespace(device=device),
+    )
 
-    await entity.async_press()
+    with patch(
+        "custom_components.fluvalble.core.device.BleakScanner.find_device_by_address",
+        new=AsyncMock(),
+    ) as scanner:
+        report = await diagnostics._build_report(entry)
 
-    device.async_collect_diagnostics.assert_awaited_once()
-
-
-def test_channel_test_button_presses_device_test():
-    asyncio.run(_async_test_channel_test_button_presses_device_test())
-
-
-async def _async_test_channel_test_button_presses_device_test():
-    device = _make_device()
-    device.async_test_led_channels = AsyncMock(return_value=True)
-    entity = button.FluvalChannelTestButton(device, "test_led_channels")
-
-    await entity.async_press()
-
-    device.async_test_led_channels.assert_awaited_once()
+    client.disconnect.assert_not_awaited()
+    client.request_state.assert_not_awaited()
+    scanner.assert_not_awaited()
+    assert report["entry"]["entry_id"] == diagnostics.REDACTED
+    assert report["entry"]["title"] == diagnostics.REDACTED
+    assert report["entry"]["unique_id"] == diagnostics.REDACTED
+    assert report["entry"]["data"]["mac"] == diagnostics.REDACTED
+    assert report["model"] == device.model_name
+    assert report["channel_count"] == 4
 
 
 def test_light_internal_update_and_actions():

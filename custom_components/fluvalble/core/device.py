@@ -40,7 +40,6 @@ _LOGGER = logging.getLogger(__name__)
 NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 SELECTS = ["mode", "schedule_mode"]
 SENSORS = ["rssi", "last_seen"]
-DIAGNOSTICS = ["diagnostics"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
 CHANNEL_NAMES_AQUASKY = {
     "channel_1": "Red",
@@ -74,8 +73,6 @@ BLE_LOOKUP_RETRIES = 3
 PREVIEW_STEP_SECONDS = 2
 TRANSITION_STEP_SECONDS = 30
 DAY_MINUTES = 24 * 60
-CHANNEL_TEST_LEVEL = 100
-CHANNEL_TEST_HOLD_SECONDS = 2
 
 # Approximate sRGB appearance of the five Plant/Marine LED channels.  These
 # fixtures do not expose literal RGB LEDs, so Home Assistant colours need to be
@@ -135,7 +132,6 @@ class Device:
         self.connected = False
         self.entry_id: str | None = None
         self.schedule_mode = "manual"
-        self.channel_test_active = False
         self.conn_info = {
             "mac": self.address,
             "model": self.model,
@@ -733,8 +729,6 @@ class Device:
         labels = self._channel_labels()
         if attr in labels:
             return labels[attr]
-        if attr == "test_led_channels":
-            return "Test LED Channels"
         return attr.replace("_", " ").title()
 
     def selects(self) -> list[str]:
@@ -743,7 +737,7 @@ class Device:
 
     def sensors(self) -> list[str]:
         """List of diagnostics sensors provided by the device."""
-        return list(SENSORS) + list(DIAGNOSTICS)
+        return list(SENSORS)
 
     def attribute(self, attr: str) -> Attribute:
         """Provide attributes to the entities like switches, numbers etc."""
@@ -764,29 +758,18 @@ class Device:
             )
         if attr == "last_seen":
             return Attribute(value=self.conn_info.get("last_seen"))
-        if attr == "diagnostics":
-            return Attribute(
-                value=self.diagnostics.get("status"),
-                extra=self.diagnostics,
-            )
         return Attribute()
 
     def register_update(self, attr: str, handler: Callable):
         """Register handlers for updates."""
         if attr in ("connection", "rssi", "last_seen"):
             self.updates_connect.append(handler)
-        elif attr in DIAGNOSTICS:
-            self.updates_connect.append(handler)
         else:
             self.updates_component.append(handler)
 
     def deregister_update(self, attr: str, handler: Callable):
         """Remove a previously registered update handler."""
-        target = (
-            self.updates_connect
-            if attr in ("connection", "rssi", "last_seen", *DIAGNOSTICS)
-            else self.updates_component
-        )
+        target = self.updates_connect if attr in ("connection", "rssi", "last_seen") else self.updates_component
         with contextlib.suppress(ValueError):
             target.remove(handler)
 
@@ -944,107 +927,6 @@ class Device:
             restore_values = self.preview_restore_values
             self.preview_restore_values = None
             await self.async_set_channels(restore_values)
-
-    async def async_test_led_channels(self) -> bool:
-        """Test power and each supported channel, then restore prior state."""
-        if self.channel_test_active:
-            return False
-        self.channel_test_active = True
-        await self.async_stop_preview()
-        original_values = {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
-        original_power = bool(self.values.get("led_on_off"))
-        results: list[dict[str, Any]] = []
-        error = None
-        self.diagnostics.update(
-            {
-                "status": "channel_test_running",
-                "channel_test_started_at": datetime.now(UTC).isoformat(),
-                "channel_test_results": results,
-            }
-        )
-
-        try:
-            power_ok = await self.async_set_switch("led_on_off", True)
-            results.append(self._channel_test_result("Power", True, power_ok))
-            for channel in self.numbers() if power_ok else []:
-                targets = {candidate: 0 for candidate in self.numbers()}
-                targets[channel] = CHANNEL_TEST_LEVEL
-                write_ok = await self.async_set_channels(targets, force=True)
-                results.append(
-                    self._channel_test_result(
-                        self.entity_name(channel),
-                        CHANNEL_TEST_LEVEL,
-                        write_ok,
-                    )
-                )
-                self.diagnostics.update(
-                    {
-                        "channel_test_current": self.entity_name(channel),
-                        "channel_test_results": list(results),
-                    }
-                )
-                for handler in self.updates_connect:
-                    handler()
-                if not write_ok:
-                    break
-                await asyncio.sleep(CHANNEL_TEST_HOLD_SECONDS)
-        except Exception as err:  # noqa: BLE001
-            error = f"{type(err).__name__}: {err}"
-            _LOGGER.exception("Fluval LED channel test failed")
-        finally:
-            try:
-                restore_ok = await self.async_set_channels(
-                    original_values,
-                    force=True,
-                )
-                if not original_power:
-                    restore_ok = await self.async_set_switch("led_on_off", False) and restore_ok
-            except Exception as err:  # noqa: BLE001
-                restore_ok = False
-                restore_error = f"{type(err).__name__}: {err}"
-                error = f"{error}; restore failed: {restore_error}" if error else f"restore failed: {restore_error}"
-                _LOGGER.exception("Unable to restore Fluval state after channel test")
-            self.channel_test_active = False
-
-        expected_count = len(self.numbers()) + 1
-        passed = (
-            len(results) == expected_count
-            and all(item["write_ok"] and item["verified"] for item in results)
-            and error is None
-        )
-        writes_ok = bool(results) and all(item["write_ok"] for item in results)
-        self.diagnostics.update(
-            {
-                "status": (
-                    "channel_test_passed"
-                    if passed
-                    else ("channel_test_unverified" if writes_ok else "channel_test_failed")
-                ),
-                "channel_test_completed_at": datetime.now(UTC).isoformat(),
-                "channel_test_results": list(results),
-                "channel_test_restore_ok": restore_ok,
-                "channel_test_error": error,
-            }
-        )
-        for handler in self.updates_connect:
-            handler()
-        return passed
-
-    def _channel_test_result(
-        self,
-        channel: str,
-        requested: bool | int,
-        write_ok: bool,
-    ) -> dict[str, Any]:
-        """Build a copyable result for one channel-test step."""
-        return {
-            "channel": channel,
-            "requested": requested,
-            "write_ok": write_ok,
-            "verified": bool(write_ok and self.client and self.client.last_write_verified),
-            "confirmed_state": (dict(self.client.last_confirmed_state) if self.client is not None else {}),
-            "mismatches": (dict(self.client.last_verification_mismatches) if self.client is not None else {}),
-        }
 
     async def _async_preview_schedule(
         self,
@@ -1401,62 +1283,53 @@ class Device:
         return True
 
     async def async_collect_diagnostics(self) -> dict[str, Any]:
-        """Collect practical BLE diagnostics for this configured device."""
-        if self.client is not None:
-            await self.client.disconnect()
+        """Collect a practical snapshot without changing the BLE session."""
         now = datetime.now(UTC)
         report: dict[str, Any] = {
-            "status": "running",
+            "status": "ok",
             "checked_at": now.isoformat(),
             "configured_mac": self.address,
             "name": self.name,
-            "known_connection_info": dict(self.conn_info),
+            "model": self.model_name,
+            "lamp_profile": self.lamp_profile,
+            "channel_count": self._resolved_channel_count(),
             "facebd": self.facebd,
             "connected": self.connected,
-            "client_created": self.client is not None,
+            "controls_available": self.controls_available,
+            "schedule_mode": self.schedule_mode,
+            "connection_options": {
+                "ping_interval": self._ping_interval,
+                "active_time": self._active_time,
+            },
+            "values": dict(self.values),
+            "connection_info": dict(self.conn_info),
+            "last_diagnostics": dict(self.diagnostics),
         }
 
-        if self.hass is not None and self.address:
+        if self.client is not None:
+            report["gatt"] = {
+                "profile": self.client.profile,
+                "wifi_facebd": self.client.wifi_facebd,
+                "plant_pro_spp": self.client.plant_pro_spp,
+                "raw_facebd": self.client.raw_facebd,
+                "command_write_uuid": self.client.command_write_uuid,
+                "notify_uuids": list(self.client.notify_uuids),
+                "last_error": self.client.last_error,
+                "last_write_targets": list(self.client.last_write_targets),
+                "last_write_verified": self.client.last_write_verified,
+            }
+
+        if self.hass is not None:
             service_info = bluetooth.async_last_service_info(self.hass, self.address, connectable=True)
             if service_info is None:
                 service_info = bluetooth.async_last_service_info(self.hass, self.address)
-
-            report["ha_last_service_info_found"] = service_info is not None
+            report["ha_ble_cache"] = service_info is not None
             if service_info is not None:
-                report["ha_last_service_info"] = self._service_info_report(service_info)
-                self.update_ble(service_info.device, service_info.advertisement)
-
-        direct_device = None
-        if self.hass is not None:
-            direct_device = self._connectable_ble_device()
-            report["ha_connectable_route_found"] = direct_device is not None
-            if direct_device is not None:
-                report["selected_ble_device"] = self._ble_device_report(direct_device)
-        elif self.address:
-            try:
-                direct_device = await BleakScanner.find_device_by_address(self.address, timeout=BLE_LOOKUP_TIMEOUT)
-            except (TimeoutError, BleakError) as err:
-                report["direct_scan_error"] = f"{type(err).__name__}: {err}"
-
-        report["direct_scan_found"] = direct_device is not None
-        if direct_device is not None:
-            report["direct_scan_device"] = self._ble_device_report(direct_device)
-            self._update_from_ble_device(direct_device)
-            if self.client is None:
-                self.client = self._new_client(direct_device)
-
-        report["refresh_state_attempted"] = False
-        report["refresh_state_ok"] = False
-        if direct_device is not None or self.client is not None:
-            report["refresh_state_attempted"] = True
-            report["refresh_state_ok"] = await self.async_refresh_state()
-
-        report["status"] = "ok" if direct_device is not None else "not_found"
-        report["updated_connection_info"] = dict(self.conn_info)
-        self.diagnostics = report
-
-        for handler in self.updates_connect:
-            handler()
+                report["advertisement_name"] = service_info.device.name
+                report["advertisement_rssi"] = service_info.advertisement.rssi
+                report["advertisement_service_uuids"] = list(service_info.advertisement.service_uuids)
+                report["service_data"] = dict(service_info.advertisement.service_data)
+                report["manufacturer_data"] = dict(service_info.advertisement.manufacturer_data)
 
         return report
 
@@ -1534,7 +1407,7 @@ class Device:
         return self.client.device if self.client is not None else None
 
     def _set_diagnostic_error(self, status: str, message: str) -> None:
-        """Store command failures in the diagnostics sensor for quick copying."""
+        """Store command failures for downloadable diagnostics."""
         self.diagnostics.update(
             {
                 "status": status,
@@ -1566,37 +1439,6 @@ class Device:
             props.get("ManufacturerData", {}),
         )
         self._notify_diagnostics_throttled()
-
-    def _ble_device_report(self, device: BLEDevice) -> dict[str, Any]:
-        """Return a copyable, JSON-friendly BLEDevice summary."""
-        details = device.details if isinstance(device.details, dict) else {}
-        props = details.get("props", {})
-        return {
-            "name": device.name,
-            "address": device.address,
-            "source": details.get("source"),
-            "rssi": props.get("RSSI"),
-            "uuids": list(props.get("UUIDs", [])),
-            "service_data_keys": list(props.get("ServiceData", {})),
-            "manufacturer_data_keys": [str(key) for key in props.get("ManufacturerData", {})],
-            "path": details.get("path"),
-        }
-
-    def _service_info_report(self, service_info) -> dict[str, Any]:
-        """Return a compact HA Bluetooth service info summary."""
-        advertisement = service_info.advertisement
-        return {
-            "name": service_info.name,
-            "address": service_info.address,
-            "rssi": advertisement.rssi,
-            "service_uuids": list(advertisement.service_uuids),
-            "service_data": {key: bytes(value).hex() for key, value in advertisement.service_data.items()},
-            "manufacturer_data": {
-                str(key): bytes(value).hex() for key, value in advertisement.manufacturer_data.items()
-            },
-            "connectable": getattr(service_info, "connectable", None),
-            "source": getattr(service_info, "source", None),
-        }
 
     def _uses_facebd_protocol(
         self,

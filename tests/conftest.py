@@ -147,8 +147,23 @@ def _stub_homeassistant():
 
     # ---- homeassistant.helpers.device_registry ----
     ha_dr = types.ModuleType("homeassistant.helpers.device_registry")
+    ha_dr.DeviceEntry = MagicMock
     ha_dr.CONNECTION_BLUETOOTH = "bluetooth"
     ha_dr.format_mac = lambda mac: str(mac).strip().upper().replace("-", ":")
+
+    # ---- homeassistant.helpers.redact ----
+    ha_redact = types.ModuleType("homeassistant.helpers.redact")
+
+    def _async_redact_data(value, keys):
+        if isinstance(value, dict):
+            return {
+                key: "**REDACTED**" if key in keys else _async_redact_data(item, keys) for key, item in value.items()
+            }
+        if isinstance(value, list):
+            return [_async_redact_data(item, keys) for item in value]
+        return value
+
+    ha_redact.async_redact_data = _async_redact_data
 
     # ---- homeassistant.helpers.entity ----
     class _FakeEntity:
@@ -177,6 +192,7 @@ def _stub_homeassistant():
     ha_helpers = types.ModuleType("homeassistant.helpers")
     ha_helpers.entity = ha_entity
     ha_helpers.device_registry = ha_dr
+    ha_helpers.redact = ha_redact
 
     # ---- homeassistant.helpers.entity_platform ----
     ha_ep = types.ModuleType("homeassistant.helpers.entity_platform")
@@ -323,6 +339,7 @@ def _stub_homeassistant():
         "homeassistant.components.light": ha_light,
         "homeassistant.helpers": ha_helpers,
         "homeassistant.helpers.device_registry": ha_dr,
+        "homeassistant.helpers.redact": ha_redact,
         "homeassistant.helpers.entity": ha_entity,
         "homeassistant.helpers.entity_platform": ha_ep,
         "homeassistant.helpers.event": ha_event,

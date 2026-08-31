@@ -94,6 +94,11 @@ PLANT_PRO_WEEKDAYS = (
     "sunday",
 )
 RETIRED_CHANNEL_SUFFIXES = tuple(f"_channel_{index}" for index in range(1, 6))
+RETIRED_DIAGNOSTIC_SUFFIXES = (
+    "_diagnostics",
+    "_refresh_diagnostics",
+    "_test_led_channels",
+)
 
 
 def _validate_schedule_points(points: object) -> list[dict]:
@@ -467,15 +472,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
 @callback
 def _remove_retired_channel_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove channel sliders superseded by the native colour light entity."""
+    """Remove entities superseded by native light and diagnostics support."""
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
 
     registry = er.async_get(hass)
     for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
         domain = str(getattr(entity, "domain", "") or str(entity.entity_id).partition(".")[0])
         unique_id = str(getattr(entity, "unique_id", ""))
-        if domain == Platform.NUMBER.value and unique_id.endswith(RETIRED_CHANNEL_SUFFIXES):
-            _LOGGER.info("Removing retired Fluval channel entity %s", entity.entity_id)
+        retired_channel = domain == Platform.NUMBER.value and unique_id.endswith(RETIRED_CHANNEL_SUFFIXES)
+        retired_diagnostics = unique_id.endswith(RETIRED_DIAGNOSTIC_SUFFIXES)
+        if retired_channel or retired_diagnostics:
+            _LOGGER.info("Removing retired Fluval entity %s", entity.entity_id)
             registry.async_remove(entity.entity_id)
 
 
