@@ -42,6 +42,18 @@ MAC_REGEX = re.compile(
 MANUAL_ENTRY = "__manual__"
 
 
+def validate_active_time(value: Any) -> int:
+    """Accept persistent mode (0) or a non-churning finite idle window."""
+    try:
+        active_time = int(value)
+    except (TypeError, ValueError) as err:
+        raise vol.Invalid("Active connection window must be an integer") from err
+
+    if active_time == 0 or 30 <= active_time <= 600:
+        return active_time
+    raise vol.Invalid("Active connection window must be 0 or between 30 and 600 seconds")
+
+
 def normalize_mac(mac: str) -> str:
     """Normalize MAC to uppercase colon-separated for HA Bluetooth API.
 
@@ -338,7 +350,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_ACTIVE_TIME,
                     default=options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME),
-                ): vol.All(int, vol.Range(min=30, max=600)),
+                ): validate_active_time,
             }
         )
         return self.async_show_form(step_id="init", data_schema=schema)

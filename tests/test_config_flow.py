@@ -7,6 +7,7 @@ All HA stubs are registered by conftest.py before this module loads.
 import sys
 import os
 import pytest
+import voluptuous as vol
 
 # conftest.py registers all stubs before collection; just ensure path is set.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -14,8 +15,20 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from custom_components.fluvalble.config_flow import (
     normalize_mac,
     unique_id_from_mac,
+    validate_active_time,
     MAC_REGEX,
 )
+
+
+class TestActiveTimeSchema:
+    @pytest.mark.parametrize("value", [0, 30, 120, 600])
+    def test_accepts_persistent_or_bounded_idle_window(self, value):
+        assert validate_active_time(value) == value
+
+    @pytest.mark.parametrize("value", [-1, 1, 29, 601])
+    def test_rejects_churn_prone_or_out_of_range_values(self, value):
+        with pytest.raises(vol.Invalid):
+            validate_active_time(value)
 
 
 class TestNormalizeMac:

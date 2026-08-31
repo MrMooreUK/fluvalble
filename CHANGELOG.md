@@ -14,11 +14,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Added explicit fixture schedule refresh/readback to the dashboard card. Native
   Professional curves are imported only when **Load from fixture** is selected,
   and the card identifies local, uploaded, and fixture-confirmed data.
+- Added an optional persistent BLE connection mode (`0`-second active window)
+  with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
 - Replaced the Home Assistant minute-by-minute schedule executor with fixture-native
   scheduling. Existing Auto curves are migrated once when they contain 2–12
   points; larger saved curves remain available in Manual mode for editing.
+- BLE reconnects now replace stale clients, use one bounded connector retry
+  cycle, and cannot race an in-flight command or integration unload.
 
 ### Added
 - Plant Pro / Plant 4.0 core BLE support using its native unencrypted SPP

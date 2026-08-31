@@ -62,11 +62,15 @@ class _FakeTask:
         return None
 
 
-def _make_client(address="AA:BB:CC:DD:EE:FF"):
+def _make_client(address="AA:BB:CC:DD:EE:FF", *, active_time=120, ping_interval=10):
     ble_device = MagicMock()
     ble_device.address = address
     with patch("asyncio.create_task", side_effect=lambda coro: _FakeTask(coro)):
-        return Client(ble_device)
+        return Client(
+            ble_device,
+            active_time=active_time,
+            ping_interval=ping_interval,
+        )
 
 
 def _facebd_characteristics():
@@ -360,6 +364,188 @@ def test_device_provider_refreshes_adapter_route():
 
     assert client._current_device() is proxy
     assert client.device.details["source"] == "esphome"
+
+
+def test_fresh_connection_uses_one_connector_retry_cycle():
+    asyncio.run(_async_test_fresh_connection_uses_one_connector_retry_cycle())
+
+
+async def _async_test_fresh_connection_uses_one_connector_retry_cycle():
+    client = _make_client()
+    connected = SimpleNamespace(is_connected=True, start_notify=AsyncMock())
+    client._resolve_characteristics = AsyncMock()
+
+    with patch(
+        "custom_components.fluvalble.core.client.establish_connection",
+        new=AsyncMock(return_value=connected),
+    ) as establish:
+        result = await client._ensure_client()
+
+    assert result is connected
+    establish.assert_awaited_once()
+    assert establish.await_args.kwargs["max_attempts"] == client_module.CONNECT_RETRIES
+    assert establish.await_args.kwargs["disconnected_callback"] == client._on_disconnected
+
+
+def test_disconnected_client_is_replaced_instead_of_reused():
+    asyncio.run(_async_test_disconnected_client_is_replaced_instead_of_reused())
+
+
+async def _async_test_disconnected_client_is_replaced_instead_of_reused():
+    client = _make_client()
+    stale = SimpleNamespace(is_connected=False, disconnect=AsyncMock())
+    fresh = SimpleNamespace(is_connected=True, start_notify=AsyncMock())
+    client.client = stale
+    client._resolve_characteristics = AsyncMock()
+
+    with patch(
+        "custom_components.fluvalble.core.client.establish_connection",
+        new=AsyncMock(return_value=fresh),
+    ) as establish:
+        result = await client._ensure_client()
+
+    assert result is fresh
+    stale.disconnect.assert_awaited_once()
+    establish.assert_awaited_once()
+
+
+def test_unexpected_persistent_disconnect_schedules_immediate_reconnect():
+    status_callback = MagicMock()
+    client = _make_client(active_time=0)
+    client.status_callback = status_callback
+    connected = MagicMock()
+    client.client = connected
+    client.ping_future = MagicMock()
+
+    with patch(
+        "custom_components.fluvalble.core.client.asyncio.create_task",
+        side_effect=lambda coro: _FakeTask(coro),
+    ) as create_task:
+        client._on_disconnected(connected)
+
+    assert client.client is None
+    client.ping_future.cancel.assert_called_once()
+    status_callback.assert_called_once_with(False)
+    create_task.assert_called_once()
+
+
+def test_finite_disconnect_does_not_reconnect_until_demand():
+    client = _make_client(active_time=120)
+    client.connect_task = None
+    connected = MagicMock()
+    client.client = connected
+
+    with patch("custom_components.fluvalble.core.client.asyncio.create_task") as create_task:
+        client._on_disconnected(connected)
+
+    assert client.client is None
+    create_task.assert_not_called()
+
+
+def test_persistent_heartbeat_reconnects_once_after_command_releases():
+    asyncio.run(_async_test_persistent_heartbeat_reconnects_once_after_command_releases())
+
+
+async def _async_test_persistent_heartbeat_reconnects_once_after_command_releases():
+    client = _make_client(active_time=0, ping_interval=60)
+    client.connect_task = None
+    client.wake_read_uuid = "wake"
+    client.ping_time = float("inf")
+    old = SimpleNamespace(
+        is_connected=True,
+        read_gatt_char=AsyncMock(return_value=b""),
+        disconnect=AsyncMock(),
+    )
+    fresh = SimpleNamespace(
+        is_connected=True,
+        read_gatt_char=AsyncMock(return_value=b""),
+        start_notify=AsyncMock(),
+    )
+    client.client = old
+    client._resolve_characteristics = AsyncMock()
+    heartbeat = asyncio.create_task(client._ping_loop())
+    client.ping_task = heartbeat
+
+    for _ in range(10):
+        if client.ping_future is not None:
+            break
+        await asyncio.sleep(0)
+    assert client.ping_future is not None
+
+    await client._command_lock.acquire()
+    try:
+        with patch(
+            "custom_components.fluvalble.core.client.establish_connection",
+            new=AsyncMock(return_value=fresh),
+        ) as establish:
+            client._on_disconnected(old)
+            await asyncio.sleep(0)
+            establish.assert_not_awaited()
+
+            client._command_lock.release()
+            for _ in range(10):
+                if establish.await_count:
+                    break
+                await asyncio.sleep(0)
+            establish.assert_awaited_once()
+            assert client.client is fresh
+    finally:
+        if client._command_lock.locked():
+            client._command_lock.release()
+        await client.stop()
+
+
+def test_stale_disconnect_callback_cannot_clear_new_connection():
+    client = _make_client(active_time=0)
+    stale = MagicMock()
+    current = MagicMock()
+    client.client = current
+
+    client._on_disconnected(stale)
+
+    assert client.client is current
+
+
+def test_final_stop_prevents_disconnect_callback_from_reconnecting():
+    client = _make_client(active_time=0)
+    client.connect_task = None
+    connected = MagicMock()
+    client.client = connected
+    client._stopping = True
+
+    with patch("custom_components.fluvalble.core.client.asyncio.create_task") as create_task:
+        client._on_disconnected(connected)
+
+    assert client.client is None
+    create_task.assert_not_called()
+
+
+def test_persistent_connection_uses_infinite_idle_deadline():
+    client = _make_client(active_time=0)
+    with patch(
+        "custom_components.fluvalble.core.client.asyncio.create_task",
+        side_effect=lambda coro: _FakeTask(coro),
+    ):
+        client.ping()
+
+    assert client.ping_time == float("inf")
+
+
+def test_disconnect_is_reusable_but_stop_is_final():
+    asyncio.run(_async_test_disconnect_is_reusable_but_stop_is_final())
+
+
+async def _async_test_disconnect_is_reusable_but_stop_is_final():
+    client = _make_client(active_time=0)
+    client.connect_task = None
+    client.client = SimpleNamespace(is_connected=True, disconnect=AsyncMock())
+
+    await client.disconnect()
+    assert client._stopping is False
+
+    client.client = SimpleNamespace(is_connected=True, disconnect=AsyncMock())
+    await client.stop()
+    assert client._stopping is True
 
 
 def test_ping_loop_can_be_cancelled_while_waiting():
