@@ -19,6 +19,8 @@ from custom_components.fluvalble import (
     _validate_native_auto_schedule,
     _validate_native_effect_windows,
     _validate_native_pro_points,
+    _async_upload_native_schedule,
+    _validate_native_pro_schedule_points,
     _validate_schedule_points,
     async_set_schedule_mode,
 )
@@ -207,6 +209,62 @@ async def _async_test_control_schedule_mode_updates_the_saved_schedule(monkeypat
     assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "auto"
     assert device.schedule_mode == "auto"
     run_auto_schedule.assert_awaited_once_with(hass, "entry_1")
+
+
+def test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch):
+    asyncio.run(_async_test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch))
+
+
+async def _async_test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch):
+    import custom_components.fluvalble as integration
+
+    device = _make_device()
+    device.async_set_native_pro_schedule = AsyncMock(return_value=True)
+    hass = _FakeHass(device)
+    points = _schedule_points()
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "manual"}}}
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
+
+    await async_set_schedule_mode(hass, "entry_1", "native")
+
+    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "native"
+    device.async_set_native_pro_schedule.assert_awaited_once_with(points, activate=True)
+
+
+def test_native_schedule_upload_rejects_more_than_twelve_points():
+    asyncio.run(_async_test_native_schedule_upload_rejects_more_than_twelve_points())
+
+
+async def _async_test_native_schedule_upload_rejects_more_than_twelve_points():
+    device = _make_device()
+    device.async_set_native_pro_schedule = AsyncMock(return_value=True)
+    points = [{"time": f"{hour:02d}:00"} for hour in range(13)]
+
+    assert not await _async_upload_native_schedule(_FakeHass(device), "entry_1", points)
+    device.async_set_native_pro_schedule.assert_not_awaited()
+    assert device.diagnostics["native_schedule_last_result"] == "invalid_point_count"
+
+
+def test_failed_native_mode_upload_does_not_replace_working_mode(monkeypatch):
+    asyncio.run(_async_test_failed_native_mode_upload_does_not_replace_working_mode(monkeypatch))
+
+
+async def _async_test_failed_native_mode_upload_does_not_replace_working_mode(monkeypatch):
+    import custom_components.fluvalble as integration
+    from homeassistant.exceptions import HomeAssistantError
+
+    device = _make_device()
+    device.async_set_native_pro_schedule = AsyncMock(return_value=False)
+    device.command_error_message = MagicMock(return_value="write failed")
+    hass = _FakeHass(device)
+    points = _schedule_points()
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "auto"}}}
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
+
+    with pytest.raises(HomeAssistantError, match="write failed"):
+        await async_set_schedule_mode(hass, "entry_1", "native")
+
+    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "auto"
 
 
 def test_load_schedule_supports_legacy_list_records(monkeypatch):

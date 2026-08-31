@@ -257,7 +257,7 @@ SCHEDULE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional("entry_id"): str,
         vol.Optional("mac"): str,
         vol.Required("points"): _validate_schedule_points,
-        vol.Optional("mode"): vol.In(["manual", "auto", "professional"]),
+        vol.Optional("mode"): vol.In(["manual", "auto", "native"]),
     }
 )
 
@@ -606,11 +606,17 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def async_save_schedule(call: ServiceCall) -> None:
         entry_id = get_entry_id(call.data)
+        mode = call.data.get("mode")
+        if mode == "native" and not await _async_upload_native_schedule(hass, entry_id, call.data["points"]):
+            device = _device_for_entry(hass, entry_id)
+            raise HomeAssistantError(
+                device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
+            )
         await _async_save_schedule(
             hass,
             entry_id,
             call.data["points"],
-            mode=call.data.get("mode"),
+            mode=mode,
         )
         if call.data.get("mode") == "auto":
             await _async_run_auto_schedule(hass, entry_id)
@@ -791,13 +797,37 @@ async def _async_save_schedule(
 
 async def async_set_schedule_mode(hass: HomeAssistant, entry_id: str, mode: str) -> None:
     """Set the HA-owned schedule mode exposed in the device controls."""
-    if mode not in {"manual", "auto"}:
+    if mode not in {"manual", "auto", "native"}:
         raise HomeAssistantError(f"Unsupported HA schedule mode: {mode}")
 
     saved = await _async_load_schedule_data(hass, entry_id)
-    await _async_save_schedule(hass, entry_id, saved.get("points") or [], mode=mode)
+    points = saved.get("points") or []
+    if mode == "native" and not await _async_upload_native_schedule(hass, entry_id, points):
+        device = _device_for_entry(hass, entry_id)
+        raise HomeAssistantError(
+            device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
+        )
+    await _async_save_schedule(hass, entry_id, points, mode=mode)
     if mode == "auto":
         await _async_run_auto_schedule(hass, entry_id)
+
+
+async def _async_upload_native_schedule(hass: HomeAssistant, entry_id: str, points: list[dict]) -> bool:
+    """Upload an HA schedule as a fixture-native Professional curve once."""
+    device = _device_for_entry(hass, entry_id)
+    if device is None:
+        return False
+    if not 2 <= len(points) <= MAX_NATIVE_PRO_SCHEDULE_POINTS:
+        device.diagnostics.update(
+            {
+                "native_schedule_last_result": "invalid_point_count",
+                "last_error": f"Fixture-native schedules require 2 to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points",
+            }
+        )
+        return False
+    ok = await device.async_set_native_pro_schedule(points, activate=True)
+    device.diagnostics["native_schedule_last_result"] = "uploaded" if ok else "failed"
+    return ok
 
 
 async def _async_apply_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool:
@@ -816,7 +846,7 @@ async def _async_apply_auto_schedule(hass: HomeAssistant, entry_id: str) -> bool
         device.diagnostics.update(
             {
                 "auto_schedule_mode": saved.get("mode", "manual"),
-                "auto_schedule_last_result": "manual_mode",
+                "auto_schedule_last_result": ("fixture_native" if saved.get("mode") == "native" else "manual_mode"),
             }
         )
         return True

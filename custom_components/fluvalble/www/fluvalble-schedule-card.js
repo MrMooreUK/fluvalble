@@ -81,10 +81,11 @@ class FluvalbleScheduleCard extends HTMLElement {
 
           <div class="actions">
             <label class="mode-control">
-              HA mode
+              Schedule mode
               <select id="schedule-mode">
-                <option value="manual" ${this.store.mode !== "auto" ? "selected" : ""}>Manual</option>
+                <option value="manual" ${this.store.mode === "manual" ? "selected" : ""}>Manual</option>
                 <option value="auto" ${this.store.mode === "auto" ? "selected" : ""}>Auto</option>
+                <option value="native" ${this.store.mode === "native" ? "selected" : ""}>Fixture native</option>
               </select>
             </label>
             <button id="apply">Apply Schedule</button>
@@ -141,7 +142,8 @@ class FluvalbleScheduleCard extends HTMLElement {
         // only follows its time cursor; it must not be the active scheduler.
         this.syncToCurrentTime();
       }
-      this.toast(`HA mode set to ${this.store.mode === "auto" ? "Auto" : "Manual"}`);
+      const labels = { manual: "Manual", auto: "HA Auto", native: "Fixture native" };
+      this.toast(`Schedule mode set to ${labels[this.store.mode] || "Manual"}`);
     });
     root.getElementById("apply").addEventListener("click", () => {
       const channels = interpolate(this.store.points, this.previewMinute);
@@ -692,7 +694,7 @@ function easedValue(from, to, progress) {
 
 function setScheduleMode(config, mode, source) {
   const store = getScheduleStore(config);
-  store.mode = mode === "auto" ? "auto" : "manual";
+  store.mode = ["auto", "native"].includes(mode) ? mode : "manual";
   notifyScheduleStore(config, source);
 }
 

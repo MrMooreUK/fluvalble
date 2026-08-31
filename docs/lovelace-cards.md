@@ -160,9 +160,11 @@ slider updates the spectrum and wavelength cards. When **Physical preview** is
 enabled, applying or previewing a schedule also sends the selected levels to the
 light.
 
-Use **Apply Schedule** to save the current schedule to Home Assistant. When HA
-mode is set to **Auto**, Home Assistant applies the saved schedule in the
-background even when the dashboard is closed.
+Use **Apply Schedule** to save the current schedule. **HA Auto** applies it from
+Home Assistant once per minute even when the dashboard is closed. **Fixture
+native** uploads 2-12 points once as the light's Professional schedule, then the
+controller follows its own clock. Manual saves without activating either
+executor.
 
 Use **Play 24h preview** to loop through the schedule visually. Physical preview
 writes are throttled to 30-minute schedule intervals to avoid unnecessary BLE

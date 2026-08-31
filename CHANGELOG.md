@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added transport-neutral fixture-native Auto and Professional schedule support
+  for classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers using the
+  FluvalConnect protocol layouts.
+
+### Added
 - Plant Pro / Plant 4.0 core BLE support using its native unencrypted SPP
   transport for discovery, power, mode, five-channel colour, and live state.
 - Plant Pro RTC synchronization using the FluvalConnect mesh clock command so
