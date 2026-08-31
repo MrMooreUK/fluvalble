@@ -12,6 +12,7 @@ from custom_components.fluvalble.core.device import Device
 
 
 def _make_device():
+    now = datetime.now(UTC)
     device = Device(
         "AquaSky3.0_Test",
         config_data={
@@ -21,7 +22,8 @@ def _make_device():
     )
     device.connected = True
     device.conn_info["rssi"] = -70
-    device.conn_info["last_seen"] = datetime(2026, 1, 1, tzinfo=UTC)
+    device.conn_info["rssi_updated_at"] = now
+    device.conn_info["last_seen"] = now
     device.diagnostics["status"] = "ok"
     device.values.update(
         {
@@ -98,6 +100,8 @@ def test_diagnostic_entities_update_from_device_attributes():
 
     assert connection._attr_is_on is True
     assert rssi._attr_native_value == -70
+    assert rssi._attr_state_class.value == "measurement"
+    assert rssi._attr_extra_state_attributes["last_advertisement"] == device.conn_info["rssi_updated_at"]
     assert last_seen._attr_native_value == device.conn_info["last_seen"]
 
 

@@ -50,7 +50,7 @@
   "entity": {
     "binary_sensor": {
       "connection": {
-        "name": "Connection"
+        "name": "Reachable"
       }
     },
     "button": {

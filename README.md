@@ -31,7 +31,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Plant Pro effects** | Plant Pro / Plant 4.0 exposes its four native effects—Thunderstorm, Lightning, Sun and lightning, and Colour cycle—through the standard light effect control. |
 | **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
-| **Connection health** | Binary sensor shows BLE connection status, with RSSI and last-seen attributes for troubleshooting. |
+| **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
 | **Bluetooth routing** | Works with local Bluetooth adapters and ESP32 boards running ESPHome Bluetooth Proxy. Home Assistant automatically selects the best connectable route on each connection. |
 
@@ -177,7 +177,8 @@ After setup you'll see one device with entities like:
 |--------|-------------|---------|
 | **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGBW; Plant, Plant Pro, and Marine spectra use RGB translation. |
 | **Select** | Mode | Manual / Automatic / Professional. |
-| **Binary sensor** | Connection | BLE connection status (diagnostic). RSSI and last-seen time in attributes. |
+| **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
+| **Sensors** | Signal strength / Last seen | Advertisement RSSI, its observation time, and the latest successful BLE activity. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `light.fluval_aabbccddeeff_light`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
@@ -259,7 +260,7 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | **Lamp connected but doesn't respond to actions** | Try the Fluval app first to confirm the light works. If the app works but HA doesn't, open an issue with your model and HA logs. |
 | **ESPHome proxy is online but commands are unreliable** | Check the proxy's Wi-Fi signal and place it closer to the light. The integration asks HA for the best connectable adapter or ESPHome proxy on reconnect; no adapter needs to be disabled manually. Download diagnostics from the Fluval integration or device page and include the report when opening an issue. |
 | **Light entity doesn't turn the fixture on/off** | Ensure the light model uses the same BLE command set. Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
-| **Entities show "unavailable"** | The light may be out of range, off, or the BLE connection dropped. Move the light or HA adapter closer; check the connection binary sensor and RSSI. |
+| **Entities show "unavailable"** | The light may be out of range or off. Move the light or HA adapter closer; check Reachable, Last seen, and RSSI. An idle GATT disconnect is expected when a finite active connection window is configured. |
 | **Colour or mode doesn't update** | Some firmware reports only its physical channel levels. Plant/Marine RGB is therefore an approximation when the colour was changed outside Home Assistant. |
 | **Colour control doesn't change the light** | Confirm the fixture works in the Fluval app, select Manual mode, and retry. If it still fails, download diagnostics from the Fluval integration or device page and include the report with your model when opening an issue. |
 
@@ -276,6 +277,7 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 - A keep-alive loop pings the light every 10 seconds to maintain the connection and flush any queued commands.
 - Persistent mode (`0`) keeps the session open and immediately starts one serialized reconnect cycle if the link drops.
 - Finite mode cleanly closes the connection after the configured idle window; the default remains 2 minutes.
+- Reachable remains on for five minutes after an advertisement, successful connection, or successful command. RSSI comes only from advertisements, so it may remain unchanged while a connected controller is not advertising.
 - Each reconnect uses a fresh BLE client and the current HA-selected route.
 
 ---
