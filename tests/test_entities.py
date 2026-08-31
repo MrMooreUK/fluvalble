@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGBW_COLOR
 
-from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor, switch
+from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor
 from custom_components.fluvalble.core.device import Device
 
 
@@ -39,30 +39,11 @@ def _make_device():
 def test_create_entities_for_platforms():
     device = _make_device()
 
-    assert len(switch.create_entities(device)) == 1
     assert len(select.create_entities(device)) == 2
     assert len(sensor.create_entities(device)) == 2
     assert len(button.create_entities(device)) == 1
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
-
-
-def test_switch_internal_update_and_actions():
-    asyncio.run(_async_test_switch_internal_update_and_actions())
-
-
-async def _async_test_switch_internal_update_and_actions():
-    device = _make_device()
-    entity = switch.FluvalSwitch(device, "led_on_off")
-    device.async_set_switch = AsyncMock(return_value=True)
-
-    entity.internal_update()
-    await entity.async_turn_off()
-    await entity.async_turn_on()
-
-    assert entity._attr_is_on is True
-    assert device.async_set_switch.await_args_list[0].args == ("led_on_off", False)
-    assert device.async_set_switch.await_args_list[1].args == ("led_on_off", True)
 
 
 def test_select_internal_update_and_select_option():
@@ -216,6 +197,23 @@ async def _async_test_light_internal_update_and_actions():
     device.async_set_switch.assert_awaited_once_with("led_on_off", False)
 
 
+def test_light_entity_handles_power_only_actions():
+    asyncio.run(_async_test_light_entity_handles_power_only_actions())
+
+
+async def _async_test_light_entity_handles_power_only_actions():
+    device = _make_device()
+    device.values["led_on_off"] = False
+    device.async_set_switch = AsyncMock(return_value=True)
+    entity = light.FluvalLight(device, "light")
+
+    await entity.async_turn_on()
+    await entity.async_turn_off()
+
+    assert device.async_set_switch.await_args_list[0].args == ("led_on_off", True)
+    assert device.async_set_switch.await_args_list[1].args == ("led_on_off", False)
+
+
 def test_light_exposes_and_routes_classic_native_effects():
     asyncio.run(_async_test_light_exposes_and_routes_classic_native_effects())
 
@@ -265,11 +263,9 @@ def test_controls_remain_available_when_recently_seen_but_not_connected():
     device.client = None
     device.conn_info["last_seen"] = datetime(2026, 1, 1, tzinfo=UTC)
 
-    switch_entity = switch.FluvalSwitch(device, "led_on_off")
     select_entity = select.FluvalSelect(device, "mode")
     light_entity = light.FluvalLight(device, "light")
 
-    assert switch_entity._attr_available is True
     assert select_entity._attr_available is True
     assert light_entity._attr_available is True
 
