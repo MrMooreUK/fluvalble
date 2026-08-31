@@ -1,72 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
-  <title id="title">Fluval BLE icon</title>
-  <desc id="desc">A bold aquarium LED fixture casting cyan light onto water.</desc>
+  <title id="title">Fluval BLE</title>
+  <desc id="desc">A cyan light bar over a single wave on navy.</desc>
   <defs>
-    <linearGradient id="bg" x1="64" y1="40" x2="448" y2="472" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#06101d"/>
-      <stop offset="0.52" stop-color="#071a2c"/>
-      <stop offset="1" stop-color="#03354b"/>
-    </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="35%" r="70%">
-      <stop offset="0" stop-color="#83fbff" stop-opacity="0.40"/>
-      <stop offset="0.42" stop-color="#00c8ff" stop-opacity="0.15"/>
-      <stop offset="1" stop-color="#00c8ff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="fixture" x1="88" y1="112" x2="424" y2="200" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#101827"/>
-      <stop offset="0.5" stop-color="#29435d"/>
-      <stop offset="1" stop-color="#0a1320"/>
-    </linearGradient>
-    <linearGradient id="edge" x1="112" y1="198" x2="400" y2="198" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#00e5ff" stop-opacity="0.25"/>
-      <stop offset="0.5" stop-color="#c4fdff" stop-opacity="0.88"/>
-      <stop offset="1" stop-color="#6372ff" stop-opacity="0.28"/>
-    </linearGradient>
-    <linearGradient id="beam" x1="256" y1="198" x2="256" y2="418" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#9dffff" stop-opacity="0.76"/>
-      <stop offset="0.58" stop-color="#00c8ff" stop-opacity="0.22"/>
-      <stop offset="1" stop-color="#00c8ff" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="water" x1="72" y1="372" x2="440" y2="372" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#027cff"/>
-      <stop offset="0.50" stop-color="#00efff"/>
-      <stop offset="1" stop-color="#54ffcf"/>
-    </linearGradient>
-    <filter id="shadow" x="-20%" y="-20%" width="140%" height="160%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.44"/>
-    </filter>
-    <filter id="led-glow" x="-120%" y="-120%" width="340%" height="340%">
-      <feGaussianBlur stdDeviation="8" result="blur"/>
-      <feMerge>
-        <feMergeNode in="blur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
-    </filter>
+    <clipPath id="card">
+      <rect width="512" height="512" rx="114"/>
+    </clipPath>
   </defs>
-
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bg)"/>
-  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#glow)"/>
-  <rect x="27" y="27" width="458" height="458" rx="109" fill="none" stroke="#ffffff" stroke-opacity="0.11" stroke-width="6"/>
-
-  <g filter="url(#shadow)">
-    <path d="M112 198 L400 198 L454 414 Q256 448 58 414 Z" fill="url(#beam)"/>
-
-    <rect x="80" y="102" width="352" height="104" rx="32" fill="url(#fixture)" stroke="#ffffff" stroke-opacity="0.12" stroke-width="2"/>
-    <path d="M112 120 H400" stroke="#ffffff" stroke-opacity="0.18" stroke-width="8" stroke-linecap="round"/>
-    <rect x="112" y="195" width="288" height="9" rx="4.5" fill="url(#edge)"/>
-
-    <g filter="url(#led-glow)">
-      <circle cx="150" cy="154" r="24" fill="#ecfeff"/>
-      <circle cx="220" cy="154" r="24" fill="#00b7ff"/>
-      <circle cx="292" cy="154" r="24" fill="#67fff0"/>
-      <circle cx="362" cy="154" r="24" fill="#ecfeff"/>
-    </g>
-    <circle cx="142" cy="145" r="7" fill="#ffffff" opacity="0.80"/>
-    <circle cx="212" cy="145" r="7" fill="#ffffff" opacity="0.55"/>
-    <circle cx="284" cy="145" r="7" fill="#ffffff" opacity="0.68"/>
-    <circle cx="354" cy="145" r="7" fill="#ffffff" opacity="0.80"/>
-
-    <path d="M64 372 C108 334 156 410 210 374 C262 340 312 410 366 374 C394 355 420 356 448 372 L448 488 L64 488 Z" fill="url(#water)" opacity="0.76"/>
-    <path d="M64 421 C126 378 176 452 240 410 C294 374 342 444 404 404 C420 394 434 392 448 398 L448 488 L64 488 Z" fill="#062f57" opacity="0.88"/>
+  <g clip-path="url(#card)">
+    <rect width="512" height="512" fill="#081522"/>
+    <rect x="136" y="198" width="240" height="48" rx="24" fill="#54f7ff"/>
+    <path d="M0 318 C110 268 170 388 288 322 C372 274 430 360 512 312 V512 H0 Z" fill="#00c8ff"/>
   </g>
 </svg>
