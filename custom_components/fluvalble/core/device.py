@@ -30,6 +30,7 @@ from .discovery import (
 from .effects import (
     effect_id,
     effect_list as classic_effect_list,
+    effect_name,
     plant_pro_effect_id,
     plant_pro_effect_list,
     plant_pro_effect_name,
@@ -547,7 +548,16 @@ class Device:
         """Return effects supported by the positively identified controller."""
         if self.supports_plant_pro_effects():
             return plant_pro_effect_list()
-        return classic_effect_list() if self.supports_classic_effects() else []
+        return classic_effect_list() if self.supports_classic_effects() or self.supports_facebd_effects() else []
+
+    def supports_facebd_effects(self) -> bool:
+        """Return whether BLE evidence identifies an AquaSky FACEBD controller."""
+        if not self._uses_wifi_protocol():
+            return False
+        if self.lamp_profile == LAMP_PROFILE_AQUASKY3:
+            return True
+        identity = f"{self.name} {self.model}".lower().replace(" ", "")
+        return "aquasky" in identity
 
     def supports_plant_pro_effects(self) -> bool:
         """Return whether available evidence identifies a Plant Pro controller."""
@@ -583,10 +593,14 @@ class Device:
             return False
 
         plant_pro = self._uses_plant_pro_protocol()
+        facebd = self._uses_wifi_protocol()
         effect_code = plant_pro_effect_id(effect) if plant_pro else effect_id(effect)
         if effect_code is None:
             return False
-        if not plant_pro and not self.supports_classic_effects():
+        if facebd and not self.supports_facebd_effects():
+            _LOGGER.warning("FACEBD weather effects require an AquaSky controller identity")
+            return False
+        if not plant_pro and not facebd and not self.supports_classic_effects():
             _LOGGER.warning(
                 "Classic weather effects are not valid for Fluval transport %s",
                 self.client.command_write_uuid if self.client else None,
@@ -605,12 +619,24 @@ class Device:
             packets.append(
                 protocol.spp_mode_packet(MODE_TO_CODE["manual"])
                 if plant_pro
+                else protocol.wifi_mode_packet(MODE_TO_CODE["manual"])
+                if facebd
                 else protocol.old_mode_packet(MODE_TO_CODE["manual"])
             )
         if not self.values.get("led_on_off"):
-            packets.append(protocol.spp_switch_packet(True) if plant_pro else protocol.old_switch_packet(True))
+            packets.append(
+                protocol.spp_switch_packet(True)
+                if plant_pro
+                else protocol.wifi_switch_packet(True)
+                if facebd
+                else protocol.old_switch_packet(True)
+            )
         packets.append(
-            protocol.spp_effect_packet(effect_code) if plant_pro else protocol.old_weather_effect_packet(effect_code)
+            protocol.spp_effect_packet(effect_code)
+            if plant_pro
+            else protocol.wifi_effect_packet(effect_code)
+            if facebd
+            else protocol.old_weather_effect_packet(effect_code)
         )
 
         for packet in packets:
@@ -1241,7 +1267,7 @@ class Device:
             if self._uses_plant_pro_protocol():
                 self.facebd = False
                 return False
-            if self.client.wifi_facebd:
+            if getattr(self.client, "wifi_facebd", False):
                 self.facebd = True
                 return True
             write_uuid = self.client.command_write_uuid.lower()
@@ -1655,6 +1681,15 @@ class Device:
 
         if protocol.WIFI_SWITCH_KEY in data:
             self.values["led_on_off"] = bool(data[protocol.WIFI_SWITCH_KEY])
+            updated = True
+
+        if (
+            self.supports_facebd_effects()
+            and protocol.WIFI_MANUAL_KEY in data
+            and isinstance(data[protocol.WIFI_MANUAL_KEY], int)
+        ):
+            effect_code = data[protocol.WIFI_MANUAL_KEY]
+            self.values["effect"] = effect_name(effect_code) if effect_code else None
             updated = True
 
         present = 0

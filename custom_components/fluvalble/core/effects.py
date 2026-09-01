@@ -43,6 +43,11 @@ def effect_id(effect: str) -> int | None:
     return WEATHER_EFFECTS.get(effect)
 
 
+def effect_name(effect_id: int) -> str | None:
+    """Return the Home Assistant name for a classic/FACEBD effect ID."""
+    return next((name for name, value in WEATHER_EFFECTS.items() if value == effect_id), None)
+
+
 def plant_pro_effect_list() -> list[str]:
     """Return the Plant Pro effects in stable Home Assistant order."""
     return [EFFECT_NONE, *PLANT_PRO_EFFECTS]

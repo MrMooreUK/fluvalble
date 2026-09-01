@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added the 11 APK-native weather effects to positively identified AquaSky
+  3.0/FACEBD controllers through Home Assistant's standard light effect control.
 - Added standard Home Assistant config-entry and device diagnostics downloads
   with recursive redaction and non-disruptive runtime snapshots.
 - Added transport-neutral fixture-native Auto and Professional schedule support

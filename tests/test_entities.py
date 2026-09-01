@@ -251,6 +251,28 @@ async def _async_test_light_exposes_and_routes_classic_native_effects():
     device.async_stop_effect.assert_awaited_once()
 
 
+def test_light_exposes_facebd_native_effects():
+    device = _make_device()
+    device.conn_info["service_uuids"] = ["facebd00-0000-1000-8000-00805f9b34fb"]
+    device.facebd = True
+    entity = light.FluvalLight(device, "light")
+
+    assert entity._attr_effect_list == [
+        "None",
+        "Thunderstorm",
+        "Lightning",
+        "Sun and lightning",
+        "Colour cycle",
+        "Mostly sunny",
+        "Partly sunny",
+        "Partly cloudy",
+        "Mostly cloudy",
+        "Full moon",
+        "Half moon",
+        "Crescent moon",
+    ]
+
+
 def test_entity_unregisters_update_handler():
     device = _make_device()
     device.deregister_update = MagicMock()
