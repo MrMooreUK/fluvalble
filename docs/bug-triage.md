@@ -1,87 +1,76 @@
-# Open Bug Triage
+# Resolved Bug Triage
 
-This document captures the state of the two currently-open bugs. Neither
-is fixed yet; both are documented here so they remain solvable once we
-have the right evidence.
+This document records the resolution and remaining hardware-validation
+boundaries for the two protocol bugs that originally blocked reliable AquaSky
+2.0 control and fixture clock synchronization. Both upstream issues are now
+closed.
 
-| # | Title | Status | Blocker |
-|---|-------|--------|---------|
-| [#6](https://github.com/MrMooreUK/fluvalble/issues/6) | Aquasky 2.0: connected but does not respond to commands | Open — investigation | Needs debug logs from a real Aquasky 2.0 |
-| [#8](https://github.com/MrMooreUK/fluvalble/issues/8) | Automatic mode schedule wrong after power cut (lamp RTC reset) | Open — investigation | Needs protocol capture of clock-sync command (or confirmation it doesn't exist) |
+| # | Title | Resolution |
+|---|-------|------------|
+| [#6](https://github.com/MrMooreUK/fluvalble/issues/6) | AquaSky 2.0 connected but did not respond to commands | Fixed by [PR #20](https://github.com/MrMooreUK/fluvalble/pull/20) |
+| [#8](https://github.com/MrMooreUK/fluvalble/issues/8) | Automatic schedule drifted after a power cut | Fixed by [PR #25](https://github.com/MrMooreUK/fluvalble/pull/25) |
 
 ---
 
-## #6 — Aquasky 2.0 commands ignored
+## #6 — AquaSky 2.0 commands ignored
 
-**Symptom:** Integration connects to the lamp, but toggling the LED switch
-or moving a channel slider has no effect. Device briefly disconnects then
-reconnects with the previous state unchanged.
+**Original symptom:** The integration connected to an AquaSky 2.0, but power
+or channel commands did not affect the fixture. The controller briefly
+disconnected and returned with its preceding state.
 
-**Hypothesis:** Either (a) the v0.0.4 BLE client is not re-usable after
-idle and the user is on an old release, or (b) the Aquasky 2.0 requires
-`response=False` on its write characteristic where Plant 3.0 accepts
-`response=True`.
+**Resolution:** PR #20 aligned the classic BLE transport with the affected
+controller by:
 
-**What we need to make progress:**
+- preferring GATT write-without-response when the characteristic supports it;
+- decoding classic channel status using the controller's 0–1000 wire scale;
+- logging the selected GATT response mode and raw/encrypted payloads for future
+  protocol diagnosis.
 
-- [ ] Confirm reporter is on v0.0.5+ (the BLE-reuse fix from PR #4 was
-      released in v0.0.5). If they're on v0.0.4, ask them to retest.
-- [ ] Debug log capture from an Aquasky 2.0 with
-      `custom_components.fluvalble: debug` enabled, while sending one
-      command. The log lines we need look like:
-      ```
-      Sending to XX:XX:XX:XX:XX:XX — raw: 68 04 ... | encrypted: 54 ...
-      ```
-- [ ] A BLE sniffer trace (ESP32 or nRF) of the same operation in the
-      official Fluval app, for byte-level comparison.
-
-**Workaround:** None yet. Users should keep the lamp in Manual mode and
-control channels via automations.
+An affected AquaSky 2.0 user reported working control before the issue was
+closed. The same issue also exposed a missing Sync clock entity in the tested
+release; PR #25 restored that entity and the current button platform includes
+it.
 
 ---
 
 ## #8 — Schedule drift after power cut
 
-**Symptom:** After a power interruption, the lamp's built-in Automatic /
-Professional lighting schedule runs at the wrong times. Manual mode is
-unaffected.
+**Original symptom:** A power interruption reset the fixture's internal
+real-time clock, causing its Automatic or Professional schedule to run at the
+wrong time until the clock was synchronized again.
 
-**Root cause:** The lamp's automatic schedule is driven by an internal
-RTC. Power loss resets the RTC to its epoch, and the schedule drifts
-from wall-clock time. The official Fluval app presumably re-syncs the
-clock on connect; this integration does not.
+**Resolution:** PR #25 added:
 
-**What we need to make progress:**
+- automatic clock synchronization after a fresh BLE connection;
+- a **Sync clock** button for a forced synchronization from Home Assistant;
+- a reset of the synchronization flag on disconnect so the next session
+  synchronizes again.
 
-- [ ] Confirm the BLE protocol includes a clock-sync command. Sources
-      to check:
-  - Fluval Plant 3.0 BLE protocol thread on Planted Tank Forum
-  - ESPHome `fluval` external component source
-  - A captured traffic dump from the official Fluval app
-- [ ] If a command exists: implement and test sending it after
-      `CMD_STATUS` on each fresh connection.
-- [ ] If no command exists: document as a known limitation in README
-      and recommend Manual mode for HA-controlled setups.
-
-**Workaround:** Set the Mode select entity to **Manual** and drive
-brightness from HA automations (sunrise / sunset, or a fixed schedule).
-This is already covered in the README's example automations.
+The classic OLD BLE `0x0E` clock command was validated on physical four-channel
+hardware. The FACEBD timezone/clock keys and Plant Pro/mesh clock frame are
+covered by unit tests, but their physical behavior should still be confirmed on
+representative AquaSky 3.0 and Plant Pro hardware when available.
 
 ---
 
 ## Reporting a new bug
 
-When a new issue is opened, please ask the reporter to:
+When a new issue is opened, ask the reporter to:
 
-1. Confirm the integration version (Settings → Devices & services →
-   Fluval Aquarium LED → ⓘ).
+1. Confirm the integration version from **Settings → Devices & services →
+   Fluval Aquarium LED → info**.
 2. Enable debug logging:
+
    ```yaml
    logger:
      default: info
      logs:
        custom_components.fluvalble: debug
    ```
-3. Capture the log snippet around a failing command.
-4. Note the lamp model and Bluetooth adapter (built-in vs ESP32
-   proxy vs other).
+
+3. Capture the log snippet around one failing command with Bluetooth addresses
+   and other identifiers redacted.
+4. Note the exact lamp model and Bluetooth route, such as a built-in adapter or
+   ESPHome Bluetooth proxy.
+5. Describe what the physical fixture did; Home Assistant state alone does not
+   prove that a BLE command succeeded.
