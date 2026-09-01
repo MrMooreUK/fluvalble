@@ -368,6 +368,274 @@ class FluvalbleScheduleCard extends HTMLElement {
   }
 }
 
+class FluvalbleEffectScheduleCard extends HTMLElement {
+  static getConfigElement() {
+    return document.createElement("hui-entities-card-editor");
+  }
+
+  static getStubConfig() {
+    return {
+      type: "custom:fluvalble-effect-schedule-card",
+      title: "Fluval Timed Effects",
+    };
+  }
+
+  setConfig(config) {
+    this.config = {
+      title: "Fluval Timed Effects",
+      ...config,
+    };
+    this.store = getScheduleStore(this.config);
+    this.attachShadow({ mode: "open" });
+    this.render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this.loadSavedEffectSchedule();
+    if (this.shadowRoot) this.render();
+  }
+
+  getCardSize() {
+    return Math.max(3, this.store.effectWindows.length + 2);
+  }
+
+  render() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const options = this.store.effectOptions || [];
+    const supported = options.length > 0;
+    const rows = buildEffectRows(this.store.effectWindows, options);
+    const status = supported
+      ? `${options.length} fixture-native effects · ${effectScheduleSourceLabel(this.store)}`
+      : "Timed effects become available after a supported controller is identified";
+
+    root.innerHTML = `
+      <ha-card>
+        <div class="card">
+          <div class="header">
+            <div>
+              <div class="title">${escapeHtml(this.config.title)}</div>
+              <div class="subtitle">${escapeHtml(status)}</div>
+            </div>
+            <button id="add" ${supported && this.store.effectWindows.length < 7 ? "" : "disabled"}>Add window</button>
+          </div>
+          <div class="rows">
+            ${rows || '<div class="empty">No timed-effect windows configured.</div>'}
+          </div>
+          <div class="actions">
+            <button id="apply" ${supported ? "" : "disabled"}>Apply to fixture</button>
+            <button id="load">Load from fixture</button>
+            <button id="clear" ${supported ? "" : "disabled"}>Clear fixture schedule</button>
+          </div>
+          ${this.store.effectReadbackComplete === false && this.store.effectProtocol === "classic"
+            ? '<div class="notice">Classic controllers report only one timed-effect slot in normal state responses. The saved Home Assistant copy remains the complete editable schedule.</div>'
+            : ""}
+        </div>
+      </ha-card>
+      <style>
+        .card { padding: 16px; }
+        .header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+        .title { font-size: 18px; font-weight: 600; }
+        .subtitle, .empty, .notice { color: var(--secondary-text-color); font-size: 13px; }
+        .subtitle { margin-top: 2px; }
+        .rows { display: grid; gap: 10px; margin-top: 14px; }
+        .row { background: var(--secondary-background-color); border-radius: 8px; display: grid; gap: 10px; padding: 12px; }
+        .main { align-items: center; display: grid; gap: 8px; grid-template-columns: auto minmax(150px, 1fr) auto auto auto; }
+        .enabled { align-items: center; display: flex; font-size: 12px; gap: 5px; }
+        .time { align-items: center; color: var(--secondary-text-color); display: flex; font-size: 12px; gap: 6px; }
+        input[type="time"], select { background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 6px; color: var(--primary-text-color); padding: 7px; }
+        .weekdays { display: flex; flex-wrap: wrap; gap: 8px 12px; }
+        .weekday { align-items: center; display: flex; font-size: 12px; gap: 4px; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+        .notice { border-left: 3px solid var(--warning-color, #f0a000); margin-top: 14px; padding-left: 10px; }
+        button { background: var(--primary-color); border: 0; border-radius: 6px; color: var(--text-primary-color); cursor: pointer; padding: 8px 12px; }
+        button:disabled { cursor: default; opacity: .45; }
+        button.remove, button#load { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        button#clear { background: var(--error-color); }
+        @media (max-width: 600px) {
+          .main { grid-template-columns: auto 1fr; }
+          .time { justify-content: flex-start; }
+        }
+      </style>
+    `;
+
+    root.getElementById("add").addEventListener("click", () => this.addWindow());
+    root.getElementById("apply").addEventListener("click", () => this.applySchedule());
+    root.getElementById("load").addEventListener("click", () => this.loadFixtureSchedule());
+    root.getElementById("clear").addEventListener("click", () => this.clearSchedule());
+    root.querySelectorAll("[data-effect-field]").forEach((input) => {
+      input.addEventListener("change", (event) => {
+        const index = Number(event.target.dataset.effectIndex);
+        const field = event.target.dataset.effectField;
+        this.store.effectWindows[index][field] = field === "enabled" ? event.target.checked : event.target.value;
+        this.store.effectSource = "local";
+        this.render();
+      });
+    });
+    root.querySelectorAll("[data-effect-weekday]").forEach((input) => {
+      input.addEventListener("change", (event) => {
+        this.toggleWeekday(
+          Number(event.target.dataset.effectIndex),
+          event.target.dataset.effectWeekday,
+          event.target.checked,
+        );
+      });
+    });
+    root.querySelectorAll(".remove").forEach((button) => {
+      button.addEventListener("click", (event) => {
+        this.store.effectWindows.splice(Number(event.target.dataset.effectIndex), 1);
+        this.store.effectSource = "local";
+        this.render();
+      });
+    });
+  }
+
+  toast(message) {
+    this.dispatchEvent(new CustomEvent("hass-notification", {
+      bubbles: true,
+      composed: true,
+      detail: { message },
+    }));
+  }
+
+  addWindow() {
+    if (this.store.effectWindows.length >= 7 || !this.store.effectOptions.length) return;
+    const used = new Set(this.store.effectWindows.flatMap((effectWindow) => effectWindow.weekdays));
+    const weekday = WEEKDAYS.find(([value]) => !used.has(value));
+    if (!weekday) {
+      this.toast("Every weekday is already assigned to an effect window");
+      return;
+    }
+    this.store.effectWindows.push({
+      enabled: true,
+      effect: this.store.effectOptions[0],
+      start: "12:00",
+      end: "12:10",
+      weekdays: [weekday[0]],
+    });
+    this.store.effectSource = "local";
+    this.render();
+  }
+
+  toggleWeekday(index, weekday, checked) {
+    const effectWindow = this.store.effectWindows[index];
+    if (!effectWindow) return;
+    if (checked) {
+      const usedElsewhere = this.store.effectWindows.some((candidate, candidateIndex) => (
+        candidateIndex !== index && candidate.weekdays.includes(weekday)
+      ));
+      if (usedElsewhere) {
+        this.toast(`${weekdayLabel(weekday)} is already assigned to another effect window`);
+        this.render();
+        return;
+      }
+      effectWindow.weekdays = [...new Set([...effectWindow.weekdays, weekday])];
+    } else if (effectWindow.weekdays.length === 1) {
+      this.toast("Each effect window requires at least one weekday");
+      this.render();
+      return;
+    } else {
+      effectWindow.weekdays = effectWindow.weekdays.filter((value) => value !== weekday);
+    }
+    this.store.effectSource = "local";
+    this.render();
+  }
+
+  async loadSavedEffectSchedule() {
+    if (!this._hass || this.store.loadingEffects || this.store.effectsLoaded) return;
+    this.store.loadingEffects = true;
+    try {
+      const result = await this._hass.callWS({
+        type: "fluvalble/get_schedule",
+        ...targetData(this.config),
+      });
+      this.updateCapabilities(result?.fixture);
+      if (Array.isArray(result?.effect_windows)) {
+        this.store.effectWindows = normalizeEffectWindows(result.effect_windows);
+      }
+      this.store.effectSource = "local";
+      this.store.effectsLoaded = true;
+      this.render();
+    } catch (error) {
+      console.warn("Unable to load saved Fluval timed effects", error);
+    } finally {
+      this.store.loadingEffects = false;
+    }
+  }
+
+  async loadFixtureSchedule() {
+    if (!this._hass || this.store.loadingEffects) return;
+    this.store.loadingEffects = true;
+    try {
+      const result = await this._hass.callWS({
+        type: "fluvalble/get_schedule",
+        ...targetData(this.config),
+        refresh: true,
+      });
+      this.updateCapabilities(result?.fixture);
+      this.render();
+      const effects = result?.fixture?.effects;
+      if (!Array.isArray(effects)) {
+        this.toast("No timed-effect schedule readback is available from the fixture");
+        return;
+      }
+      this.store.effectWindows = normalizeEffectWindows(effects);
+      this.store.effectSource = "fixture";
+      this.render();
+      const qualifier = this.store.effectReadbackComplete ? "" : " (partial controller readback)";
+      this.toast(`Loaded timed effects from the fixture${qualifier}`);
+    } catch (error) {
+      console.warn("Unable to load Fluval timed effects from the fixture", error);
+      this.toast("Unable to load timed effects from the fixture");
+    } finally {
+      this.store.loadingEffects = false;
+    }
+  }
+
+  updateCapabilities(fixture) {
+    this.store.effectOptions = Array.isArray(fixture?.effect_options) ? fixture.effect_options : [];
+    this.store.effectProtocol = fixture?.protocol || null;
+    this.store.effectReadbackComplete = fixture?.effect_readback_complete ?? null;
+  }
+
+  async applySchedule() {
+    const error = validateEffectWindows(this.store.effectWindows, this.store.effectOptions);
+    if (error) {
+      this.toast(error);
+      return;
+    }
+    try {
+      await this._hass.callService("fluvalble", "set_native_effect_schedule", {
+        ...targetData(this.config),
+        windows: this.store.effectWindows.map((effectWindow) => ({ ...effectWindow })),
+      });
+      this.store.effectSource = "uploaded";
+      this.render();
+      this.toast("Timed effects uploaded to the fixture");
+    } catch (error) {
+      console.warn("Unable to upload the Fluval timed-effect schedule", error);
+      this.toast("Unable to upload timed effects");
+    }
+  }
+
+  async clearSchedule() {
+    try {
+      await this._hass.callService("fluvalble", "set_native_effect_schedule", {
+        ...targetData(this.config),
+        windows: [],
+      });
+      this.store.effectWindows = [];
+      this.store.effectSource = "uploaded";
+      this.render();
+      this.toast("Timed effects cleared from the fixture");
+    } catch (error) {
+      console.warn("Unable to clear the Fluval timed-effect schedule", error);
+      this.toast("Unable to clear timed effects");
+    }
+  }
+}
+
 class FluvalbleSpectrumCard extends HTMLElement {
   static getConfigElement() {
     return document.createElement("hui-entities-card-editor");
@@ -580,6 +848,16 @@ const CHANNELS = [
   ["channel_5", "#b86cff", "Violet"],
 ];
 
+const WEEKDAYS = [
+  ["monday", "Mon"],
+  ["tuesday", "Tue"],
+  ["wednesday", "Wed"],
+  ["thursday", "Thu"],
+  ["friday", "Fri"],
+  ["saturday", "Sat"],
+  ["sunday", "Sun"],
+];
+
 function getStoreKey(config) {
   return config.store_key || config.entry_id || config.mac || "default";
 }
@@ -594,6 +872,11 @@ function getScheduleStore(config) {
       selectedMinute: 660,
       mode: "manual",
       scheduleSource: "local",
+      effectWindows: normalizeEffectWindows(config.effect_windows || []),
+      effectOptions: [],
+      effectProtocol: null,
+      effectReadbackComplete: null,
+      effectSource: "local",
     };
   }
   return window.__fluvalbleScheduleStores[key];
@@ -749,6 +1032,75 @@ function scheduleSourceLabel(store) {
   if (store.scheduleSource === "fixture") return "confirmed fixture readback";
   if (store.scheduleSource === "uploaded") return "uploaded; awaiting fixture readback";
   return "Home Assistant copy";
+}
+
+function effectScheduleSourceLabel(store) {
+  if (store.effectSource === "fixture") return "fixture readback";
+  if (store.effectSource === "uploaded") return "uploaded and saved";
+  return "saved Home Assistant copy";
+}
+
+function normalizeEffectWindows(windows) {
+  if (!Array.isArray(windows)) return [];
+  return windows.slice(0, 7).map((effectWindow) => ({
+    enabled: effectWindow?.enabled !== false,
+    effect: String(effectWindow?.effect || ""),
+    start: validTime(effectWindow?.start) ? effectWindow.start : "12:00",
+    end: validTime(effectWindow?.end) ? effectWindow.end : "12:10",
+    weekdays: Array.isArray(effectWindow?.weekdays)
+      ? effectWindow.weekdays.filter((day) => WEEKDAYS.some(([value]) => value === day))
+      : [],
+  }));
+}
+
+function buildEffectRows(windows, options) {
+  const usedDays = windows.map((effectWindow) => new Set(effectWindow.weekdays));
+  return windows.map((effectWindow, index) => `
+    <div class="row">
+      <div class="main">
+        <label class="enabled">
+          <input type="checkbox" data-effect-index="${index}" data-effect-field="enabled" ${effectWindow.enabled ? "checked" : ""}>
+          Enabled
+        </label>
+        <select data-effect-index="${index}" data-effect-field="effect">
+          ${options.map((effect) => `<option value="${escapeHtml(effect)}" ${effect === effectWindow.effect ? "selected" : ""}>${escapeHtml(effect)}</option>`).join("")}
+        </select>
+        <label class="time">From <input type="time" data-effect-index="${index}" data-effect-field="start" value="${escapeHtml(effectWindow.start)}"></label>
+        <label class="time">To <input type="time" data-effect-index="${index}" data-effect-field="end" value="${escapeHtml(effectWindow.end)}"></label>
+        <button class="remove" data-effect-index="${index}">Remove</button>
+      </div>
+      <div class="weekdays">
+        ${WEEKDAYS.map(([day, label]) => {
+          const assignedElsewhere = usedDays.some((used, candidateIndex) => candidateIndex !== index && used.has(day));
+          return `<label class="weekday"><input type="checkbox" data-effect-index="${index}" data-effect-weekday="${day}" ${effectWindow.weekdays.includes(day) ? "checked" : ""} ${assignedElsewhere ? "disabled" : ""}>${label}</label>`;
+        }).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function validateEffectWindows(windows, options) {
+  if (!Array.isArray(windows) || windows.length > 7) return "Fluval controllers support at most seven effect windows";
+  const usedDays = new Set();
+  for (const effectWindow of windows) {
+    if (!options.includes(effectWindow.effect)) return "Choose an effect supported by this fixture";
+    if (!validTime(effectWindow.start) || !validTime(effectWindow.end)) return "Every effect window requires valid start and end times";
+    if (effectWindow.start === "00:00" && effectWindow.end === "00:00") return "An effect window cannot start and end at 00:00";
+    if (!Array.isArray(effectWindow.weekdays) || !effectWindow.weekdays.length) return "Every effect window requires at least one weekday";
+    for (const day of effectWindow.weekdays) {
+      if (usedDays.has(day)) return `${weekdayLabel(day)} is assigned to more than one effect window`;
+      usedDays.add(day);
+    }
+  }
+  return null;
+}
+
+function validTime(value) {
+  return typeof value === "string" && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value);
+}
+
+function weekdayLabel(value) {
+  return WEEKDAYS.find(([day]) => day === value)?.[1] || value;
 }
 
 function denormalizePoints(points) {
@@ -1031,6 +1383,9 @@ function escapeHtml(value) {
 if (!customElements.get("fluvalble-schedule-card")) {
   customElements.define("fluvalble-schedule-card", FluvalbleScheduleCard);
 }
+if (!customElements.get("fluvalble-effect-schedule-card")) {
+  customElements.define("fluvalble-effect-schedule-card", FluvalbleEffectScheduleCard);
+}
 if (!customElements.get("fluvalble-spectrum-card")) {
   customElements.define("fluvalble-spectrum-card", FluvalbleSpectrumCard);
 }
@@ -1043,6 +1398,11 @@ registerCustomCard({
   type: "fluvalble-schedule-card",
   name: "Fluval BLE Schedule",
   description: "24-hour channel graph and physical preview controls for Fluval BLE lights.",
+});
+registerCustomCard({
+  type: "fluvalble-effect-schedule-card",
+  name: "Fluval BLE Timed Effects",
+  description: "Edit and upload fixture-native timed effects for Fluval BLE lights.",
 });
 registerCustomCard({
   type: "fluvalble-spectrum-card",

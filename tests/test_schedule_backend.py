@@ -11,6 +11,7 @@ from custom_components.fluvalble import (
     DOMAIN,
     FluvalRuntimeData,
     _async_schedule_payload,
+    _async_save_effect_schedule,
     _async_load_schedule,
     _async_load_schedule_data,
     _async_migrate_legacy_auto_schedule,
@@ -20,6 +21,7 @@ from custom_components.fluvalble import (
     _validate_native_pro_points,
     _async_upload_native_schedule,
     _native_schedule_readback,
+    _normalize_effect_schedule,
     _validate_schedule_points,
     async_set_schedule_mode,
 )
@@ -241,6 +243,7 @@ async def _async_test_save_and_load_schedule_data(monkeypatch):
     assert await _async_load_schedule_data(hass, "entry_1") == {
         "points": points,
         "mode": "auto",
+        "effect_windows": None,
     }
 
 
@@ -348,6 +351,77 @@ async def _async_test_load_schedule_supports_legacy_list_records(monkeypatch):
     assert await _async_load_schedule_data(_FakeHass(), "entry_1") == {
         "points": points,
         "mode": "manual",
+        "effect_windows": None,
+    }
+
+
+def test_effect_schedule_normalizes_submitted_and_fixture_shapes():
+    submitted = _normalize_effect_schedule(
+        [
+            {
+                "start_hour": 12,
+                "start_minute": 5,
+                "end_hour": 12,
+                "end_minute": 15,
+                "effect_id": 2,
+                "weekdays": [True, False, True, False, False, False, False],
+                "enabled": True,
+            }
+        ]
+    )
+
+    assert submitted == [
+        {
+            "start": "12:05",
+            "end": "12:15",
+            "effect": "Lightning",
+            "weekdays": ["monday", "wednesday"],
+            "enabled": True,
+        }
+    ]
+    assert _normalize_effect_schedule([]) == []
+    assert _normalize_effect_schedule([{"start": "12:00"}]) is None
+
+
+def test_saving_effect_schedule_preserves_professional_curve(monkeypatch):
+    asyncio.run(_async_test_saving_effect_schedule_preserves_professional_curve(monkeypatch))
+
+
+async def _async_test_saving_effect_schedule_preserves_professional_curve(monkeypatch):
+    import custom_components.fluvalble as integration
+
+    points = _schedule_points()
+    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "native"}}}
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
+
+    await _async_save_effect_schedule(
+        _FakeHass(),
+        "entry_1",
+        [
+            {
+                "start_hour": 12,
+                "start_minute": 0,
+                "end_hour": 12,
+                "end_minute": 10,
+                "effect_id": 1,
+                "weekdays": [True, False, False, False, False, False, False],
+                "enabled": True,
+            }
+        ],
+    )
+
+    assert _MemoryStore.data["schedules"]["entry_1"] == {
+        "points": points,
+        "mode": "native",
+        "effect_windows": [
+            {
+                "start": "12:00",
+                "end": "12:10",
+                "effect": "Thunderstorm",
+                "weekdays": ["monday"],
+                "enabled": True,
+            }
+        ],
     }
 
 
@@ -432,11 +506,22 @@ def test_fixture_schedule_readback_normalizes_protocol_shapes():
                 {"time": "08:00", "levels": [10, 20, 30, 40, 50]},
                 {"minute": 750, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
             ],
+            "native_effect_schedule": [
+                {
+                    "start": "12:00",
+                    "end": "12:10",
+                    "effect": "Lightning",
+                    "weekdays": [True, False, True, False, False, False, False],
+                    "enabled": True,
+                }
+            ],
         }
     )
+    device.conn_info["service_uuids"] = ["facebd00-0000-1000-8000-00805f9b34fb"]
+    device.facebd = True
     device.diagnostics.update(
         {
-            "native_schedule_protocol": "plant_pro",
+            "native_schedule_protocol": "facebd",
             "native_schedule_readback_at": "2026-08-31T18:00:00+00:00",
         }
     )
@@ -444,7 +529,7 @@ def test_fixture_schedule_readback_normalizes_protocol_shapes():
     readback = _native_schedule_readback(device)
 
     assert readback["available"] is True
-    assert readback["protocol"] == "plant_pro"
+    assert readback["protocol"] == "facebd"
     assert readback["auto"] == {
         "sunrise": "08:00",
         "sunrise_ramp": 60,
@@ -458,6 +543,29 @@ def test_fixture_schedule_readback_normalizes_protocol_shapes():
         {"time": "08:00", "red": 10, "green": 20, "blue": 30, "white": 40, "channel_5": 50},
         {"time": "12:30", "red": 1, "green": 2, "blue": 3, "white": 4, "channel_5": 0},
     ]
+    assert readback["effects"] == [
+        {
+            "start": "12:00",
+            "end": "12:10",
+            "effect": "Lightning",
+            "weekdays": ["monday", "wednesday"],
+            "enabled": True,
+        }
+    ]
+    assert readback["effect_options"] == [
+        "Thunderstorm",
+        "Lightning",
+        "Sun and lightning",
+        "Colour cycle",
+        "Mostly sunny",
+        "Partly sunny",
+        "Partly cloudy",
+        "Mostly cloudy",
+        "Full moon",
+        "Half moon",
+        "Crescent moon",
+    ]
+    assert readback["effect_readback_complete"] is True
 
 
 def test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch):
@@ -472,7 +580,24 @@ async def _async_test_schedule_payload_refreshes_fixture_only_when_requested(mon
     device.values["native_pro_schedule"] = [
         {"minute": 480, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40}
     ]
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "native"}}}
+    effect_windows = [
+        {
+            "start": "12:00",
+            "end": "12:10",
+            "effect": "Lightning",
+            "weekdays": ["monday"],
+            "enabled": True,
+        }
+    ]
+    _MemoryStore.data = {
+        "schedules": {
+            "entry_1": {
+                "points": _schedule_points(),
+                "mode": "native",
+                "effect_windows": effect_windows,
+            }
+        }
+    }
     monkeypatch.setattr(integration, "Store", _MemoryStore)
     hass = _FakeHass(device)
 
@@ -480,6 +605,7 @@ async def _async_test_schedule_payload_refreshes_fixture_only_when_requested(mon
     refreshed = await _async_schedule_payload(hass, "entry_1", refresh=True)
 
     assert cached["refresh_ok"] is None
+    assert cached["effect_windows"] == effect_windows
     assert refreshed["refresh_ok"] is True
     assert refreshed["fixture"]["professional"][0]["time"] == "08:00"
     device.async_refresh_state.assert_awaited_once()

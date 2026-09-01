@@ -138,8 +138,9 @@ proxy connection slot.
 
 ## Lovelace dashboard cards
 
-Optional dashboard cards are available for AquaSky 3.0 schedule editing,
-spectrum bar preview, and wavelength preview. See
+Optional dashboard cards are available for Professional schedule editing,
+fixture-native timed-effect windows, spectrum bar preview, and wavelength
+preview. See
 [`docs/lovelace-cards.md`](docs/lovelace-cards.md) for setup instructions,
 example YAML, usage notes, and preview safety guidance.
 
@@ -151,6 +152,13 @@ are migrated to Fixture native when they fit the controller limit. **Load from
 fixture** explicitly refreshes the controller and imports a reported Professional
 curve without silently replacing the Home Assistant copy. The card labels its
 current data as local, uploaded, or confirmed fixture readback.
+
+The separate timed-effects card writes the same onboard effect windows exposed
+by `fluvalble.set_native_effect_schedule`. It limits the effect picker to the
+connected controller's supported catalog, prevents assigning a weekday to more
+than one window, and keeps the complete submitted schedule in Home Assistant.
+Classic controller readback is identified as partial because its normal state
+response exposes only one timed-effect slot.
 
 ### Native fixture schedules
 

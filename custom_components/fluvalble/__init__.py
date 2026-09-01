@@ -29,7 +29,7 @@ from .core import (
     DOMAIN,
 )
 from .core.device import Device
-from .core.effects import WEATHER_EFFECTS
+from .core.effects import EFFECT_NONE, WEATHER_EFFECTS, effect_name
 
 try:
     from homeassistant.config_entries import ConfigEntryState
@@ -673,6 +673,11 @@ def _register_services(hass: HomeAssistant) -> None:
             raise HomeAssistantError(
                 device.diagnostics.get("last_error") or "Unable to store the native effect schedule"
             )
+        await _async_save_effect_schedule(
+            hass,
+            get_entry_id(call.data),
+            call.data["windows"],
+        )
 
     hass.services.async_register(
         DOMAIN,
@@ -820,6 +825,59 @@ def _normalize_fixture_pro_schedule(schedule: object) -> list[dict[str, Any]] | 
     return points
 
 
+def _normalize_effect_schedule(schedule: object) -> list[dict[str, Any]] | None:
+    """Normalize saved, submitted, or fixture-read timed-effect windows for the card."""
+    if not isinstance(schedule, list):
+        return None
+    windows: list[dict[str, Any]] = []
+    for window in schedule:
+        if not isinstance(window, dict):
+            return None
+        start = _format_fixture_minute(window.get("start"))
+        if start is None and isinstance(window.get("start_hour"), int) and isinstance(window.get("start_minute"), int):
+            start = _format_fixture_minute({"hour": window["start_hour"], "minute": window["start_minute"]})
+        end = _format_fixture_minute(window.get("end"))
+        if end is None and isinstance(window.get("end_hour"), int) and isinstance(window.get("end_minute"), int):
+            end = _format_fixture_minute({"hour": window["end_hour"], "minute": window["end_minute"]})
+        if start is None or end is None:
+            return None
+
+        effect = window.get("effect")
+        if not isinstance(effect, str):
+            effect_id = window.get("effect_id")
+            effect = effect_name(effect_id) if isinstance(effect_id, int) else None
+        if effect not in WEATHER_EFFECTS:
+            return None
+
+        weekdays = window.get("weekdays", list(PLANT_PRO_WEEKDAYS))
+        if (
+            isinstance(weekdays, list)
+            and len(weekdays) == len(PLANT_PRO_WEEKDAYS)
+            and all(isinstance(value, bool) for value in weekdays)
+        ):
+            weekday_names = [day for day, enabled in zip(PLANT_PRO_WEEKDAYS, weekdays, strict=True) if enabled]
+        elif isinstance(weekdays, list) and all(day in PLANT_PRO_WEEKDAYS for day in weekdays):
+            weekday_names = list(dict.fromkeys(weekdays))
+        else:
+            return None
+        if not weekday_names:
+            return None
+
+        enabled = window.get("enabled", True)
+        if not isinstance(enabled, bool):
+            return None
+        windows.append(
+            {
+                "start": start,
+                "end": end,
+                "effect": effect,
+                "weekdays": weekday_names,
+                "enabled": enabled,
+            }
+        )
+    return windows
+
+
 def _native_schedule_readback(device: Device | None) -> dict[str, Any]:
     """Return protocol-neutral native schedule readback for the dashboard."""
     if device is None:
@@ -828,17 +886,25 @@ def _native_schedule_readback(device: Device | None) -> dict[str, Any]:
             "mode": None,
             "auto": None,
             "professional": None,
+            "effects": None,
+            "effect_options": [],
+            "effect_readback_complete": False,
             "protocol": None,
             "read_at": None,
         }
     auto = _normalize_fixture_auto_schedule(device.values.get("native_auto_schedule"))
     professional = _normalize_fixture_pro_schedule(device.values.get("native_pro_schedule"))
+    effects = _normalize_effect_schedule(device.values.get("native_effect_schedule"))
+    protocol_name = device.diagnostics.get("native_schedule_protocol")
     return {
-        "available": auto is not None or professional is not None,
+        "available": auto is not None or professional is not None or effects is not None,
         "mode": device.values.get("mode"),
         "auto": auto,
         "professional": professional,
-        "protocol": device.diagnostics.get("native_schedule_protocol"),
+        "effects": effects,
+        "effect_options": [effect for effect in device.effect_list() if effect != EFFECT_NONE],
+        "effect_readback_complete": protocol_name in {"facebd", "plant_pro"},
+        "protocol": protocol_name,
         "read_at": device.diagnostics.get("native_schedule_readback_at"),
     }
 
@@ -854,6 +920,7 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
         "entry_id": entry_id,
         "points": saved.get("points"),
         "mode": saved.get("mode", "manual"),
+        "effect_windows": saved.get("effect_windows"),
         "fixture": _native_schedule_readback(device),
         "refresh_ok": refresh_ok,
     }
@@ -926,13 +993,14 @@ async def _async_load_schedule_data(hass: HomeAssistant, entry_id: str) -> dict:
     schedules = data.get("schedules", {})
     saved = schedules.get(entry_id)
     if isinstance(saved, list):
-        return {"points": saved, "mode": "manual"}
+        return {"points": saved, "mode": "manual", "effect_windows": None}
     if isinstance(saved, dict):
         return {
             "points": saved.get("points"),
             "mode": saved.get("mode", "manual"),
+            "effect_windows": _normalize_effect_schedule(saved.get("effect_windows")),
         }
-    return {"points": None, "mode": "manual"}
+    return {"points": None, "mode": "manual", "effect_windows": None}
 
 
 async def _async_save_schedule(
@@ -948,10 +1016,12 @@ async def _async_save_schedule(
     schedules = data.setdefault("schedules", {})
     existing = schedules.get(entry_id)
     existing_mode = existing.get("mode", "manual") if isinstance(existing, dict) else "manual"
+    existing_effect_windows = existing.get("effect_windows") if isinstance(existing, dict) else None
     schedule_mode = mode or existing_mode
     schedules[entry_id] = {
         "points": points,
         "mode": schedule_mode,
+        "effect_windows": existing_effect_windows,
     }
     await store.async_save(data)
 
@@ -961,6 +1031,30 @@ async def _async_save_schedule(
         device.schedule_mode = schedule_mode
         for handler in device.updates_component:
             handler()
+
+
+async def _async_save_effect_schedule(
+    hass: HomeAssistant,
+    entry_id: str,
+    windows: list[dict[str, Any]],
+) -> None:
+    """Save the user-authored timed-effect windows without replacing channel schedules."""
+    normalized = _normalize_effect_schedule(windows)
+    if normalized is None:
+        raise HomeAssistantError("Unable to normalize the timed-effect schedule")
+    store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
+    data = await store.async_load() or {}
+    schedules = data.setdefault("schedules", {})
+    existing = schedules.get(entry_id)
+    if isinstance(existing, list):
+        existing = {"points": existing, "mode": "manual"}
+    if not isinstance(existing, dict):
+        existing = {"points": None, "mode": "manual"}
+    schedules[entry_id] = {
+        **existing,
+        "effect_windows": normalized,
+    }
+    await store.async_save(data)
 
 
 def _device_for_entry(hass: HomeAssistant, entry_id: str) -> Device | None:
