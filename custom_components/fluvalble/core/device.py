@@ -328,6 +328,36 @@ class Device:
         )
         return True
 
+    def _record_native_effect_schedule_readback(
+        self,
+        *,
+        protocol_name: str,
+        windows: list[dict[str, Any]] | None,
+    ) -> bool:
+        """Store protocol-neutral fixture-owned timed-effect readback."""
+        if windows is None:
+            return False
+        effect_lookup = plant_pro_effect_name if protocol_name == "plant_pro" else effect_name
+        normalized = [
+            {
+                **window,
+                "effect": effect_lookup(window["effect_id"]),
+            }
+            for window in windows
+        ]
+        self.values["native_effect_schedule"] = normalized
+        self.diagnostics["native_effect_schedule"] = normalized
+        if protocol_name == "plant_pro":
+            # Backward-compatible diagnostics key from the original Plant Pro service.
+            self.diagnostics["plant_pro_effect_schedule"] = normalized
+        self.diagnostics.update(
+            {
+                "native_schedule_protocol": protocol_name,
+                "native_schedule_readback_at": datetime.now(UTC).isoformat(),
+            }
+        )
+        return True
+
     def numbers(self) -> list[str]:
         """List of numbers provided by the device."""
         if self._resolved_channel_count() == 4:
@@ -791,26 +821,58 @@ class Device:
         return True
 
     async def async_set_native_effect_schedule(self, windows: list[dict[str, Any]]) -> bool:
-        """Store Plant Pro timed native-effect windows in the fixture."""
-        if not await self._async_prepare_command() or not self._uses_plant_pro_protocol():
+        """Store APK-native timed weather-effect windows in the fixture."""
+        if not await self._async_prepare_command():
+            return False
+
+        if self._uses_plant_pro_protocol():
+            native_protocol = "plant_pro"
+            packet_builder = protocol.spp_effect_schedule_packet
+            effect_lookup = plant_pro_effect_name
+        elif self._uses_wifi_protocol() and self.supports_facebd_effects():
+            native_protocol = "facebd"
+            packet_builder = protocol.wifi_effect_schedule_packet
+            effect_lookup = effect_name
+        elif self.supports_classic_effects():
+            native_protocol = "classic"
+            packet_builder = protocol.old_effect_schedule_packet
+            effect_lookup = effect_name
+        else:
             self._set_diagnostic_error(
                 "unsupported_transport",
-                "Timed native effects require a Plant Pro 4.0 controller",
+                "Timed native effects require a supported classic, AquaSky 3.0/FACEBD, or Plant Pro controller",
             )
             return False
-        if not await self._async_send_packet(protocol.spp_effect_schedule_packet(windows)):
+
+        try:
+            packet = packet_builder(windows)
+        except (KeyError, TypeError, ValueError) as err:
+            self._set_diagnostic_error("invalid_native_effect_schedule", str(err))
             return False
-        self.diagnostics["plant_pro_effect_schedule"] = [
+        if not await self._async_send_packet(packet):
+            return False
+        normalized = [
             {
                 "enabled": bool(window.get("enabled", True)),
                 "weekdays": list(window["weekdays"]),
                 "start": f"{window['start_hour']:02d}:{window['start_minute']:02d}",
                 "end": f"{window['end_hour']:02d}:{window['end_minute']:02d}",
                 "effect_id": window["effect_id"],
-                "effect": plant_pro_effect_name(window["effect_id"]),
+                "effect": effect_lookup(window["effect_id"]),
             }
             for window in windows
         ]
+        self.values["native_effect_schedule"] = normalized
+        self.diagnostics.update(
+            {
+                "status": "native_effect_schedule_submitted",
+                "native_schedule_protocol": native_protocol,
+                "native_effect_schedule": normalized,
+                "native_effect_schedule_packet": packet.hex(),
+            }
+        )
+        if native_protocol == "plant_pro":
+            self.diagnostics["plant_pro_effect_schedule"] = normalized
         self._notify_diagnostics_throttled()
         return True
 
@@ -1649,11 +1711,21 @@ class Device:
             for index in range(len(channels), 5):
                 self.values[f"channel_{index + 1}"] = 0
         elif self.values["mode"] == "automatic":
-            auto_schedule = protocol.decode_old_auto_schedule(data[2:-1], channel_count=self._resolved_channel_count())
+            body = data[2:-1]
+            auto_schedule = protocol.decode_old_auto_schedule(body, channel_count=self._resolved_channel_count())
             self._record_native_schedule_readback(protocol_name="classic", auto=auto_schedule)
+            self._record_native_effect_schedule_readback(
+                protocol_name="classic",
+                windows=protocol.decode_old_effect_schedule(body, channel_count=self._resolved_channel_count()),
+            )
         elif self.values["mode"] == "professional":
-            pro_schedule = protocol.decode_old_pro_schedule(data[2:-1], channel_count=self._resolved_channel_count())
+            body = data[2:-1]
+            pro_schedule = protocol.decode_old_pro_schedule(body, channel_count=self._resolved_channel_count())
             self._record_native_schedule_readback(protocol_name="classic", professional=pro_schedule)
+            self._record_native_effect_schedule_readback(
+                protocol_name="classic",
+                windows=protocol.decode_old_effect_schedule(body, channel_count=self._resolved_channel_count()),
+            )
 
         _LOGGER.debug(
             "led: %s mode: %s channels: %s / %s / %s / %s / %s",
@@ -1710,6 +1782,7 @@ class Device:
             protocol.WIFI_PRO_COUNT_KEY,
             protocol.WIFI_PRO_TIMES_KEY,
             protocol.WIFI_PRO_LEVELS_KEY,
+            protocol.WIFI_SCHEDULED_EFFECT_KEY,
         )
         if any(key in data for key in facebd_schedule_keys):
             auto_schedule = protocol.decode_wifi_auto_schedule(data)
@@ -1719,6 +1792,13 @@ class Device:
                     protocol_name="facebd",
                     auto=auto_schedule,
                     professional=pro_schedule,
+                )
+                or updated
+            )
+            updated = (
+                self._record_native_effect_schedule_readback(
+                    protocol_name="facebd",
+                    windows=protocol.decode_wifi_effect_schedule(data),
                 )
                 or updated
             )
@@ -1769,10 +1849,10 @@ class Device:
             self.diagnostics["plant_pro_pro_schedule"] = pro_schedule
 
         effect_schedule = protocol.decode_spp_effect_schedule(data)
-        if effect_schedule is not None:
-            for window in effect_schedule:
-                window["effect"] = plant_pro_effect_name(window["effect_id"])
-            self.diagnostics["plant_pro_effect_schedule"] = effect_schedule
+        if self._record_native_effect_schedule_readback(
+            protocol_name="plant_pro",
+            windows=effect_schedule,
+        ):
             updated = True
 
         if updated:

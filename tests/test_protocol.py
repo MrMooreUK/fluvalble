@@ -345,6 +345,7 @@ def test_plant_pro_effect_schedule_uses_fixed_42_byte_apk_blob():
             "enabled": True,
         }
     ]
+
     packet = protocol.spp_effect_schedule_packet(windows)
     decoded = protocol.decode_cbor_update(packet)
 
@@ -360,6 +361,109 @@ def test_plant_pro_effect_schedule_uses_fixed_42_byte_apk_blob():
             "effect_id": 1,
         }
     ]
+
+
+def test_facebd_effect_schedule_uses_apk_key_123_variable_blob():
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 11,
+            "weekdays": [True, False, True, False, True, False, False],
+            "enabled": True,
+        }
+    ]
+
+    packet = protocol.wifi_effect_schedule_packet(windows)
+    decoded = protocol.decode_cbor_map(packet)
+
+    assert packet == bytes.fromhex("a1 18 7b 46 95 0c 00 0c 0a 0b")
+    assert decoded[protocol.WIFI_SCHEDULED_EFFECT_KEY] == bytes((0x95, 12, 0, 12, 10, 11))
+    assert protocol.decode_wifi_effect_schedule(decoded) == [
+        {
+            "enabled": True,
+            "weekdays": [True, False, True, False, True, False, False],
+            "start": "12:00",
+            "end": "12:10",
+            "effect_id": 11,
+        }
+    ]
+    assert protocol.wifi_effect_schedule_packet([]) == bytes.fromhex("a1 18 7b 40")
+
+
+def test_classic_effect_schedule_uses_apk_6811_packet():
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 11,
+            "weekdays": [True, False, True, False, True, False, False],
+            "enabled": True,
+        }
+    ]
+
+    packet = protocol.old_effect_schedule_packet(windows)
+
+    assert packet[:-1] == bytes.fromhex("68 11 95 0c 00 0c 0a 0b")
+    assert packet[-1] == _xor(packet[:-1])
+    assert protocol.old_effect_schedule_packet([]) == bytes.fromhex("68 11 79")
+
+
+@pytest.mark.parametrize(
+    ("builder", "effect_id"),
+    [
+        (protocol.spp_effect_schedule_packet, 5),
+        (protocol.wifi_effect_schedule_packet, 12),
+        (protocol.old_effect_schedule_packet, 12),
+    ],
+)
+def test_effect_schedule_rejects_transport_unsupported_effect_ids(builder, effect_id):
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": effect_id,
+            "weekdays": [True] * 7,
+            "enabled": True,
+        }
+    ]
+
+    with pytest.raises(ValueError, match="effect window ID"):
+        builder(windows)
+
+
+def test_classic_schedule_readback_distinguishes_sleep_from_effect_slot():
+    day = bytes((10, 20, 30, 40))
+    night = bytes((1, 2, 3, 4))
+    base = bytes((1, 8, 0, 9, 0)) + day + bytes((19, 0, 20, 0)) + night
+    effect = bytes((0x95, 12, 0, 12, 10, 11))
+
+    auto = protocol.decode_old_auto_schedule(base + effect, channel_count=4)
+    windows = protocol.decode_old_effect_schedule(base + effect, channel_count=4)
+
+    assert auto["sleep"] is None
+    assert windows == [
+        {
+            "enabled": True,
+            "weekdays": [True, False, True, False, True, False, False],
+            "start": "12:00",
+            "end": "12:10",
+            "effect_id": 11,
+        }
+    ]
+
+
+def _xor(packet):
+    checksum = 0
+    for item in packet:
+        checksum ^= item
+    return checksum
 
 
 def test_plant_pro_status_strips_d2_header_and_skips_schedule_blobs():

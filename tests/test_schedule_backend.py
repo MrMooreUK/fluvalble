@@ -182,6 +182,47 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
     assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
 
 
+def test_native_effect_validator_accepts_classic_and_facebd_weather_catalog():
+    windows = _validate_native_effect_windows(
+        [
+            {
+                "start": "22:00",
+                "end": "22:10",
+                "effect": "Crescent moon",
+            }
+        ]
+    )
+
+    assert windows[0]["effect_id"] == 11
+    assert windows[0]["weekdays"] == [True] * 7
+
+
+def test_native_effect_validator_matches_apk_weekday_rules():
+    with pytest.raises(vol.Invalid, match="only one effect window"):
+        _validate_native_effect_windows(
+            [
+                {
+                    "start": "12:00",
+                    "end": "12:10",
+                    "effect": "Thunderstorm",
+                    "weekdays": ["monday"],
+                },
+                {
+                    "start": "13:00",
+                    "end": "13:10",
+                    "effect": "Lightning",
+                    "weekdays": ["monday"],
+                },
+            ]
+        )
+
+    with pytest.raises(vol.Invalid, match="at least one weekday"):
+        _validate_native_effect_windows([{"start": "12:00", "end": "12:10", "effect": "Thunderstorm", "weekdays": []}])
+
+    with pytest.raises(vol.Invalid, match="cannot both be 00:00"):
+        _validate_native_effect_windows([{"start": "00:00", "end": "00:00", "effect": "Thunderstorm"}])
+
+
 def test_save_and_load_schedule_data(monkeypatch):
     asyncio.run(_async_test_save_and_load_schedule_data(monkeypatch))
 

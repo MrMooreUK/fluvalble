@@ -657,6 +657,100 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
 
 
+def test_classic_and_facebd_native_effect_schedules_use_apk_packets():
+    asyncio.run(_async_test_classic_and_facebd_native_effect_schedules_use_apk_packets())
+
+
+async def _async_test_classic_and_facebd_native_effect_schedules_use_apk_packets():
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 11,
+            "weekdays": [True, False, True, False, True, False, False],
+            "enabled": True,
+        }
+    ]
+
+    classic = _make_device(service_uuids=["00001002-0000-1000-8000-00805f9b34fb"])
+    classic.client = SimpleNamespace(
+        command_write_uuid="00001001-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=False,
+    )
+    classic._async_prepare_command = AsyncMock(return_value=True)
+    classic._async_send_packet = AsyncMock(return_value=True)
+
+    facebd = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    facebd.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=True,
+    )
+    facebd._async_prepare_command = AsyncMock(return_value=True)
+    facebd._async_send_packet = AsyncMock(return_value=True)
+
+    assert await classic.async_set_native_effect_schedule(windows)
+    assert await facebd.async_set_native_effect_schedule(windows)
+    classic._async_send_packet.assert_awaited_once_with(protocol.old_effect_schedule_packet(windows))
+    facebd._async_send_packet.assert_awaited_once_with(protocol.wifi_effect_schedule_packet(windows))
+    assert classic.diagnostics["native_schedule_protocol"] == "classic"
+    assert facebd.diagnostics["native_schedule_protocol"] == "facebd"
+    assert classic.diagnostics["native_effect_schedule"][0]["effect"] == "Crescent moon"
+    assert facebd.diagnostics["native_effect_schedule"][0]["effect"] == "Crescent moon"
+
+
+def test_plant_pro_native_effect_schedule_rejects_weather_only_effect():
+    asyncio.run(_async_test_plant_pro_native_effect_schedule_rejects_weather_only_effect())
+
+
+async def _async_test_plant_pro_native_effect_schedule_rejects_weather_only_effect():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = SimpleNamespace(plant_pro_spp=True)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect_id": 11,
+            "weekdays": [True] * 7,
+            "enabled": True,
+        }
+    ]
+
+    assert not await device.async_set_native_effect_schedule(windows)
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["status"] == "invalid_native_effect_schedule"
+
+
+def test_facebd_effect_schedule_readback_uses_weather_names():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    data = protocol.decode_cbor_map(
+        protocol.wifi_effect_schedule_packet(
+            [
+                {
+                    "start_hour": 12,
+                    "start_minute": 0,
+                    "end_hour": 12,
+                    "end_minute": 10,
+                    "effect_id": 11,
+                    "weekdays": [True] * 7,
+                    "enabled": True,
+                }
+            ]
+        )
+    )
+
+    assert device._decode_wifi_update(data)
+    assert device.values["native_effect_schedule"][0]["effect"] == "Crescent moon"
+    assert device.diagnostics["native_schedule_protocol"] == "facebd"
+
+
 def test_native_pro_schedule_limits_follow_detected_apk_transport():
     classic = _make_device()
     facebd = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")

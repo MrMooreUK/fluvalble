@@ -29,7 +29,7 @@ from .core import (
     DOMAIN,
 )
 from .core.device import Device
-from .core.effects import PLANT_PRO_EFFECTS
+from .core.effects import WEATHER_EFFECTS
 
 try:
     from homeassistant.config_entries import ConfigEntryState
@@ -196,10 +196,11 @@ def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
 
 
 def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
-    """Validate Plant Pro fixture-owned timed effect windows."""
+    """Validate fixture-owned timed weather-effect windows."""
     if not isinstance(value, list) or len(value) > 7:
-        raise vol.Invalid("Plant Pro supports at most seven timed effect windows")
+        raise vol.Invalid("Fluval controllers support at most seven timed effect windows")
     windows = []
+    used_weekdays: set[str] = set()
     supported = {"start", "end", "effect", "weekdays", "enabled"}
     for window in value:
         if not isinstance(window, dict) or not {"start", "end", "effect"}.issubset(window):
@@ -208,14 +209,22 @@ def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
             raise vol.Invalid("Effect window contains unsupported fields")
         start_hour, start_minute = _validate_time(window["start"], "effect start")
         end_hour, end_minute = _validate_time(window["end"], "effect end")
+        if (start_hour, start_minute, end_hour, end_minute) == (0, 0, 0, 0):
+            raise vol.Invalid("effect start and end cannot both be 00:00")
         effect = window["effect"]
-        if effect not in PLANT_PRO_EFFECTS:
-            raise vol.Invalid(f"effect must be one of {', '.join(PLANT_PRO_EFFECTS)}")
+        if effect not in WEATHER_EFFECTS:
+            raise vol.Invalid(f"effect must be one of {', '.join(WEATHER_EFFECTS)}")
         weekdays = window.get("weekdays", list(PLANT_PRO_WEEKDAYS))
         if not isinstance(weekdays, list) or any(day not in PLANT_PRO_WEEKDAYS for day in weekdays):
             raise vol.Invalid("weekdays must contain valid lowercase weekday names")
         if len(set(weekdays)) != len(weekdays):
             raise vol.Invalid("weekdays must not contain duplicates")
+        if not weekdays:
+            raise vol.Invalid("each effect window requires at least one weekday")
+        repeated_weekdays = used_weekdays.intersection(weekdays)
+        if repeated_weekdays:
+            raise vol.Invalid("each weekday can be assigned to only one effect window")
+        used_weekdays.update(weekdays)
         enabled = window.get("enabled", True)
         if not isinstance(enabled, bool):
             raise vol.Invalid("enabled must be true or false")
@@ -225,7 +234,7 @@ def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
                 "start_minute": start_minute,
                 "end_hour": end_hour,
                 "end_minute": end_minute,
-                "effect_id": PLANT_PRO_EFFECTS[effect],
+                "effect_id": WEATHER_EFFECTS[effect],
                 "weekdays": [day in weekdays for day in PLANT_PRO_WEEKDAYS],
                 "enabled": enabled,
             }
@@ -662,7 +671,7 @@ def _register_services(hass: HomeAssistant) -> None:
         device = get_device(call)
         if not await device.async_set_native_effect_schedule(call.data["windows"]):
             raise HomeAssistantError(
-                device.diagnostics.get("last_error") or "Unable to store the Plant Pro effect schedule"
+                device.diagnostics.get("last_error") or "Unable to store the native effect schedule"
             )
 
     hass.services.async_register(
