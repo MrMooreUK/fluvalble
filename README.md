@@ -138,20 +138,23 @@ proxy connection slot.
 
 ## Lovelace dashboard cards
 
-Optional dashboard cards are available for Professional schedule editing,
+Optional dashboard cards are available for Auto and Professional schedule editing,
 fixture-native timed-effect windows, spectrum bar preview, and wavelength
 preview. See
 [`docs/lovelace-cards.md`](docs/lovelace-cards.md) for setup instructions,
 example YAML, usage notes, and preview safety guidance.
 
-The schedule card offers **Manual** and **Fixture native** modes. Fixture native
-uploads an APK-supported Professional curve once: 4–10 points for classic/OLD
-controllers and 4–12 points for AquaSky 3.0/FACEBD and Plant Pro/MESH. Manual disables the fixture's
-onboard schedule. Saved schedules from the retired Home Assistant Auto executor
-are migrated to Fixture native when they fit the controller limit. **Load from
-fixture** explicitly refreshes the controller and imports a reported Professional
-curve without silently replacing the Home Assistant copy. The card labels its
-current data as local, uploaded, or confirmed fixture readback.
+The schedule card has separate **Auto** and **Professional** editors. Auto writes
+the fixture's sunrise, sunset, optional sleep time, ramp durations, and day/night
+channel levels, then activates Automatic mode. Professional offers **Manual** and
+**Fixture native** modes; Fixture native uploads an APK-supported curve once:
+4–10 points for classic/OLD controllers and 4–12 points for AquaSky 3.0/FACEBD
+and Plant Pro/MESH. Manual disables the fixture's onboard schedule. Saved
+schedules from the retired Home Assistant Auto executor are migrated to Fixture
+native when they fit the controller limit. **Load from fixture** explicitly
+refreshes and imports the reported schedule for the active editor without
+silently replacing the other editor. Each editor labels its current data as
+local, uploaded, or confirmed fixture readback.
 
 The separate timed-effects card writes the same onboard effect windows exposed
 by `fluvalble.set_native_effect_schedule`. It limits the effect picker to the
