@@ -107,7 +107,7 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 1. Go to **Settings** → **Devices & services** → **Add integration**.
 2. Search for **Fluval Aquarium LED** (or **Fluval BLE**).
 3. **Select your light** from the dropdown. The list shows only devices that look like Fluval lights (by Bluetooth service or name), so your aquarium light is easy to find. Ensure the light is **on** and in range before adding.
-   - If your light appears: choose it and submit. The integration creates one device with a primary light entity, mode select, clock-sync button, connection status, and diagnostic sensors.
+   - If your light appears: choose it and submit. The integration creates one device with a primary light entity, mode select, identify and clock-sync buttons, connection status, and diagnostic sensors.
    - If it's not in the list: choose **"My device isn't in the list — enter MAC address manually"**, then enter the MAC (e.g. `AA:BB:CC:DD:EE:FF`). You can find the MAC in your phone's Bluetooth settings or the Fluval app.
 4. After setup, the light and supporting entities appear on the device. If you only see the integration card (for example, "Update") and no light entity, see [Troubleshooting](#troubleshooting) below.
 
@@ -193,6 +193,7 @@ After setup you'll see one device with entities like:
 |--------|-------------|---------|
 | **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGBW; Plant, Plant Pro, and Marine spectra use RGB translation. |
 | **Select** | Mode | Manual / Automatic / Professional. |
+| **Button** | Identify | Runs the fixture's native FluvalConnect Find command so the physical light identifies itself. |
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
 | **Sensors** | Signal strength / Last seen | Advertisement RSSI, its observation time, and the latest successful BLE activity. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |

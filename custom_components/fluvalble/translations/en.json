@@ -54,6 +54,9 @@
       }
     },
     "button": {
+      "identify": {
+        "name": "Identify"
+      },
       "sync_clock": {
         "name": "Sync clock"
       }

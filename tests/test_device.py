@@ -602,6 +602,35 @@ async def _async_test_plant_pro_commands_use_spp_packets():
     device._async_send_packet.assert_awaited_once_with(protocol.spp_all_zone_packet([75, 0, 0, 0, 0]))
 
 
+async def _assert_identify_packet(device, expected_packet):
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_identify()
+    device._async_send_packet.assert_awaited_once_with(expected_packet)
+
+
+def test_identify_uses_transport_specific_apk_command():
+    async def run_test():
+        classic = _make_device()
+        classic.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+        await _assert_identify_packet(classic, protocol.old_find_packet())
+
+        facebd = _make_device(name="AquaSky3.0_Test")
+        facebd.client = SimpleNamespace(
+            command_write_uuid="facebd02-7261-6262-6974-696f74626c65",
+            plant_pro_spp=False,
+            wifi_facebd=True,
+        )
+        await _assert_identify_packet(facebd, protocol.wifi_find_packet())
+
+        plant_pro = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+        plant_pro.client = SimpleNamespace(plant_pro_spp=True, wifi_facebd=False)
+        await _assert_identify_packet(plant_pro, protocol.spp_find_packet())
+
+    asyncio.run(run_test())
+
+
 def test_plant_pro_native_schedule_actions_write_fixture_packets():
     asyncio.run(_async_test_plant_pro_native_schedule_actions_write_fixture_packets())
 
