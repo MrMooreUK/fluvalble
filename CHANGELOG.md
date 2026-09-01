@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added an optional timed-effects dashboard card that edits, validates, uploads,
+  clears, and explicitly loads fixture-native effect windows while preserving a
+  complete Home Assistant copy when classic readback is partial.
 - Added APK-native timed weather-effect schedules for supported classic and
   AquaSky 3.0/FACEBD controllers, extending the existing Plant Pro action.
 - Added the 11 APK-native weather effects to positively identified AquaSky

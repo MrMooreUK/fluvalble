@@ -6,6 +6,9 @@ views:
   - title: Aquarium
     path: aquarium
     cards:
+      - type: custom:fluvalble-effect-schedule-card
+        title: Fluval Timed Effects
+
       - type: custom:fluvalble-schedule-card
         title: AquaSky 24 Hour Schedule
         physical_preview: true

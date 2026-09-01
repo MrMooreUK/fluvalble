@@ -1,7 +1,8 @@
 # Lovelace dashboard cards
 
-This integration includes optional Lovelace cards for previewing and editing an
-AquaSky 3.0 schedule from a Home Assistant dashboard.
+This integration includes optional Lovelace cards for previewing and editing
+Fluval channel schedules and fixture-native timed effects from a Home Assistant
+dashboard.
 
 > Preview notice: these cards and schedule tools have only been tested with
 > AquaSky 3.0. They are not suitable or validated for aquarium use until
@@ -30,7 +31,7 @@ module as a dashboard resource:
 
 ## Add the cards
 
-The same JavaScript resource registers three custom cards:
+The same JavaScript resource registers four custom cards:
 
 - `custom:fluvalble-schedule-card` shows the 24-hour channel schedule, schedule
   mode and data source, physical preview controls, and the selected time slider.
@@ -38,12 +39,17 @@ The same JavaScript resource registers three custom cards:
   schedule time.
 - `custom:fluvalble-wavelength-card` shows a wavelength-style preview based on
   the selected schedule time and channel levels.
+- `custom:fluvalble-effect-schedule-card` edits up to seven timed native-effect
+  windows stored and executed by a supported Fluval controller.
 
 Add the cards to a dashboard using YAML mode or a manual card:
 
 ```yaml
 type: vertical-stack
 cards:
+  - type: custom:fluvalble-effect-schedule-card
+    title: Fluval Timed Effects
+
   - type: custom:fluvalble-schedule-card
     title: AquaSky 24 Hour Schedule
     physical_preview: false
@@ -153,6 +159,10 @@ cards:
 The complete dashboard example is available in
 [`docs/lovelace-fluvalble-card.yaml`](lovelace-fluvalble-card.yaml).
 
+When more than one Fluval light is configured, set `entry_id` or `mac` on each
+card so its editor and actions target the intended fixture. With one configured
+light, the integration resolves that single entry automatically.
+
 ## Using the cards
 
 The schedule card is the source of truth for the selected time. Moving its time
@@ -178,4 +188,23 @@ writes are throttled to 30-minute schedule intervals to avoid unnecessary BLE
 traffic. Use **Stop preview** to stop playback. Fixture-native mode is
 reactivated after a physical preview; Manual mode restores the prior static
 levels.
+
+### Timed effects
+
+The timed-effects card loads the effect catalog reported by the positively
+identified controller: 11 weather effects for supported classic and AquaSky
+3.0/FACEBD fixtures, or the four Plant Pro effects. Each weekday can belong to
+only one window, matching FluvalConnect, and each window requires an effect,
+start and end time, and at least one weekday.
+
+Use **Apply to fixture** to upload the complete set of windows once. The fixture
+then runs them from its own clock. **Clear fixture schedule** sends the
+controller's native empty schedule. Both operations save the submitted windows
+as the Home Assistant copy. **Load from fixture** explicitly replaces the
+editor with controller readback but does not upload it again.
+
+FACEBD and Plant Pro controllers can report the complete timed-effect schedule.
+Classic state responses expose only one embedded timed-effect slot, so the card
+labels that readback as partial and retains the complete Home Assistant copy
+until the user explicitly chooses **Load from fixture**.
 
