@@ -30,6 +30,7 @@ WIFI_PRO_LEVELS_KEY = 122
 WIFI_SCHEDULED_EFFECT_KEY = 123
 WIFI_MIN_PRO_POINTS = 4
 WIFI_MAX_PRO_POINTS = 12
+WIFI_MAX_EFFECT_WINDOWS = 7
 
 SPP_COMMAND_HEADER = 0xD1
 SPP_STATUS_HEADER = 0xD2
@@ -63,6 +64,7 @@ OLD_PRO_SCHEDULE = 0x10
 OLD_SCHEDULED_EFFECT = 0x11
 OLD_MIN_PRO_POINTS = 4
 OLD_MAX_PRO_POINTS = 10
+OLD_MAX_EFFECT_WINDOWS = 7
 
 # Mesh / Plant Pro clock opcode recovered from FluvalConnect.
 MESH_OPCODE_CLOCK = 0xCD
@@ -174,6 +176,20 @@ def wifi_auto_preview_packet(minute: int | None) -> bytes:
     return cbor_map({WIFI_AUTO_PREVIEW_KEY: 1440 if minute is None else int(minute) % 1440})
 
 
+def wifi_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
+    """Build the APK-native FACEBD timed-effect byte string in CBOR key 123."""
+    return cbor_map(
+        {
+            WIFI_SCHEDULED_EFFECT_KEY: _effect_schedule_blob(
+                windows,
+                maximum=WIFI_MAX_EFFECT_WINDOWS,
+                maximum_effect_id=11,
+                label="FACEBD",
+            )
+        }
+    )
+
+
 def decode_wifi_auto_schedule(data: Mapping[int, Any]) -> dict[str, Any] | None:
     """Decode FACEBD native Auto fields into the integration schedule shape."""
     sunrise = _decode_minute_pair(data.get(WIFI_AUTO_SUNRISE_KEY), sunrise=True)
@@ -212,6 +228,18 @@ def decode_wifi_pro_schedule(data: Mapping[int, Any], *, channel_count: int = 4)
         point.update({f"channel_{channel}": value for channel, value in enumerate(values, start=1)})
         points.append(point)
     return points
+
+
+def decode_wifi_effect_schedule(data: Mapping[int, Any]) -> list[dict[str, Any]] | None:
+    """Decode FACEBD key 123 into normalized timed-effect windows."""
+    blob = data.get(WIFI_SCHEDULED_EFFECT_KEY)
+    if not isinstance(blob, bytes):
+        return None
+    return _decode_effect_schedule_blob(
+        blob,
+        maximum=WIFI_MAX_EFFECT_WINDOWS,
+        maximum_effect_id=11,
+    )
 
 
 def spp_switch_packet(is_on: bool) -> bytes:
@@ -282,25 +310,14 @@ def spp_pro_schedule_packet(points: Iterable[dict[str, Any]]) -> bytes:
 
 def spp_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
     """Build seven fixed Plant Pro timed-effect slots in CBOR key 15."""
-    normalized = list(windows)
-    if len(normalized) > SPP_MAX_EFFECT_WINDOWS:
-        raise ValueError(f"Plant Pro supports at most {SPP_MAX_EFFECT_WINDOWS} effect windows")
-    blob = bytearray(SPP_MAX_EFFECT_WINDOWS * 6)
-    for index, window in enumerate(normalized):
-        start_h, start_m = _validate_time((window["start_hour"], window["start_minute"]), "start")
-        end_h, end_m = _validate_time((window["end_hour"], window["end_minute"]), "end")
-        effect_id = int(window["effect_id"])
-        if not 1 <= effect_id <= 4:
-            raise ValueError("Plant Pro effect window ID must be between 1 and 4")
-        weekdays = list(window.get("weekdays", []))
-        if len(weekdays) != 7 or any(not isinstance(value, bool) for value in weekdays):
-            raise ValueError("Plant Pro effect weekdays must contain seven booleans")
-        flags = sum((1 << day) for day, enabled in enumerate(weekdays) if enabled)
-        if bool(window.get("enabled", True)):
-            flags |= 0x80
-        offset = index * 6
-        blob[offset : offset + 6] = bytes((flags, start_h, start_m, end_h, end_m, effect_id))
-    return spp_command({SPP_EFFECT_SCHEDULE_KEY: bytes(blob)})
+    blob = _effect_schedule_blob(
+        windows,
+        maximum=SPP_MAX_EFFECT_WINDOWS,
+        maximum_effect_id=4,
+        label="Plant Pro",
+        fixed_slots=True,
+    )
+    return spp_command({SPP_EFFECT_SCHEDULE_KEY: blob})
 
 
 def spp_command(values: dict[int, bool | bytes | int]) -> bytes:
@@ -360,6 +377,17 @@ def old_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: 
     return old_packet(bytes((0x68, OLD_PRO_SCHEDULE)) + payload)
 
 
+def old_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
+    """Build classic ``6811`` timed weather-effect windows from the APK."""
+    blob = _effect_schedule_blob(
+        windows,
+        maximum=OLD_MAX_EFFECT_WINDOWS,
+        maximum_effect_id=11,
+        label="Classic Fluval",
+    )
+    return old_packet(bytes((0x68, OLD_SCHEDULED_EFFECT)) + blob)
+
+
 def _validate_pro_point_count(count: int, *, minimum: int, maximum: int, label: str) -> None:
     """Enforce the Professional-schedule limits exposed by FluvalConnect."""
     if not minimum <= count <= maximum:
@@ -400,7 +428,8 @@ def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, An
         return None
     offset += channel_count
     sleep = None
-    if len(body) >= offset + 3 and body[offset]:
+    remainder = len(body) - offset
+    if remainder in (3, 9) and body[offset]:
         sleep_minute = _checked_minute(body[offset + 1], body[offset + 2])
         if sleep_minute is None:
             return None
@@ -433,6 +462,28 @@ def decode_old_pro_schedule(body: bytes, *, channel_count: int) -> list[dict[str
         point.update({f"channel_{channel}": level for channel, level in enumerate(levels, start=1)})
         points.append(point)
     return points
+
+
+def decode_old_effect_schedule(body: bytes, *, channel_count: int) -> list[dict[str, Any]] | None:
+    """Decode the one classic effect slot embedded in ``6805`` mode state."""
+    if channel_count not in (4, 5) or not body:
+        return None
+    if body[0] == 1:
+        base_length = channel_count * 2 + 9
+        remainder = len(body) - base_length
+        if remainder not in (6, 9):
+            return None
+    elif body[0] == 2 and len(body) >= 2:
+        base_length = 2 + body[1] * (channel_count + 2)
+        if len(body) - base_length != 6:
+            return None
+    else:
+        return None
+    return _decode_effect_schedule_blob(
+        body[-6:],
+        maximum=1,
+        maximum_effect_id=11,
+    )
 
 
 def old_mode_packet(mode: int) -> bytes:
@@ -537,14 +588,63 @@ def decode_spp_pro_schedule(data: dict[int, Any]) -> list[dict[str, Any]] | None
 def decode_spp_effect_schedule(data: dict[int, Any]) -> list[dict[str, Any]] | None:
     """Decode the Plant Pro key-15 seven-slot timed-effect schedule."""
     blob = data.get(SPP_EFFECT_SCHEDULE_KEY)
-    if not isinstance(blob, bytes) or len(blob) < SPP_MAX_EFFECT_WINDOWS * 6:
+    if not isinstance(blob, bytes) or len(blob) != SPP_MAX_EFFECT_WINDOWS * 6:
+        return None
+    return _decode_effect_schedule_blob(
+        blob,
+        maximum=SPP_MAX_EFFECT_WINDOWS,
+        maximum_effect_id=4,
+    )
+
+
+def _effect_schedule_blob(
+    windows: Iterable[dict[str, Any]],
+    *,
+    maximum: int,
+    maximum_effect_id: int,
+    label: str,
+    fixed_slots: bool = False,
+) -> bytes:
+    """Encode the APK's shared six-byte timed-effect window records."""
+    normalized = list(windows)
+    if len(normalized) > maximum:
+        raise ValueError(f"{label} supports at most {maximum} effect windows")
+    blob = bytearray(maximum * 6 if fixed_slots else len(normalized) * 6)
+    for index, window in enumerate(normalized):
+        start_h, start_m = _validate_time((window["start_hour"], window["start_minute"]), "start")
+        end_h, end_m = _validate_time((window["end_hour"], window["end_minute"]), "end")
+        effect_id = int(window["effect_id"])
+        if not 1 <= effect_id <= maximum_effect_id:
+            raise ValueError(f"{label} effect window ID must be between 1 and {maximum_effect_id}")
+        weekdays = list(window.get("weekdays", []))
+        if len(weekdays) != 7 or any(not isinstance(value, bool) for value in weekdays):
+            raise ValueError(f"{label} effect weekdays must contain seven booleans")
+        flags = sum((1 << day) for day, enabled in enumerate(weekdays) if enabled)
+        if bool(window.get("enabled", True)):
+            flags |= 0x80
+        offset = index * 6
+        blob[offset : offset + 6] = bytes((flags, start_h, start_m, end_h, end_m, effect_id))
+    return bytes(blob)
+
+
+def _decode_effect_schedule_blob(
+    blob: bytes,
+    *,
+    maximum: int,
+    maximum_effect_id: int,
+) -> list[dict[str, Any]] | None:
+    """Decode the APK's shared six-byte timed-effect window records."""
+    if len(blob) % 6 or len(blob) > maximum * 6:
         return None
     windows = []
-    for index in range(SPP_MAX_EFFECT_WINDOWS):
-        offset = index * 6
+    for offset in range(0, len(blob), 6):
         flags, start_h, start_m, end_h, end_m, effect_id = blob[offset : offset + 6]
         if not any((flags, start_h, start_m, end_h, end_m, effect_id)):
             continue
+        if start_h > 23 or end_h > 23 or start_m > 59 or end_m > 59:
+            return None
+        if not 1 <= effect_id <= maximum_effect_id:
+            return None
         windows.append(
             {
                 "enabled": bool(flags & 0x80),

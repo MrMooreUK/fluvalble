@@ -162,12 +162,18 @@ schedules in the fixture itself. The integration provides actions under
   ramp duration, and day/night channel levels.
 - `fluvalble.set_native_pro_schedule` stores 4–10 classic/OLD or 4–12
   FACEBD/MESH timed channel points, matching FluvalConnect.
-- `fluvalble.set_native_effect_schedule` stores up to seven Plant Pro effect
-  windows; passing an empty `windows` list clears them.
+- `fluvalble.set_native_effect_schedule` stores up to seven timed effect
+  windows on supported classic, AquaSky 3.0/FACEBD, and Plant Pro controllers;
+  passing an empty `windows` list clears them. Classic and FACEBD fixtures use
+  the 11 weather effects, while Plant Pro uses its four-effect subset. Matching
+  FluvalConnect, each weekday can belong to only one effect window.
 
 The action UI contains complete examples and field descriptions. These actions
 use the protocol identified by the live BLE connection. Fixture readback is
 included in the downloadable diagnostics report where the controller reports it.
+Classic status readback exposes only its single embedded effect slot even when
+the fixture was sent a longer schedule; the submitted schedule remains recorded
+in diagnostics without being misrepresented as fixture-confirmed readback.
 
 ---
 

@@ -262,8 +262,8 @@ set_native_pro_schedule:
         object:
 
 set_native_effect_schedule:
-  name: Set Plant Pro effect schedule
-  description: Store up to seven timed native-effect windows directly in a Plant Pro 4.0 fixture. An empty list clears all windows.
+  name: Set native effect schedule
+  description: Store up to seven timed native-effect windows directly in a supported classic, AquaSky 3.0/FACEBD, or Plant Pro fixture. Classic and FACEBD support the 11 weather effects; Plant Pro supports its four-effect subset. An empty list clears all windows.
   fields:
     entry_id:
       name: Config entry ID
@@ -277,7 +277,7 @@ set_native_effect_schedule:
         text:
     windows:
       name: Effect windows
-      description: Windows with start/end, effect, optional weekdays, and optional enabled state.
+      description: Windows with start/end, effect, optional weekdays, and optional enabled state. Each weekday can be assigned to only one window, matching FluvalConnect.
       required: true
       example:
         - start: "12:00"
