@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added APK-native preview controls for fixture-stored Auto and Professional
+  schedules across classic (`680B`/`680C`), AquaSky 3.0/FACEBD (CBOR key 119),
+  and Plant Pro/MESH (D1 CBOR key 51) controllers.
 - Added a fixture-native Auto schedule editor to the dashboard card, including
   sunrise, sunset, optional sleep, ramp durations, and fixture-specific day and
   night channel levels. Loading Auto data remains an explicit action and does

@@ -191,11 +191,18 @@ controller's Auto readback without modifying the Professional editor. Channel
 labels follow the configured fixture profile, including four-channel AquaSky and
 five-channel Plant/Plant Pro layouts.
 
-Use **Play 24h preview** to loop through the schedule visually. Physical preview
-writes are throttled to 30-minute schedule intervals to avoid unnecessary BLE
-traffic. Use **Stop preview** to stop playback. Fixture-native mode is
-reactivated after a physical preview; Manual mode restores the prior static
-levels.
+Use **Preview fixture time** or **Play fixture schedule** to invoke the APK's
+native preview path against the schedule already loaded from the controller.
+Preview never uploads the editor copy: load or save and then explicitly load the
+fixture schedule first. Classic fixtures receive `680B` preview levels and
+`680C` to stop; FACEBD and Plant Pro/MESH fixtures evaluate their stored
+schedule at the requested minute. **Stop preview** restores the prior fixture
+mode.
+
+Use **Play editor preview** for the existing Professional graph simulation.
+When **Physical preview** is enabled, its ordinary channel writes remain
+throttled to 30-minute schedule intervals. This editor-owned path is separate
+from fixture-native preview and can display unsaved Professional changes.
 
 ### Timed effects
 

@@ -501,6 +501,10 @@ def test_schedule_card_exposes_fixture_native_auto_editor():
     assert "Load Auto from fixture" in source
     assert "sunrise_ramp" in source
     assert "day_levels" in source
+    assert 'callService("preview_native_schedule"' in source
+    assert "Preview fixture time" in source
+    assert "Play fixture schedule" in source
+    assert "Unsaved editor values are never uploaded by preview" in source
 
 
 def test_fixture_schedule_readback_normalizes_protocol_shapes():
