@@ -126,7 +126,17 @@ def test_classic_effects_require_positive_transport_evidence():
 
     assert unknown.effect_list() == []
     assert classic.effect_list() == ["None", *WEATHER_EFFECTS]
-    assert facebd.effect_list() == []
+    assert facebd.effect_list() == ["None", *WEATHER_EFFECTS]
+
+
+def test_non_aquasky_facebd_identity_does_not_expose_weather_effects():
+    device = _make_device(
+        name="Unknown_FACEBD",
+        model="Unknown Bluetooth LED",
+        service_uuids=["facebd00-0000-1000-8000-00805f9b34fb"],
+    )
+
+    assert device.effect_list() == []
 
 
 def test_plant_pro_identity_exposes_only_plant_pro_effects():
@@ -196,18 +206,57 @@ async def _async_test_plant_pro_native_effect_uses_key_14_packet():
     assert device.values["effect"] == "Sun and lightning"
 
 
-def test_native_weather_effect_rejects_nonclassic_transport():
-    asyncio.run(_async_test_native_weather_effect_rejects_nonclassic_transport())
+def test_facebd_native_effect_uses_apk_key_109_packet():
+    asyncio.run(_async_test_facebd_native_effect_uses_apk_key_109_packet())
 
 
-async def _async_test_native_weather_effect_rejects_nonclassic_transport():
-    device = _make_device()
-    device.client = SimpleNamespace(command_write_uuid="facebd80-0000-1000-8000-00805f9b34fb")
+async def _async_test_facebd_native_effect_uses_apk_key_109_packet():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=True,
+    )
+    device.values.update(
+        {
+            "channel_1": 10,
+            "channel_2": 20,
+            "channel_3": 30,
+            "channel_4": 40,
+            "mode": "automatic",
+            "led_on_off": False,
+        }
+    )
     device._async_prepare_command = AsyncMock(return_value=True)
     device._async_send_packet = AsyncMock(return_value=True)
 
-    assert not await device.async_set_effect("Lightning")
-    device._async_send_packet.assert_not_awaited()
+    assert await device.async_set_effect("Lightning")
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.wifi_mode_packet(0),
+        protocol.wifi_switch_packet(True),
+        protocol.wifi_effect_packet(2),
+    ]
+    assert device.values["effect"] == "Lightning"
+    assert device.values["led_on_off"] is True
+    assert device.values["mode"] == "manual"
+
+
+def test_facebd_status_decodes_effect_and_static_mode():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    device.facebd = True
+
+    assert device._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 4})
+    assert device.values["effect"] == "Colour cycle"
+
+    assert device._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 0})
+    assert device.values["effect"] is None
+
+
+def test_non_aquasky_facebd_status_does_not_claim_effect():
+    device = _make_device(name="Unknown_FACEBD", model="Unknown Bluetooth LED")
+    device.facebd = True
+
+    assert not device._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 4})
     assert device.values["effect"] is None
 
 
@@ -251,6 +300,30 @@ async def _async_test_effect_active_off_sends_only_switch_packet():
     assert await device.async_set_switch("led_on_off", False)
 
     device._async_send_packet.assert_awaited_once_with(protocol.old_switch_packet(False))
+    assert device.values["led_on_off"] is False
+    assert device.values["effect"] is None
+
+
+def test_facebd_effect_active_off_sends_only_switch_packet():
+    asyncio.run(_async_test_facebd_effect_active_off_sends_only_switch_packet())
+
+
+async def _async_test_facebd_effect_active_off_sends_only_switch_packet():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=True,
+    )
+    device.values["led_on_off"] = True
+    device.values["effect"] = "Lightning"
+    device._effect_restore_channels = device._channel_snapshot()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_switch("led_on_off", False)
+
+    device._async_send_packet.assert_awaited_once_with(protocol.wifi_switch_packet(False))
     assert device.values["led_on_off"] is False
     assert device.values["effect"] is None
 

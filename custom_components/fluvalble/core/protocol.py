@@ -78,6 +78,18 @@ def wifi_mode_packet(mode: int) -> bytes:
     return cbor_map({WIFI_MODE_KEY: mode})
 
 
+def wifi_effect_packet(effect_id: int) -> bytes:
+    """Build the APK-native FACEBD weather-effect packet.
+
+    FluvalConnect's ``createLightWeatherValue`` writes the selected weather ID
+    to CBOR key 109 for its WiFi/FACEBD transport. Static channel writes use
+    the same key with value zero to leave the effect.
+    """
+    if not 0 <= effect_id <= 11:
+        raise ValueError("FACEBD Fluval effect ID must be between 0 and 11")
+    return cbor_map({WIFI_MANUAL_KEY: effect_id})
+
+
 def wifi_all_zone_packet(values: Iterable[int]) -> bytes:
     """Build the FACEBD WiFi-over-BLE packet for the five color channels."""
     packet = {WIFI_MANUAL_KEY: 0}
