@@ -47,7 +47,10 @@ _LOGGER = logging.getLogger(__name__)
 REACHABLE_SECONDS = 300
 
 NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
-SELECTS = ["mode", "schedule_mode"]
+# FluvalConnect exposes Manual, Auto, and Professional as one operating-mode
+# control for every supported light family. Schedule editors configure those
+# modes; they are not a second fixture mode selector.
+SELECTS = ["mode"]
 SENSORS = ["rssi", "last_seen"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
 CHANNEL_NAMES_AQUASKY = {
@@ -84,7 +87,6 @@ CHANNEL_NAMES_PLANT_PRO = {
 CHANNEL_NAMES = CHANNEL_NAMES_AQUASKY
 MODES = ["manual", "automatic", "professional"]
 MODE_TO_CODE = {mode: index for index, mode in enumerate(MODES)}
-SCHEDULE_MODES = ["manual", "auto"]
 DIAGNOSTIC_UPDATE_INTERVAL = 5
 BLE_LOOKUP_TIMEOUT = 10
 BLE_LOOKUP_RETRIES = 3
@@ -1090,8 +1092,6 @@ class Device:
             return Attribute(min=0, max=100, step=1, value=self.values[attr])
         if attr == "mode":
             return Attribute(options=MODES, default=self.values[attr])
-        if attr == "schedule_mode":
-            return Attribute(options=SCHEDULE_MODES, default=self.schedule_mode)
         if attr == "led_on_off":
             return Attribute(is_on=self.values[attr])
         if attr == "daylight_saving_time":

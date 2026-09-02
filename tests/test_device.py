@@ -22,6 +22,7 @@ from custom_components.fluvalble.core.device import (
     REACHABLE_SECONDS,
 )
 from custom_components.fluvalble.core.effects import PLANT_PRO_EFFECTS, WEATHER_EFFECTS
+from custom_components.fluvalble.core.products import PRODUCTS
 
 
 def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config):
@@ -47,6 +48,11 @@ def _old_manual_status(channels, *, flags=1, effect_id=0, presets=None):
         for preset in presets:
             body.extend(preset)
     return protocol.old_packet(protocol.OLD_READ_PARAMS + body)
+
+
+def test_every_apk_product_exposes_one_fixture_mode_select():
+    for product_id in PRODUCTS:
+        assert _make_device(product_id=product_id).selects() == ["mode"]
 
 
 def test_apk_product_identity_drives_auto_model_and_channel_count():

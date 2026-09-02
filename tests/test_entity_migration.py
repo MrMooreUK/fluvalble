@@ -42,6 +42,16 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
         domain="switch",
         unique_id="AABBCCDDEEFF_daylight_saving_time",
     )
+    schedule_mode = SimpleNamespace(
+        entity_id="select.fluval_schedule_mode",
+        domain="select",
+        unique_id="AABBCCDDEEFF_schedule_mode",
+    )
+    mode = SimpleNamespace(
+        entity_id="select.fluval_mode",
+        domain="select",
+        unique_id="AABBCCDDEEFF_mode",
+    )
     light = SimpleNamespace(
         entity_id="light.fluval_light",
         domain="light",
@@ -71,6 +81,8 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
             legacy_number,
             legacy_switch,
             dst_switch,
+            schedule_mode,
+            mode,
             light,
             diagnostics,
             refresh,
@@ -102,6 +114,7 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
         channel.entity_id,
         legacy_number.entity_id,
         legacy_switch.entity_id,
+        schedule_mode.entity_id,
         diagnostics.entity_id,
         refresh.entity_id,
         channel_test.entity_id,

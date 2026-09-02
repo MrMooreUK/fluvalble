@@ -50,7 +50,9 @@ def _make_device():
 def test_create_entities_for_platforms():
     device = _make_device()
 
-    assert len(select.create_entities(device)) == 2
+    mode_entities = select.create_entities(device)
+    assert len(mode_entities) == 1
+    assert mode_entities[0].attr == "mode"
     assert len(sensor.create_entities(device)) == 2
     assert len(button.create_entities(device)) == 2
     assert len(binary_sensor.create_entities(device)) == 1
@@ -119,28 +121,6 @@ async def _async_test_select_internal_update_and_select_option():
     assert "manual" in entity._attr_options
     assert entity._attr_current_option == "automatic"
     device.async_select_option.assert_awaited_once_with("mode", "automatic")
-
-
-def test_schedule_mode_select_updates_home_assistant_schedule(monkeypatch):
-    asyncio.run(_async_test_schedule_mode_select_updates_home_assistant_schedule(monkeypatch))
-
-
-async def _async_test_schedule_mode_select_updates_home_assistant_schedule(
-    monkeypatch,
-):
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.entry_id = "entry_1"
-    entity = select.FluvalSelect(device, "schedule_mode")
-    hass = MagicMock()
-    set_schedule_mode = AsyncMock()
-    monkeypatch.setattr(select.FluvalSelect, "hass", hass, raising=False)
-    monkeypatch.setattr(integration, "async_set_schedule_mode", set_schedule_mode)
-
-    await entity.async_select_option("auto")
-
-    set_schedule_mode.assert_awaited_once_with(hass, "entry_1", "auto")
 
 
 def test_diagnostic_entities_update_from_device_attributes():

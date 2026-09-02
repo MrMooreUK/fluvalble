@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Removed the duplicate schedule-mode select from every light model. The APK
+  exposes Manual, Automatic, and Professional through one fixture mode control;
+  native schedule editors configure that same mode instead of creating another
+  device dropdown. Existing stale schedule-mode entities are removed during
+  config-entry setup.
+
 ### Added
 - Added classic fixture-resident P1-P4 recall and save actions using the APK's
   `6804` channel write and `6806` zero-based save-slot command.
