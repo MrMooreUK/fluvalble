@@ -249,7 +249,7 @@ async def _async_test_plant_pro_native_effect_uses_key_14_packet():
     assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
         protocol.spp_mode_packet(0),
         protocol.spp_switch_packet(True),
-        protocol.spp_effect_packet(3),
+        protocol.spp_effect_packet(2),
     ]
     assert device.values["effect"] == "Sun and lightning"
 
@@ -287,6 +287,33 @@ async def _async_test_facebd_native_effect_uses_apk_key_109_packet():
     assert device.values["effect"] == "Lightning"
     assert device.values["led_on_off"] is True
     assert device.values["mode"] == "manual"
+
+
+def test_four_effect_facebd_product_uses_apk_mesh_effect_id():
+    asyncio.run(_async_test_four_effect_facebd_product_uses_apk_mesh_effect_id())
+
+
+async def _async_test_four_effect_facebd_product_uses_apk_mesh_effect_id():
+    device = _make_device(product_id=546)
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=True,
+    )
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_effect("Lightning")
+    device._async_send_packet.assert_awaited_once_with(protocol.wifi_effect_packet(1))
+
+
+def test_four_effect_facebd_status_uses_apk_mesh_effect_name():
+    device = _make_device(product_id=546)
+    device.facebd = True
+
+    assert device._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 4})
+    assert device.values["effect"] == "Crescent moon"
 
 
 def test_facebd_status_decodes_effect_and_static_mode():
@@ -731,12 +758,12 @@ def test_plant_pro_status_decodes_effect_and_fixture_schedules():
     status = bytes((protocol.SPP_STATUS_HEADER,)) + protocol.cbor_map(status_map)
 
     assert device.decode_update_packet(status)
-    assert device.values["effect"] == "Colour cycle"
+    assert device.values["effect"] == "Crescent moon"
     assert device.values["native_auto_schedule"]["sunrise"] == "08:00"
     assert device.values["native_pro_schedule"][2]["time"] == "12:30"
     assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
     assert device.diagnostics["native_schedule_readback_at"]
-    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Lightning"
 
 
 def test_facebd_schedule_readback_is_recorded_for_dashboard():
@@ -917,7 +944,7 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
     ]
     assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
     assert device.diagnostics["native_pro_schedule_points"] == 4
-    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Lightning"
     assert "native_auto_schedule" not in device.values
     assert "native_pro_schedule" not in device.values
 
@@ -1017,6 +1044,55 @@ async def _async_test_plant_pro_native_effect_schedule_rejects_weather_only_effe
     assert not await device.async_set_native_effect_schedule(windows)
     device._async_send_packet.assert_not_awaited()
     assert device.diagnostics["status"] == "invalid_native_effect_schedule"
+
+
+def test_four_effect_facebd_schedule_resolves_name_with_product_catalogue():
+    asyncio.run(_async_test_four_effect_facebd_schedule_resolves_name_with_product_catalogue())
+
+
+async def _async_test_four_effect_facebd_schedule_resolves_name_with_product_catalogue():
+    device = _make_device(product_id=546)
+    device.client = _facebd_client()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    windows = [
+        {
+            "start_hour": 12,
+            "start_minute": 0,
+            "end_hour": 12,
+            "end_minute": 10,
+            "effect": "Lightning",
+            "weekdays": [True] * 7,
+            "enabled": True,
+        }
+    ]
+
+    assert await device.async_set_native_effect_schedule(windows)
+    wire_windows = [{**windows[0], "effect_id": 1}]
+    device._async_send_packet.assert_awaited_once_with(protocol.wifi_effect_schedule_packet(wire_windows))
+    assert device.diagnostics["native_effect_schedule"][0]["effect"] == "Lightning"
+
+
+def test_four_effect_facebd_schedule_readback_uses_mesh_names():
+    device = _make_device(product_id=546)
+    data = protocol.decode_cbor_map(
+        protocol.wifi_effect_schedule_packet(
+            [
+                {
+                    "start_hour": 12,
+                    "start_minute": 0,
+                    "end_hour": 12,
+                    "end_minute": 10,
+                    "effect_id": 4,
+                    "weekdays": [True] * 7,
+                    "enabled": True,
+                }
+            ]
+        )
+    )
+
+    assert device._decode_wifi_update(data)
+    assert device.values["native_effect_schedule"][0]["effect"] == "Crescent moon"
 
 
 def test_facebd_effect_schedule_readback_uses_weather_names():
