@@ -99,6 +99,19 @@ def _plant_pro_characteristics():
     ]
 
 
+def _classic_characteristics():
+    return [
+        _FakeCharacteristic(
+            client_module.LEGACY_COMMAND_WRITE_UUIDS[0],
+            ["write", "write-without-response"],
+        ),
+        _FakeCharacteristic(
+            "00001002-0000-1000-8000-00805f9b34fb",
+            ["notify"],
+        ),
+    ]
+
+
 def test_old_protocol_notify_callback_flushes_short_final_notifications():
     client = _make_client()
     update_callback = MagicMock()
@@ -131,6 +144,35 @@ def test_plant_pro_notify_callback_forwards_d2_status_frame():
 
     update_callback.assert_called_once_with(bytes.fromhex("d2 a1 02 f5"))
     assert client.last_confirmed_state == {protocol.SPP_SWITCH_KEY: True}
+
+
+def test_send_now_paces_commands_for_resolved_transport():
+    asyncio.run(_async_test_send_now_paces_commands_for_resolved_transport())
+
+
+async def _async_test_send_now_paces_commands_for_resolved_transport():
+    cases = (
+        (_classic_characteristics(), client_module.CLASSIC_COMMAND_GAP),
+        (_facebd_characteristics(), client_module.COMMAND_GAP),
+        (_plant_pro_characteristics(), client_module.COMMAND_GAP),
+    )
+
+    for characteristics, expected_gap in cases:
+        client = _make_client()
+        client.client = _FakeGattClient(characteristics)
+
+        await client._resolve_characteristics()
+        client.last_command_at = 100.0
+        client.ping = MagicMock()
+
+        with (
+            patch.object(client_module.time, "time", return_value=100.0),
+            patch.object(client_module.asyncio, "sleep", new=AsyncMock()) as sleep,
+        ):
+            assert await client.send_now(b"\x68\x03\x01\x6a", verify=False)
+
+        assert sleep.await_count == 1
+        assert sleep.await_args.args[0] == pytest.approx(expected_gap)
 
 
 def test_write_packet_prefers_write_without_response():

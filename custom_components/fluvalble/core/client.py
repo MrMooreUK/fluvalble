@@ -22,6 +22,7 @@ CONNECT_RETRIES = 3
 WRITE_RETRIES = 2
 WRITE_DELAY = 0.3
 COMMAND_GAP = 0.75
+CLASSIC_COMMAND_GAP = 0.2
 POST_WRITE_STATE_DELAY = 0.8
 STATE_NOTIFY_TIMEOUT = 0.75
 UNVERIFIED_WRITE_COPIES = 2
@@ -584,6 +585,12 @@ class Client:
         self.last_verification_mismatches = mismatches
         return not mismatches
 
+    def _command_gap(self) -> float:
+        """Return the inter-command delay for the resolved GATT transport."""
+        if self.profile == "legacy_encrypted":
+            return CLASSIC_COMMAND_GAP
+        return COMMAND_GAP
+
     async def send_now(
         self,
         data: bytes,
@@ -604,7 +611,7 @@ class Client:
                     with contextlib.suppress(BleakError):
                         await client.read_gatt_char(self.wake_read_uuid)
 
-                wait_time = self.last_command_at + COMMAND_GAP - time.time()
+                wait_time = self.last_command_at + self._command_gap() - time.time()
                 if wait_time > 0:
                     await asyncio.sleep(wait_time)
 
