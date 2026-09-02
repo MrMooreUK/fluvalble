@@ -178,6 +178,7 @@ def test_every_apk_product_id_decodes_from_binary_advertisement(product_id):
 
 def test_newer_product_names_match_apk_add_device_catalog():
     assert product_from_id(532).model == "Fluval Aquasky 3.0 LED"
+    assert product_from_id(386).model == "Fluval Plant PRO LED"
     assert product_from_id(545).model == "Fluval Plant 4.0 LED"
     assert product_from_id(546).model == "Fluval Reef 4.0 LED"
     assert product_from_id(547).model == "Fluval Reef Nano 4.0 LED"

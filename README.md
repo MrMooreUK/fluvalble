@@ -29,7 +29,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant, Plant Pro, and Marine spectra are translated to RGB. |
 | **Weather effects** | Product IDs for the APK's 11-effect fixtures expose the native FluvalConnect weather catalogue, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
 | **Four-effect fixtures** | Product IDs for the APK's newer four-effect fixtures expose Thunderstorm, Lightning, Sun and lightning, and Colour cycle through the standard light effect control. |
-| **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
+| **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
 | **Daylight-saving control** | FACEBD controllers expose their fixture-owned daylight-saving setting as a configuration switch, using the same state and command as FluvalConnect. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
@@ -50,7 +50,7 @@ The integration recognizes the light catalogue defined by the current FluvalConn
 - **Siena 2.0 and Roma & Shaker 2.0**
 - First-generation **Wing Nano, Roma, Vicenza, Venezia, A-Sky Aqua, and Plant Aqua** fixtures
 
-The exact product ID selects the APK-defined model, channel layout, and native-effect catalogue. BLE transport selection still comes from the fixture's live GATT services, covering the legacy encrypted, FACEBD, and FFF0/SPP protocols implemented by the integration.
+The exact product ID selects the APK-defined model, channel layout, and native-effect catalogue. Plant PRO (product 386) and Plant 4.0 (product 545) are distinct products even though both use the APK's five-channel Plant spectrum and may expose the same FFF0/SPP transport. BLE transport selection still comes from the fixture's live GATT services, covering the legacy encrypted, FACEBD, and FFF0/SPP protocols implemented by the integration.
 
 ---
 
@@ -115,7 +115,7 @@ No cloud account or app login is needed; the integration talks directly to the l
 For fixtures whose advertisement contains an APK-known product ID, the device
 page uses FluvalConnect's exact model name and Auto profile channel count. The
 manual lamp-profile option remains available as an explicit override.
-For AquaSky 3.0/FACEBD and Plant Pro/MESH controllers, the fixture's locally
+For AquaSky 3.0/FACEBD and FFF0/SPP controllers, the fixture's locally
 reported firmware version appears in Home Assistant's standard device information.
 
 Redacted diagnostics can be downloaded from the integration or device page in
@@ -134,7 +134,7 @@ window releases the Bluetooth connection when idle so the official Fluval app
 or a Fluval gateway can connect. The backward-compatible default is `120`
 seconds.
 
-Plant Pro / 4.0 permits only one BLE central at a time. Persistent mode therefore
+FFF0/SPP fixtures permit only one BLE central at a time. Persistent mode therefore
 prevents the official app or gateway from connecting while Home Assistant holds
 the connection, and it also continuously occupies one local-adapter or ESPHome
 proxy connection slot.
@@ -154,7 +154,7 @@ the fixture's sunrise, sunset, optional sleep time, ramp durations, and day/nigh
 channel levels, then activates Automatic mode. Professional offers **Manual** and
 **Fixture native** modes; Fixture native uploads an APK-supported curve once:
 4–10 points for classic/OLD controllers and 4–12 points for AquaSky 3.0/FACEBD
-and Plant Pro/MESH. Manual disables the fixture's onboard schedule. Saved
+and FFF0/SPP. Manual disables the fixture's onboard schedule. Saved
 schedules from the retired Home Assistant Auto executor are migrated to Fixture
 native when they fit the controller limit. **Load from fixture** explicitly
 refreshes and imports the reported schedule for the active editor without
@@ -164,7 +164,7 @@ local, uploaded, or confirmed fixture readback.
 **Preview fixture time** and **Play fixture schedule** use FluvalConnect's
 native preview commands against the schedule already stored by the controller.
 They never upload unsaved editor values. Classic controllers receive their
-dedicated preview-level frames; FACEBD and Plant Pro controllers evaluate the
+dedicated preview-level frames; FACEBD and FFF0/SPP controllers evaluate the
 stored schedule for the requested minute themselves. **Stop preview** sends the
 APK stop command and restores the fixture's prior mode.
 
@@ -177,7 +177,7 @@ response exposes only one timed-effect slot.
 
 ### Native fixture schedules
 
-Supported classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers can keep
+Supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers can keep
 schedules in the fixture itself. The integration provides actions under
 **Developer tools → Actions**:
 
@@ -186,9 +186,9 @@ schedules in the fixture itself. The integration provides actions under
 - `fluvalble.set_native_pro_schedule` stores 4–10 classic/OLD or 4–12
   FACEBD/MESH timed channel points, matching FluvalConnect.
 - `fluvalble.set_native_effect_schedule` stores up to seven timed effect
-  windows on supported classic, AquaSky 3.0/FACEBD, and Plant Pro controllers;
-  passing an empty `windows` list clears them. Classic and FACEBD fixtures use
-  the 11 weather effects, while Plant Pro uses its four-effect subset. Matching
+  windows on supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers;
+  passing an empty `windows` list clears them. The exact APK product ID selects
+  either the 11-effect catalogue or the four-effect subset. Matching
   FluvalConnect, each weekday can belong to only one effect window.
 - `fluvalble.preview_native_schedule` previews one minute from an Auto or
   Professional schedule already confirmed by fixture readback. Use
@@ -312,7 +312,7 @@ If you have a different Fluval BLE model and the light or other controls don't b
 
 ## How it works
 
-The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). Plant Pro / 4.0 controllers use the newer unencrypted `FFF0` SPP service with `D1` command and `D2` status CBOR frames. No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
+The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). Newer controllers may use the unencrypted `FFF0` SPP service with `D1` command and `D2` status CBOR frames. Product identity is kept separate from that live GATT transport choice. No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
 
 **BLE connection lifecycle:**
 - On load and reconnect, the integration asks HA for its best connectable BLE route. This includes local adapters and ESPHome Bluetooth proxies.
@@ -328,7 +328,7 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 
 - Original integration structure and BLE work by [@mrzottel](https://github.com/mrzottel).
 - Community reverse‑engineering of the Fluval BLE protocol (e.g. Planted Tank Forum, ESPHome/fluval projects).
-- Plant Pro / 4.0 SPP protocol research and hardware validation by [@cryystyy](https://github.com/cryystyy/fluval-plant-pro-4-homeassistant), used under the MIT License.
+- FFF0/SPP protocol research and Plant PRO hardware validation by [@cryystyy](https://github.com/cryystyy/fluval-plant-pro-4-homeassistant), used under the MIT License.
 - Licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) in this repo.
 
 ---
