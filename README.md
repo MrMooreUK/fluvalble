@@ -156,6 +156,13 @@ refreshes and imports the reported schedule for the active editor without
 silently replacing the other editor. Each editor labels its current data as
 local, uploaded, or confirmed fixture readback.
 
+**Preview fixture time** and **Play fixture schedule** use FluvalConnect's
+native preview commands against the schedule already stored by the controller.
+They never upload unsaved editor values. Classic controllers receive their
+dedicated preview-level frames; FACEBD and Plant Pro controllers evaluate the
+stored schedule for the requested minute themselves. **Stop preview** sends the
+APK stop command and restores the fixture's prior mode.
+
 The separate timed-effects card writes the same onboard effect windows exposed
 by `fluvalble.set_native_effect_schedule`. It limits the effect picker to the
 connected controller's supported catalog, prevents assigning a weekday to more
@@ -178,6 +185,9 @@ schedules in the fixture itself. The integration provides actions under
   passing an empty `windows` list clears them. Classic and FACEBD fixtures use
   the 11 weather effects, while Plant Pro uses its four-effect subset. Matching
   FluvalConnect, each weekday can belong to only one effect window.
+- `fluvalble.preview_native_schedule` previews one minute from an Auto or
+  Professional schedule already confirmed by fixture readback. Use
+  `fluvalble.stop_preview` to stop and restore the prior fixture mode.
 
 The action UI contains complete examples and field descriptions. These actions
 use the protocol identified by the live BLE connection. Fixture readback is

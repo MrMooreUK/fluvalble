@@ -73,7 +73,7 @@ set_channels:
 
 preview_schedule:
   name: Preview schedule
-  description: Physically preview a 24-hour Fluval channel schedule compressed into a short duration.
+  description: Preview an editor-owned channel curve with ordinary channel writes. This does not use fixture-native preview.
   fields:
     entry_id:
       name: Config entry ID
@@ -121,9 +121,42 @@ preview_schedule:
           max: 300
           unit_of_measurement: s
 
+preview_native_schedule:
+  name: Preview native schedule time
+  description: Preview one minute of an Auto or Professional schedule already stored on the fixture, using the APK-native preview command.
+  fields:
+    entry_id:
+      name: Config entry ID
+      description: Optional config entry ID when more than one Fluval light is configured.
+      selector:
+        text:
+    mac:
+      name: MAC address
+      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
+      selector:
+        text:
+    minute:
+      name: Minute of day
+      description: Fixture schedule minute to preview, from midnight (0) through 23:59 (1439).
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 1439
+          mode: slider
+    schedule_type:
+      name: Schedule type
+      description: Select the stored Auto or Professional schedule.
+      required: true
+      selector:
+        select:
+          options:
+            - auto
+            - professional
+
 stop_preview:
   name: Stop preview
-  description: Stop a running physical schedule preview.
+  description: Stop an editor-owned or fixture-native schedule preview and restore the prior fixture mode.
   fields:
     entry_id:
       name: Config entry ID

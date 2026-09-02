@@ -100,7 +100,9 @@ class FluvalbleScheduleCard extends HTMLElement {
             <button id="apply">Apply Schedule</button>
             <button id="load-fixture">Load from fixture</button>
             <button id="flatten">Flatten Schedule</button>
-            <button id="play">Play 24h preview</button>
+            <button id="preview-fixture">Preview fixture time</button>
+            <button id="play-fixture">Play fixture schedule</button>
+            <button id="play">Play editor preview</button>
             <button id="stop">Stop preview</button>
           </div>
         </div>
@@ -182,6 +184,12 @@ class FluvalbleScheduleCard extends HTMLElement {
     root.getElementById("play").addEventListener("click", () => {
       this.startPreviewPlayback();
     });
+    root.getElementById("preview-fixture").addEventListener("click", () => {
+      this.previewNativeSchedule("professional", this.previewMinute);
+    });
+    root.getElementById("play-fixture").addEventListener("click", () => {
+      this.startNativePreviewPlayback("professional");
+    });
     root.getElementById("stop").addEventListener("click", () => {
       this.stopPreviewPlayback();
     });
@@ -245,10 +253,23 @@ class FluvalbleScheduleCard extends HTMLElement {
             </section>
           </div>
 
+          <div class="fixture-preview">
+            <div><strong>Stored fixture preview</strong> · <span id="native-preview-time">${formatMinute(this.previewMinute)}</span></div>
+            <div class="time-row">
+              <span>00:00</span>
+              <input id="native-preview-minute" type="range" min="0" max="1439" step="5" value="${this.previewMinute}">
+              <span>24:00</span>
+            </div>
+            <div class="note">Uses only the Auto schedule already stored on the fixture. Unsaved editor values are never uploaded by preview.</div>
+          </div>
+
           <div class="note">The controller stores this schedule and runs it from its own clock. Saving switches the fixture to Automatic mode.</div>
           <div class="actions">
             <button id="save-auto">Save Auto to fixture</button>
             <button id="load-fixture">Load Auto from fixture</button>
+            <button id="preview-fixture">Preview fixture time</button>
+            <button id="play-fixture">Play fixture schedule</button>
+            <button id="stop">Stop preview</button>
           </div>
         </div>
       </ha-card>
@@ -266,6 +287,9 @@ class FluvalbleScheduleCard extends HTMLElement {
         .sleep-row { align-items: center; display: flex; gap: 12px; margin: 16px 0; }
         .check { align-items: center; display: flex; gap: 7px; white-space: nowrap; }
         .sleep-row input[type="time"] { max-width: 150px; }
+        .fixture-preview { border: 1px solid var(--divider-color); border-radius: 8px; margin-top: 16px; padding: 12px; }
+        .time-row { align-items: center; color: var(--secondary-text-color); display: grid; font-size: 12px; gap: 10px; grid-template-columns: auto 1fr auto; margin-top: 10px; }
+        .time-row input { padding: 0; }
         section { border: 1px solid var(--divider-color); border-radius: 8px; padding: 12px; }
         h3 { font-size: 14px; margin: 0 0 12px; }
         .level-row { align-items: center; display: grid; gap: 10px; grid-template-columns: 92px minmax(0, 1fr) 42px; margin-top: 9px; }
@@ -276,6 +300,7 @@ class FluvalbleScheduleCard extends HTMLElement {
         .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
         button { background: var(--primary-color); border: 0; border-radius: 6px; color: var(--text-primary-color); cursor: pointer; padding: 8px 12px; }
         button#load-fixture { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        button#stop { background: var(--error-color); }
         @media (max-width: 620px) { .time-grid, .levels-grid { grid-template-columns: 1fr; } }
       </style>
     `;
@@ -322,6 +347,20 @@ class FluvalbleScheduleCard extends HTMLElement {
     root.getElementById("load-fixture").addEventListener("click", () => {
       this.loadFixtureSchedule();
     });
+    root.getElementById("native-preview-minute").addEventListener("input", (event) => {
+      this.previewMinute = Number(event.target.value);
+      setSelectedMinute(this.config, this.previewMinute, this);
+      this.updateLocalTimeDisplay();
+    });
+    root.getElementById("preview-fixture").addEventListener("click", () => {
+      this.previewNativeSchedule("auto", this.previewMinute);
+    });
+    root.getElementById("play-fixture").addEventListener("click", () => {
+      this.startNativePreviewPlayback("auto");
+    });
+    root.getElementById("stop").addEventListener("click", () => {
+      this.stopPreviewPlayback();
+    });
   }
 
   async saveAutoSchedule() {
@@ -336,6 +375,7 @@ class FluvalbleScheduleCard extends HTMLElement {
         schedule: autoSchedulePayload(this.store.autoSchedule),
       });
       this.store.autoSource = "uploaded";
+      this.store.fixture = { ...(this.store.fixture || {}), auto: null };
       notifyScheduleStore(this.config, this);
       this.render();
       this.toast("Auto schedule uploaded to the fixture");
@@ -343,6 +383,72 @@ class FluvalbleScheduleCard extends HTMLElement {
       console.warn("Unable to save the Fluval Auto schedule", error);
       this.toast("Unable to save the Auto schedule to the fixture");
     }
+  }
+
+  hasFixtureSchedule(scheduleType) {
+    if (scheduleType === "auto") return Boolean(this.store.fixture?.auto);
+    return Array.isArray(this.store.fixture?.professional) && this.store.fixture.professional.length > 0;
+  }
+
+  async previewNativeSchedule(scheduleType, minute, quiet = false) {
+    if (!this.hasFixtureSchedule(scheduleType)) {
+      this.toast(`Load the fixture's ${scheduleType === "auto" ? "Auto" : "Professional"} schedule before previewing it`);
+      return false;
+    }
+    try {
+      await this.callService("preview_native_schedule", {
+        ...targetData(this.config),
+        minute: Math.max(0, Math.min(1439, Math.round(Number(minute) || 0))),
+        schedule_type: scheduleType,
+      });
+      this.store.nativePreviewActive = true;
+      if (!quiet) this.toast(`Previewing the stored fixture schedule at ${formatMinute(minute)}`);
+      return true;
+    } catch (error) {
+      console.warn("Unable to preview the Fluval fixture schedule", error);
+      this.stopNativePreviewTimerOnly();
+      this.toast("Unable to preview the schedule stored on the fixture");
+      return false;
+    }
+  }
+
+  startNativePreviewPlayback(scheduleType) {
+    if (!this.hasFixtureSchedule(scheduleType)) {
+      this.toast(`Load the fixture's ${scheduleType === "auto" ? "Auto" : "Professional"} schedule before previewing it`);
+      return;
+    }
+    if (this.store.playing) {
+      this.toast("Stop the editor preview before starting fixture preview");
+      return;
+    }
+    this.stopPreviewTimerOnly();
+    this.stopNativePreviewTimerOnly();
+    const durationMs = Math.max(1, Number(this.config.preview_duration || 60)) * 1000;
+    const startedAt = Date.now();
+    this.store.nativePreviewPlaying = true;
+
+    const tick = () => {
+      if (!this.store.nativePreviewPlaying) return;
+      const elapsed = Date.now() - startedAt;
+      if (elapsed >= durationMs) {
+        this.stopPreviewPlayback();
+        return;
+      }
+      const minute = Math.min(1439, Math.round((elapsed / durationMs) * 1439));
+      this.previewMinute = minute;
+      setSelectedMinute(this.config, minute, this);
+      this.updateLocalTimeDisplay();
+      if (!this.store.nativePreviewWriteInFlight) {
+        this.store.nativePreviewWriteInFlight = true;
+        this.previewNativeSchedule(scheduleType, minute, true).finally(() => {
+          this.store.nativePreviewWriteInFlight = false;
+        });
+      }
+    };
+
+    tick();
+    const intervalMs = Math.max(500, Number(this.config.step_seconds || 2) * 1000);
+    this.store.nativePreviewTimer = setInterval(tick, intervalMs);
   }
 
   applyChannels(channels) {
@@ -369,7 +475,18 @@ class FluvalbleScheduleCard extends HTMLElement {
     }));
   }
 
-  startPreviewPlayback() {
+  async startPreviewPlayback() {
+    if (this.store.nativePreviewActive || this.store.nativePreviewPlaying) {
+      this.stopNativePreviewTimerOnly();
+      try {
+        await this.callService("stop_preview", targetData(this.config));
+        this.store.nativePreviewActive = false;
+      } catch (error) {
+        console.warn("Unable to stop fixture preview before editor playback", error);
+        this.toast("Stop fixture preview before starting editor playback");
+        return;
+      }
+    }
     this.stopPreviewTimerOnly();
     this.store.previewRestoreMinute = this.store.selectedMinute;
     this.store.previewRestoreMode = this.store.mode || "manual";
@@ -414,8 +531,22 @@ class FluvalbleScheduleCard extends HTMLElement {
   }
 
   stopPreviewPlayback() {
+    const wasNativePreview = Boolean(this.store.nativePreviewActive || this.store.nativePreviewPlaying);
     this.stopPreviewTimerOnly();
+    this.stopNativePreviewTimerOnly();
     const stopped = this.callService("stop_preview", targetData(this.config));
+    this.store.nativePreviewActive = false;
+
+    if (wasNativePreview) {
+      stopped
+        .then(() => this.toast("Fixture schedule preview stopped"))
+        .catch((error) => {
+          console.warn("Unable to stop the Fluval fixture preview", error);
+          this.store.nativePreviewActive = true;
+          this.toast("Unable to stop fixture schedule preview");
+        });
+      return;
+    }
 
     if ((this.store.previewRestoreMode || this.store.mode) === "native") {
       stopped.finally(() => {
@@ -439,6 +570,16 @@ class FluvalbleScheduleCard extends HTMLElement {
     }
     if (this.store) {
       this.store.playing = false;
+    }
+  }
+
+  stopNativePreviewTimerOnly() {
+    if (this.store?.nativePreviewTimer) {
+      clearInterval(this.store.nativePreviewTimer);
+      this.store.nativePreviewTimer = null;
+    }
+    if (this.store) {
+      this.store.nativePreviewPlaying = false;
     }
   }
 
@@ -529,8 +670,12 @@ class FluvalbleScheduleCard extends HTMLElement {
     const subtitle = root.getElementById("subtitle");
     const cursor = root.getElementById("cursor");
     const timeInput = root.getElementById("time");
+    const nativePreviewTime = root.getElementById("native-preview-time");
+    const nativePreviewInput = root.getElementById("native-preview-minute");
     if (subtitle) subtitle.textContent = `${time} preview · ${scheduleSourceLabel(this.store)}`;
     if (timeInput) timeInput.value = this.previewMinute;
+    if (nativePreviewTime) nativePreviewTime.textContent = time;
+    if (nativePreviewInput) nativePreviewInput.value = this.previewMinute;
     if (cursor) {
       cursor.setAttribute("x1", x);
       cursor.setAttribute("x2", x);
@@ -549,6 +694,11 @@ class FluvalbleScheduleCard extends HTMLElement {
 
   disconnectedCallback() {
     this.stopPreviewTimerOnly();
+    this.stopNativePreviewTimerOnly();
+    if (this.store?.nativePreviewActive) {
+      this.callService("stop_preview", targetData(this.config));
+      this.store.nativePreviewActive = false;
+    }
     if (this._autoClock) {
       clearInterval(this._autoClock);
       this._autoClock = null;
@@ -1079,6 +1229,9 @@ function getScheduleStore(config) {
       scheduleSource: "local",
       autoSchedule: normalizeAutoSchedule(config.auto_schedule || DEFAULT_AUTO_SCHEDULE),
       autoSource: "local",
+      nativePreviewActive: false,
+      nativePreviewPlaying: false,
+      nativePreviewWriteInFlight: false,
       effectWindows: normalizeEffectWindows(config.effect_windows || []),
       effectOptions: [],
       effectProtocol: null,
@@ -1230,6 +1383,9 @@ function saveScheduleNow(config, source) {
     mode: store.mode || "manual",
   }).then(() => {
     store.scheduleSource = store.mode === "native" ? "uploaded" : "local";
+    if (store.mode === "native") {
+      store.fixture = { ...(store.fixture || {}), professional: null };
+    }
     notifyScheduleStore(config, source);
     if (source.shadowRoot) source.render();
   });

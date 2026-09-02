@@ -48,6 +48,7 @@ SPP_PRO_SCHEDULE_KEY = 13
 SPP_EFFECT_KEY = 14
 SPP_MANUAL_KEY = SPP_EFFECT_KEY
 SPP_EFFECT_SCHEDULE_KEY = 15
+SPP_SCHEDULE_PREVIEW_KEY = 51
 SPP_MIN_PRO_POINTS = 4
 SPP_MAX_PRO_POINTS = 12
 SPP_MAX_EFFECT_WINDOWS = 7
@@ -181,6 +182,11 @@ def wifi_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count:
 def wifi_auto_preview_packet(minute: int | None) -> bytes:
     """Build FACEBD native preview command; 1440 stops preview in the APK."""
     return cbor_map({WIFI_AUTO_PREVIEW_KEY: 1440 if minute is None else int(minute) % 1440})
+
+
+def spp_schedule_preview_packet(minute: int | None) -> bytes:
+    """Build the APK's Plant Pro/MESH native schedule-preview command."""
+    return spp_command({SPP_SCHEDULE_PREVIEW_KEY: 1440 if minute is None else int(minute) % 1440})
 
 
 def wifi_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:

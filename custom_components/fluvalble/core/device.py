@@ -166,6 +166,9 @@ class Device:
         self.preview_task: asyncio.Task | None = None
         self.preview_restore_values: dict[str, int] | None = None
         self.preview_restore_mode: str | None = None
+        self.native_preview_active = False
+        self.native_preview_schedule_type: str | None = None
+        self.native_preview_restore_mode: str | None = None
         self._clock_synced = False
         self._clock_sync_lock = asyncio.Lock()
         # Preserve the exact colour HA requested while the decoded physical
@@ -728,6 +731,9 @@ class Device:
             return False
         if activate:
             self.values["mode"] = "automatic"
+        # A successful write confirms submission, not readback. Discard any
+        # older fixture copy so native preview cannot render stale levels.
+        self.values.pop("native_auto_schedule", None)
         self.diagnostics.update(
             {
                 "status": "native_auto_schedule_submitted",
@@ -809,6 +815,7 @@ class Device:
             return False
         if activate:
             self.values["mode"] = "professional"
+        self.values.pop("native_pro_schedule", None)
         self.diagnostics.update(
             {
                 "status": "native_pro_schedule_submitted",
@@ -1084,8 +1091,78 @@ class Device:
         self.preview_task = asyncio.create_task(self._async_preview_schedule(points, duration, step_seconds))
         return True
 
-    async def async_stop_preview(self) -> None:
-        """Stop any running physical schedule preview."""
+    async def async_preview_native_schedule(self, minute: int, schedule_type: str) -> bool:
+        """Preview one minute of a schedule already stored by the fixture."""
+        if schedule_type not in {"auto", "professional"} or not 0 <= minute < DAY_MINUTES:
+            self._set_diagnostic_error(
+                "invalid_native_preview", "Native preview requires Auto or Professional and minute 0-1439"
+            )
+            return False
+
+        schedule_key = "native_auto_schedule" if schedule_type == "auto" else "native_pro_schedule"
+        if not self.values.get(schedule_key):
+            self._set_diagnostic_error(
+                "native_preview_unavailable",
+                f"Load the fixture's {schedule_type.title()} schedule before previewing it",
+            )
+            return False
+
+        if self.preview_task is not None or self.preview_restore_values is not None:
+            if not await self.async_stop_preview():
+                return False
+        if not await self._async_prepare_command():
+            return False
+
+        target_mode = "automatic" if schedule_type == "auto" else "professional"
+        starting = not self.native_preview_active
+        previous_type = self.native_preview_schedule_type
+        if starting:
+            current_mode = self.values.get("mode")
+            self.native_preview_restore_mode = current_mode if current_mode in MODES else "manual"
+
+        mode_changed = self.values.get("mode") != target_mode or previous_type not in (None, schedule_type)
+        if mode_changed and (self._uses_wifi_protocol() or self._uses_plant_pro_protocol()):
+            if not await self._async_send_packet(self._native_mode_packet(target_mode)):
+                if starting:
+                    self.native_preview_restore_mode = None
+                return False
+            self.values["mode"] = target_mode
+
+        if self._uses_wifi_protocol():
+            packet = protocol.wifi_auto_preview_packet(minute)
+            native_protocol = "facebd"
+        elif self._uses_plant_pro_protocol():
+            packet = protocol.spp_schedule_preview_packet(minute)
+            native_protocol = "plant_pro"
+        else:
+            levels = self._classic_native_preview_levels(schedule_type, minute)
+            if levels is None:
+                return False
+            packet = protocol.old_auto_preview_packet(levels)
+            native_protocol = "classic"
+
+        if not await self._async_send_packet(packet):
+            if starting:
+                await self._async_restore_native_preview_mode()
+            return False
+
+        self.native_preview_active = True
+        self.native_preview_schedule_type = schedule_type
+        self.diagnostics.update(
+            {
+                "status": "native_preview_running",
+                "native_preview_protocol": native_protocol,
+                "native_preview_schedule_type": schedule_type,
+                "preview_minute": minute,
+                "preview_time": self._format_minute(minute),
+            }
+        )
+        self._notify_diagnostics_throttled()
+        return True
+
+    async def async_stop_preview(self) -> bool:
+        """Stop any running editor or fixture-native schedule preview."""
+        restored = True
         if self.preview_task and not self.preview_task.done():
             self.preview_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -1095,11 +1172,45 @@ class Device:
         self.preview_restore_mode = None
         if restore_mode is not None:
             self.preview_restore_values = None
-            await self.async_select_option("mode", restore_mode)
+            restored = await self.async_select_option("mode", restore_mode)
         elif self.preview_restore_values:
             restore_values = self.preview_restore_values
             self.preview_restore_values = None
-            await self.async_set_channels(restore_values)
+            restored = await self.async_set_channels(restore_values)
+
+        if self.native_preview_active:
+            if not await self._async_prepare_command():
+                return False
+            if self._uses_wifi_protocol():
+                stopped = await self._async_send_packet(protocol.wifi_auto_preview_packet(None))
+            elif self._uses_plant_pro_protocol():
+                stopped = await self._async_send_packet(protocol.spp_schedule_preview_packet(None))
+            else:
+                stopped = await self._async_send_packet(protocol.old_auto_preview_packet(None))
+            if not stopped:
+                self._set_diagnostic_error("native_preview_stop_failed", "Unable to stop fixture schedule preview")
+                return False
+            if not await self._async_restore_native_preview_mode():
+                self._set_diagnostic_error(
+                    "native_preview_restore_failed", "Preview stopped but fixture mode was not restored"
+                )
+                return False
+            self.diagnostics["status"] = "native_preview_stopped"
+            self._notify_diagnostics_throttled()
+        return restored
+
+    async def _async_restore_native_preview_mode(self) -> bool:
+        """Restore the fixture mode saved before native preview."""
+        restore_mode = self.native_preview_restore_mode
+        should_restore = self._uses_wifi_protocol() or self._uses_plant_pro_protocol()
+        if restore_mode in MODES and should_restore and self.values.get("mode") != restore_mode:
+            if not await self._async_send_packet(self._native_mode_packet(restore_mode)):
+                return False
+            self.values["mode"] = restore_mode
+        self.native_preview_active = False
+        self.native_preview_schedule_type = None
+        self.native_preview_restore_mode = None
+        return True
 
     async def _async_preview_schedule(
         self,
@@ -1189,6 +1300,83 @@ class Device:
             channel: round(previous[channel] + ((next_point[channel] - previous[channel]) * ratio))
             for channel in NUMBERS
         }
+
+    def _classic_native_preview_levels(self, schedule_type: str, minute: int) -> list[int] | None:
+        """Calculate the APK's classic ``680B`` values from fixture readback."""
+        if schedule_type == "professional":
+            raw_points = self.values.get("native_pro_schedule")
+            if not isinstance(raw_points, list):
+                raw_points = []
+            points = [
+                {
+                    "minute": int(point["minute"]) % DAY_MINUTES,
+                    **{channel: max(0, min(100, int(point.get(channel, 0)))) for channel in NUMBERS},
+                }
+                for point in raw_points
+                if isinstance(point, dict) and "minute" in point
+            ]
+        else:
+            points = self._classic_auto_preview_points(self.values.get("native_auto_schedule"))
+
+        if len(points) < 2:
+            self._set_diagnostic_error(
+                "native_preview_unavailable",
+                f"The fixture did not report a complete {schedule_type.title()} schedule",
+            )
+            return None
+        points.sort(key=lambda point: point["minute"])
+        channels = self._interpolate_schedule(points, minute)
+        return [channels[channel] for channel in self.numbers()]
+
+    def _classic_auto_preview_points(self, schedule: object) -> list[dict[str, Any]]:
+        """Expand classic Auto readback into the points used by the APK preview."""
+        if not isinstance(schedule, dict):
+            return []
+        sunrise = self._native_schedule_minute(schedule.get("sunrise"))
+        sunset = self._native_schedule_minute(schedule.get("sunset"))
+        sleep = self._native_schedule_minute(schedule.get("sleep"))
+        day_levels = schedule.get("day_levels")
+        night_levels = schedule.get("night_levels")
+        if sunrise is None or sunset is None or not isinstance(day_levels, list) or not isinstance(night_levels, list):
+            return []
+
+        channel_count = len(self.numbers())
+        if len(day_levels) < channel_count or len(night_levels) < channel_count:
+            return []
+        day = [max(0, min(100, int(value))) for value in day_levels[:channel_count]]
+        night = [max(0, min(100, int(value))) for value in night_levels[:channel_count]]
+        off = [0] * channel_count
+        sunrise_ramp = max(0, min(240, int(schedule["sunrise"].get("ramp", 0))))
+        sunset_ramp = max(0, min(240, int(schedule["sunset"].get("ramp", 0))))
+
+        def point(point_minute: int, levels: list[int]) -> dict[str, Any]:
+            return {
+                "minute": point_minute % DAY_MINUTES,
+                **{channel: levels[index] if index < len(levels) else 0 for index, channel in enumerate(NUMBERS)},
+            }
+
+        points = [
+            point(sunrise, off if sleep is not None else night),
+            point(sunrise + sunrise_ramp, day),
+            point(sunset - sunset_ramp, day),
+            point(sunset, night),
+        ]
+        if sleep is not None:
+            # FluvalConnect uses two points at the sleep minute: retain night
+            # until that minute, then switch off for the overnight segment.
+            points.extend((point(sleep, night), point(sleep, off)))
+        return points
+
+    @staticmethod
+    def _native_schedule_minute(value: object) -> int | None:
+        """Read one protocol-neutral fixture time object."""
+        if not isinstance(value, dict):
+            return None
+        hour = value.get("hour")
+        minute = value.get("minute")
+        if not isinstance(hour, int) or not isinstance(minute, int) or not 0 <= hour <= 23 or not 0 <= minute <= 59:
+            return None
+        return hour * 60 + minute
 
     def _spectrum_report(self, channels: dict[str, int]) -> dict[str, Any]:
         """Return graph-friendly spectrum data for diagnostics and previews."""

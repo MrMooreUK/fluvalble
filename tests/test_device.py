@@ -640,6 +640,8 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
     device.client = SimpleNamespace(plant_pro_spp=True)
     device._async_prepare_command = AsyncMock(return_value=True)
     device._async_send_packet = AsyncMock(return_value=True)
+    device.values["native_auto_schedule"] = {"stale": True}
+    device.values["native_pro_schedule"] = [{"stale": True}]
     auto = {
         "sunrise": (8, 0, 60),
         "sunset": (20, 30, 45),
@@ -684,6 +686,8 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
     assert device.diagnostics["native_schedule_protocol"] == "plant_pro"
     assert device.diagnostics["native_pro_schedule_points"] == 4
     assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Thunderstorm"
+    assert "native_auto_schedule" not in device.values
+    assert "native_pro_schedule" not in device.values
 
 
 def test_classic_and_facebd_native_effect_schedules_use_apk_packets():
@@ -836,6 +840,112 @@ def test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
 
 def test_stopping_preview_reactivates_the_native_fixture_mode():
     asyncio.run(_async_test_stopping_preview_reactivates_the_native_fixture_mode())
+
+
+def test_facebd_native_preview_selects_stored_mode_and_restores_previous_mode():
+    asyncio.run(_async_test_facebd_native_preview_selects_stored_mode_and_restores_previous_mode())
+
+
+async def _async_test_facebd_native_preview_selects_stored_mode_and_restores_previous_mode():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    device.client = SimpleNamespace(
+        wifi_facebd=True,
+        plant_pro_spp=False,
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+    )
+    device.values["native_auto_schedule"] = {"sunrise": {"hour": 8, "minute": 0}}
+    device.values["mode"] = "manual"
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_preview_native_schedule(750, "auto")
+    assert [protocol.decode_cbor_map(call.args[0]) for call in device._async_send_packet.await_args_list] == [
+        {protocol.WIFI_MODE_KEY: 1},
+        {protocol.WIFI_AUTO_PREVIEW_KEY: 750},
+    ]
+    assert device.native_preview_active
+
+    await device.async_stop_preview()
+
+    assert protocol.decode_cbor_map(device._async_send_packet.await_args_list[-2].args[0]) == {
+        protocol.WIFI_AUTO_PREVIEW_KEY: 1440
+    }
+    assert protocol.decode_cbor_map(device._async_send_packet.await_args_list[-1].args[0]) == {
+        protocol.WIFI_MODE_KEY: 0
+    }
+    assert device.values["mode"] == "manual"
+    assert not device.native_preview_active
+
+
+def test_plant_pro_native_preview_uses_apk_mesh_packet():
+    asyncio.run(_async_test_plant_pro_native_preview_uses_apk_mesh_packet())
+
+
+async def _async_test_plant_pro_native_preview_uses_apk_mesh_packet():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = SimpleNamespace(wifi_facebd=False, plant_pro_spp=True)
+    device.values["native_pro_schedule"] = [{"minute": 0}, {"minute": 720}]
+    device.values["mode"] = "professional"
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_preview_native_schedule(360, "professional")
+    device._async_send_packet.assert_awaited_once()
+    assert protocol.decode_cbor_update(device._async_send_packet.await_args.args[0]) == {
+        protocol.SPP_SCHEDULE_PREVIEW_KEY: 360
+    }
+
+
+def test_classic_auto_preview_uses_fixture_readback_levels():
+    asyncio.run(_async_test_classic_auto_preview_uses_fixture_readback_levels())
+
+
+async def _async_test_classic_auto_preview_uses_fixture_readback_levels():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.values["native_auto_schedule"] = {
+        "sunrise": {"hour": 8, "minute": 0, "ramp": 60},
+        "sunset": {"hour": 20, "minute": 0, "ramp": 60},
+        "sleep": None,
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 5, 0, 0],
+    }
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_preview_native_schedule(9 * 60, "auto")
+    packet = device._async_send_packet.await_args.args[0]
+    assert packet[:-1] == bytes.fromhex("68 0B 03 20 02 BC 02 58 01 F4")
+
+
+def test_native_preview_requires_fixture_readback():
+    asyncio.run(_async_test_native_preview_requires_fixture_readback())
+
+
+def test_classic_professional_preview_interpolates_fixture_readback():
+    asyncio.run(_async_test_classic_professional_preview_interpolates_fixture_readback())
+
+
+async def _async_test_classic_professional_preview_interpolates_fixture_readback():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.values["native_pro_schedule"] = [
+        {"minute": 0, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
+        {"minute": 720, "channel_1": 100, "channel_2": 80, "channel_3": 60, "channel_4": 40},
+    ]
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_preview_native_schedule(360, "professional")
+    packet = device._async_send_packet.await_args.args[0]
+    assert packet[:-1] == bytes.fromhex("68 0B 01 F4 01 90 01 2C 00 C8")
+
+
+async def _async_test_native_preview_requires_fixture_readback():
+    device = _make_device()
+    device._async_prepare_command = AsyncMock(return_value=True)
+
+    assert not await device.async_preview_native_schedule(600, "professional")
+    device._async_prepare_command.assert_not_awaited()
+    assert device.diagnostics["status"] == "native_preview_unavailable"
 
 
 async def _async_test_stopping_preview_reactivates_the_native_fixture_mode():

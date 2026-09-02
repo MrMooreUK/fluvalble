@@ -147,6 +147,19 @@ def test_wifi_native_preview_uses_1440_to_stop():
     assert protocol.decode_cbor_map(protocol.wifi_auto_preview_packet(None)) == {119: 1440}
 
 
+def test_plant_pro_native_preview_uses_apk_mesh_key_and_stop_value():
+    assert protocol.decode_cbor_update(protocol.spp_schedule_preview_packet(750)) == {51: 750}
+    assert protocol.decode_cbor_update(protocol.spp_schedule_preview_packet(None)) == {51: 1440}
+
+
+def test_classic_native_preview_uses_680b_scaled_levels_and_680c_stop():
+    preview = protocol.old_auto_preview_packet([10, 20, 30, 40])
+    stop = protocol.old_auto_preview_packet(None)
+
+    assert preview[:-1] == bytes.fromhex("68 0B 00 64 00 C8 01 2C 01 90")
+    assert stop[:-1] == bytes.fromhex("68 0C")
+
+
 def test_old_clock_packet_shape():
     moment = datetime(2026, 7, 19, 12, 30, 45, tzinfo=timezone.utc)
     local = moment.astimezone()

@@ -66,6 +66,7 @@ def _runtime_device(entry_data: Any) -> Device | None:
 DISCOVERY_LOG_INTERVAL = 5
 SERVICE_SET_CHANNELS = "set_channels"
 SERVICE_PREVIEW_SCHEDULE = "preview_schedule"
+SERVICE_PREVIEW_NATIVE_SCHEDULE = "preview_native_schedule"
 SERVICE_STOP_PREVIEW = "stop_preview"
 SERVICE_SAVE_SCHEDULE = "save_schedule"
 SERVICE_SET_NATIVE_AUTO_SCHEDULE = "set_native_auto_schedule"
@@ -263,6 +264,15 @@ PREVIEW_SERVICE_SCHEMA = vol.Schema(
         vol.Required("points"): _validate_schedule_points,
         vol.Optional("duration", default=60): vol.All(int, vol.Range(min=1, max=3600)),
         vol.Optional("step_seconds", default=2): vol.All(int, vol.Range(min=1, max=300)),
+    }
+)
+
+NATIVE_PREVIEW_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): str,
+        vol.Optional("mac"): str,
+        vol.Required("minute"): vol.All(int, vol.Range(min=0, max=1439)),
+        vol.Required("schedule_type"): vol.In(["auto", "professional"]),
     }
 )
 
@@ -629,9 +639,15 @@ def _register_services(hass: HomeAssistant) -> None:
             step_seconds=call.data["step_seconds"],
         )
 
+    async def async_preview_native_schedule(call: ServiceCall) -> None:
+        device = get_device(call)
+        if not await device.async_preview_native_schedule(call.data["minute"], call.data["schedule_type"]):
+            raise HomeAssistantError(device.command_error_message())
+
     async def async_stop_preview(call: ServiceCall) -> None:
         device = get_device(call)
-        await device.async_stop_preview()
+        if not await device.async_stop_preview():
+            raise HomeAssistantError(device.command_error_message())
 
     async def async_save_schedule(call: ServiceCall) -> None:
         entry_id = get_entry_id(call.data)
@@ -690,6 +706,12 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_PREVIEW_SCHEDULE,
         async_preview_schedule,
         schema=PREVIEW_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_PREVIEW_NATIVE_SCHEDULE,
+        async_preview_native_schedule,
+        schema=NATIVE_PREVIEW_SERVICE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN,
@@ -1182,6 +1204,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
         runtime.device.cancel_reachability_refresh()
+        if runtime.device.native_preview_active:
+            await runtime.device.async_stop_preview()
         tasks = list(runtime.background_tasks)
         for task in tasks:
             task.cancel()
