@@ -43,16 +43,6 @@ class FluvalSelect(FluvalEntity, SelectEntity):
             self._async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
-        if self.attr == "schedule_mode":
-            if not self.hass or not self.device.entry_id:
-                self.internal_update()
-                return
-            from . import async_set_schedule_mode  # noqa: PLC0415
-
-            await async_set_schedule_mode(self.hass, self.device.entry_id, option)
-            self.internal_update()
-            return
-
         if not await self.device.async_select_option(self.attr, option):
             self.internal_update()
             return

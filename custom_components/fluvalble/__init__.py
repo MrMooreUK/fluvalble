@@ -150,6 +150,7 @@ RETIRED_DIAGNOSTIC_SUFFIXES = (
 )
 RETIRED_ENTITY_DOMAINS = frozenset({Platform.NUMBER.value})
 RETIRED_SWITCH_SUFFIXES = ("_led_on_off",)
+RETIRED_SELECT_SUFFIXES = ("_schedule_mode",)
 
 
 def _validate_schedule_points(points: object) -> list[dict]:
@@ -598,9 +599,10 @@ def _migrate_legacy_registry_entries(hass: HomeAssistant, entry: ConfigEntry, ma
         unique_id = str(getattr(entity, "unique_id", ""))
         retired_platform = domain in RETIRED_ENTITY_DOMAINS
         retired_switch = domain == Platform.SWITCH.value and unique_id.endswith(RETIRED_SWITCH_SUFFIXES)
+        retired_select = domain == Platform.SELECT.value and unique_id.endswith(RETIRED_SELECT_SUFFIXES)
         retired_channel = unique_id.endswith(RETIRED_CHANNEL_SUFFIXES)
         retired_diagnostics = unique_id.endswith(RETIRED_DIAGNOSTIC_SUFFIXES)
-        if retired_platform or retired_switch or retired_channel or retired_diagnostics:
+        if retired_platform or retired_switch or retired_select or retired_channel or retired_diagnostics:
             _LOGGER.info("Removing retired Fluval entity %s", entity.entity_id)
             registry.async_remove(entity.entity_id)
 
