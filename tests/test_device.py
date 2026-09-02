@@ -34,11 +34,17 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
     )
 
 
-def _old_manual_status(channels, *, flags=1, effect_id=0):
+def _old_manual_status(channels, *, flags=1, effect_id=0, presets=None):
     body = bytearray((0, flags, effect_id))
     for value in channels:
         body.extend((value & 0xFF, value >> 8))
-    body.extend(bytes(len(channels) * 4))
+    if presets is None:
+        body.extend(bytes(len(channels) * 4))
+    else:
+        if len(presets) != 4 or any(len(preset) != len(channels) for preset in presets):
+            raise ValueError("Classic fixtures require four presets matching the channel count")
+        for preset in presets:
+            body.extend(preset)
     return protocol.old_packet(protocol.OLD_READ_PARAMS + body)
 
 
@@ -678,6 +684,22 @@ def test_old_status_packet_scales_to_percent():
     assert device.values["channel_2"] == 20
     assert device.values["channel_5"] == 50
     assert device._channel_count_hint == 5
+
+
+def test_old_status_packet_retains_apk_manual_presets():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    presets = [
+        [10, 20, 30, 40],
+        [11, 21, 31, 41],
+        [12, 22, 32, 42],
+        [13, 23, 33, 43],
+    ]
+
+    assert device.decode_update_packet(_old_manual_status([1000, 750, 500, 250], presets=presets))
+
+    assert device.values["native_manual_presets"] == presets
+    assert device.diagnostics["native_manual_presets"] == presets
+    assert "native_manual_presets_readback_at" in device.diagnostics
 
 
 def test_old_status_packet_decodes_four_channels_power_flag_and_effect():

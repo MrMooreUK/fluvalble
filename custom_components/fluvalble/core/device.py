@@ -2101,6 +2101,14 @@ class Device:
             self.values["led_on_off"] = bool(decoded["power"])
             if self.supports_classic_effects():
                 self.values["effect"] = self._native_effect_name(int(decoded["effect_id"]))
+            presets = [list(preset) for preset in decoded["presets"]]
+            self.values["native_manual_presets"] = presets
+            self.diagnostics.update(
+                {
+                    "native_manual_presets": presets,
+                    "native_manual_presets_readback_at": datetime.now(UTC).isoformat(),
+                }
+            )
             # Wire scale is 0-1000 (percent * 10); HA entities use 0-100.
             channels = decoded["channels"]
             self._channel_count_hint = channel_count

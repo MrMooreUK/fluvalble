@@ -23,7 +23,30 @@ def test_decode_old_manual_state_matches_apk_layout():
         "power": True,
         "effect_id": 11,
         "channels": [100, 200, 300, 400, 500],
+        "presets": [
+            [1, 2, 3, 4, 5],
+            [6, 7, 8, 9, 10],
+            [11, 12, 13, 14, 15],
+            [16, 17, 18, 19, 20],
+        ],
     }
+
+
+def test_decode_old_manual_state_preserves_four_channel_presets():
+    body = bytearray((0, 1, 0))
+    for value in (1000, 750, 500, 250):
+        body.extend((value & 0xFF, value >> 8))
+    body.extend((10, 20, 30, 40, 11, 21, 31, 41, 12, 22, 32, 42, 13, 23, 33, 43))
+
+    decoded = protocol.decode_old_state_packet(_old_state_packet(body), channel_count=4)
+
+    assert decoded is not None
+    assert decoded["presets"] == [
+        [10, 20, 30, 40],
+        [11, 21, 31, 41],
+        [12, 22, 32, 42],
+        [13, 23, 33, 43],
+    ]
 
 
 def test_decode_old_state_accepts_only_apk_auto_and_pro_lengths():

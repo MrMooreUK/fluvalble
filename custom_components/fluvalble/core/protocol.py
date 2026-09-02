@@ -474,11 +474,16 @@ def decode_old_state_packet(packet: bytes | bytearray, *, channel_count: int) ->
     if mode == 0:
         if len(body) != channel_count * 6 + 3:
             return None
+        preset_offset = 3 + channel_count * 2
         decoded.update(
             {
                 "power": bool(body[1] & 0x01),
                 "effect_id": body[2],
                 "channels": [body[offset] | (body[offset + 1] << 8) for offset in range(3, 3 + channel_count * 2, 2)],
+                "presets": [
+                    list(body[preset_offset + slot * channel_count : preset_offset + (slot + 1) * channel_count])
+                    for slot in range(4)
+                ],
             }
         )
         return decoded
