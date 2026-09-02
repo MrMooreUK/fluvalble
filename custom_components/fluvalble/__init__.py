@@ -109,6 +109,8 @@ SERVICE_SAVE_SCHEDULE = "save_schedule"
 SERVICE_SET_NATIVE_AUTO_SCHEDULE = "set_native_auto_schedule"
 SERVICE_SET_NATIVE_PRO_SCHEDULE = "set_native_pro_schedule"
 SERVICE_SET_NATIVE_EFFECT_SCHEDULE = "set_native_effect_schedule"
+SERVICE_RECALL_MANUAL_PRESET = "recall_manual_preset"
+SERVICE_SAVE_MANUAL_PRESET = "save_manual_preset"
 SERVICES_REGISTERED = "services_registered"
 STATIC_REGISTERED = "static_registered"
 WEBSOCKET_REGISTERED = "websocket_registered"
@@ -310,6 +312,13 @@ def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
     return windows
 
 
+def _validate_manual_preset_slot(value: object) -> int:
+    """Validate the user-facing P1-P4 slot number."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4:
+        raise vol.Invalid("Manual preset slot must be an integer from 1 to 4")
+    return value
+
+
 CHANNEL_SERVICE_SCHEMA = vol.Schema(
     {
         vol.Optional("entry_id"): str,
@@ -380,6 +389,14 @@ NATIVE_EFFECT_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
         vol.Optional("entry_id"): str,
         vol.Optional("mac"): str,
         vol.Required("windows"): _validate_native_effect_windows,
+    }
+)
+
+MANUAL_PRESET_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("entry_id"): str,
+        vol.Optional("mac"): str,
+        vol.Required("slot"): _validate_manual_preset_slot,
     }
 )
 
@@ -771,6 +788,16 @@ def _register_services(hass: HomeAssistant) -> None:
             call.data["windows"],
         )
 
+    async def async_recall_manual_preset(call: ServiceCall) -> None:
+        device = get_device(call)
+        if not await device.async_recall_manual_preset(call.data["slot"]):
+            raise HomeAssistantError(device.command_error_message())
+
+    async def async_save_manual_preset(call: ServiceCall) -> None:
+        device = get_device(call)
+        if not await device.async_save_manual_preset(call.data["slot"]):
+            raise HomeAssistantError(device.command_error_message())
+
     hass.services.async_register(
         DOMAIN,
         SERVICE_SET_CHANNELS,
@@ -818,6 +845,18 @@ def _register_services(hass: HomeAssistant) -> None:
         SERVICE_SET_NATIVE_EFFECT_SCHEDULE,
         async_set_native_effect_schedule,
         schema=NATIVE_EFFECT_SCHEDULE_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_RECALL_MANUAL_PRESET,
+        async_recall_manual_preset,
+        schema=MANUAL_PRESET_SERVICE_SCHEMA,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SAVE_MANUAL_PRESET,
+        async_save_manual_preset,
+        schema=MANUAL_PRESET_SERVICE_SCHEMA,
     )
     hass.data[DOMAIN][SERVICES_REGISTERED] = True
 

@@ -1634,6 +1634,104 @@ class Device:
         self.diagnostics["daylight_saving_time"] = enabled
         return True
 
+    def _manual_preset_values(self, slot: int) -> list[int] | None:
+        """Return one complete classic preset from fixture readback."""
+        presets = self.values.get("native_manual_presets")
+        channel_count = self._resolved_channel_count()
+        if (
+            not isinstance(presets, list)
+            or len(presets) != 4
+            or not isinstance(presets[slot - 1], list)
+            or len(presets[slot - 1]) != channel_count
+        ):
+            return None
+        return [int(value) for value in presets[slot - 1]]
+
+    async def async_recall_manual_preset(self, slot: int) -> bool:
+        """Apply one fixture-resident classic P1-P4 preset as FluvalConnect does."""
+        if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 4:
+            self._set_diagnostic_error("invalid_manual_preset", "Manual preset slot must be between 1 and 4")
+            return False
+        if not await self._async_prepare_command():
+            return False
+        if self._uses_wifi_protocol() or self._uses_plant_pro_protocol():
+            self._set_diagnostic_error(
+                "unsupported_manual_preset",
+                "Fixture-resident manual presets are supported only by classic Fluval controllers",
+            )
+            return False
+
+        preset = self._manual_preset_values(slot)
+        if preset is None:
+            await self.async_refresh_state()
+            preset = self._manual_preset_values(slot)
+        if preset is None:
+            self._set_diagnostic_error(
+                "manual_preset_unavailable",
+                "Manual preset readback is unavailable; put the fixture in Manual mode and retry",
+            )
+            return False
+        if not self.values.get("led_on_off"):
+            self._set_diagnostic_error(
+                "manual_preset_requires_light_on",
+                "Turn on the fixture before recalling a manual preset",
+            )
+            return False
+
+        targets = {channel: int(preset[index]) for index, channel in enumerate(self.numbers())}
+        if not await self.async_set_channels(targets, force=True):
+            return False
+        self.diagnostics.update(
+            {
+                "status": "manual_preset_recalled",
+                "manual_preset_slot": slot,
+                "last_error": None,
+            }
+        )
+        return True
+
+    async def async_save_manual_preset(self, slot: int) -> bool:
+        """Save the current classic channel state in fixture slot P1-P4."""
+        if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 4:
+            self._set_diagnostic_error("invalid_manual_preset", "Manual preset slot must be between 1 and 4")
+            return False
+        if not await self._async_prepare_command():
+            return False
+        if self._uses_wifi_protocol() or self._uses_plant_pro_protocol():
+            self._set_diagnostic_error(
+                "unsupported_manual_preset",
+                "Fixture-resident manual presets are supported only by classic Fluval controllers",
+            )
+            return False
+        if self.values.get("mode") != "manual":
+            self._set_diagnostic_error(
+                "manual_preset_requires_manual_mode",
+                "Select Manual mode before saving a fixture preset",
+            )
+            return False
+        if not await self._async_send_packet(protocol.old_save_manual_preset_packet(slot - 1)):
+            return False
+
+        presets = self.values.get("native_manual_presets")
+        channel_count = self._resolved_channel_count()
+        if (
+            isinstance(presets, list)
+            and len(presets) == 4
+            and all(isinstance(preset, list) and len(preset) == channel_count for preset in presets)
+        ):
+            updated_presets = [list(preset) for preset in presets]
+            updated_presets[slot - 1] = self._channel_values()
+            self.values["native_manual_presets"] = updated_presets
+            self.diagnostics["native_manual_presets"] = updated_presets
+        self.diagnostics.update(
+            {
+                "status": "manual_preset_saved",
+                "manual_preset_slot": slot,
+                "last_error": None,
+            }
+        )
+        return True
+
     async def async_identify(self) -> bool:
         """Ask the fixture to identify itself using FluvalConnect's Find command."""
         if not await self._async_prepare_command():

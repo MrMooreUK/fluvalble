@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added classic fixture-resident P1-P4 recall and save actions using the APK's
+  `6804` channel write and `6806` zero-based save-slot command.
 - Added product-aware wavelength previews backed by FluvalConnect's six current
   and legacy AquaSky, Plant, and Reef spectrum datasets. Five-channel previews
   now use the APK's real fifth curve instead of a synthetic approximation.
