@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Hardened Home Assistant setup and Bluetooth discovery against malformed
+  advertisements, and removed the empty address suffix from the fallback name
+  shown when discovery details are unavailable.
 - Clarified that the existing RSSI sensor measures the latest advertisement,
   preserved its entity identity and history, and attached the advertisement's
   scanner source instead of implying it represents the active GATT route.
