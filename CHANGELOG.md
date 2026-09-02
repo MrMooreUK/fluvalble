@@ -47,6 +47,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Reduced classic encrypted BLE command pacing from 750 ms to the
+  FluvalConnect APK's 200 ms affair-queue interval. FACEBD and Plant Pro/SPP
+  retain their existing timing.
 - Corrected fixture-native Professional schedule validation to match the
   FluvalConnect APK: 4–10 points for classic/OLD controllers and 4–12 for
   AquaSky 3.0/FACEBD and Plant Pro/MESH controllers.
