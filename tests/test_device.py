@@ -1354,6 +1354,59 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
     assert protocol.WIFI_AUTO_SUNRISE_KEY not in expected
 
 
+def test_five_channel_facebd_packet_preserves_cold_white_channel():
+    device = _make_device(product_id=546)
+    device.values.update(
+        {
+            "channel_1": 10,
+            "channel_2": 20,
+            "channel_3": 30,
+            "channel_4": 40,
+            "channel_5": 50,
+        }
+    )
+    device.client = _facebd_client()
+
+    packet = protocol.wifi_all_zone_packet(device._channel_values())
+
+    assert device._expected_state_for_packet(packet) == {
+        protocol.WIFI_CHANNEL_KEYS[0]: 10,
+        protocol.WIFI_CHANNEL_KEYS[1]: 20,
+        protocol.WIFI_CHANNEL_KEYS[2]: 30,
+        protocol.WIFI_CHANNEL_KEYS[3]: 40,
+        protocol.WIFI_CHANNEL_KEYS[4]: 50,
+    }
+
+
+def test_five_channel_facebd_readback_decodes_key_114_as_cold_white():
+    device = _make_device(product_id=546)
+    device.client = _facebd_client()
+
+    assert device._decode_wifi_update(
+        {
+            protocol.WIFI_CHANNEL_KEYS[0]: 10,
+            protocol.WIFI_CHANNEL_KEYS[1]: 20,
+            protocol.WIFI_CHANNEL_KEYS[2]: 30,
+            protocol.WIFI_CHANNEL_KEYS[3]: 40,
+            protocol.WIFI_CHANNEL_KEYS[4]: 50,
+        }
+    )
+
+    assert [device.values[channel] for channel in NUMBERS] == [10, 20, 30, 40, 50]
+    assert device._channel_count_hint == 5
+    assert "native_schedule_readback_at" not in device.diagnostics
+
+
+def test_partial_facebd_readback_does_not_downgrade_channel_count_hint():
+    device = _make_device(product_id=546)
+    device.client = _facebd_client()
+    device._channel_count_hint = 5
+
+    assert device._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[0]: 25})
+
+    assert device._channel_count_hint == 5
+
+
 def test_facebd_service_uuid_selects_facebd_protocol():
     device = _make_device()
 
