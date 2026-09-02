@@ -14,6 +14,7 @@ from homeassistant.components.light import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core.device import Device
@@ -67,9 +68,21 @@ class FluvalLight(FluvalEntity, LightEntity):
         """Refresh the entity from decoded fixture state."""
         self._attr_available = self.device.controls_available
         self._attr_is_on = bool(self.device.values.get("led_on_off"))
-        self._attr_brightness = self.device.light_brightness_255() or None
-        self._attr_effect = self.device.values.get("effect")
         self._update_effect_capabilities()
+
+        if self.device.values.get("effect"):
+            # Fluval effects do not expose adjustable colour or brightness.
+            # HA explicitly permits this more restrictive mode while an
+            # effect is active, avoiding stale static colours in the state.
+            self._attr_color_mode = ColorMode.ONOFF
+            self._attr_brightness = None
+            self._attr_rgb_color = None
+            self._attr_rgbw_color = None
+            if self.hass:
+                self._async_write_ha_state()
+            return
+
+        self._attr_brightness = self.device.light_brightness_255() or None
 
         if self.device.light_mode() == "rgb":
             self._attr_color_mode = ColorMode.RGB
@@ -89,11 +102,13 @@ class FluvalLight(FluvalEntity, LightEntity):
         """Turn on the fixture and apply an optional colour or brightness."""
         requested_effect = kwargs.get(ATTR_EFFECT)
         if requested_effect == EFFECT_NONE:
-            await self.device.async_stop_effect()
+            if not await self.device.async_stop_effect():
+                self._raise_command_error()
             self.internal_update()
             return
         if requested_effect is not None:
-            await self.device.async_set_effect(str(requested_effect))
+            if not await self.device.async_set_effect(str(requested_effect)):
+                self._raise_command_error()
             self.internal_update()
             return
 
@@ -108,40 +123,49 @@ class FluvalLight(FluvalEntity, LightEntity):
         color = self._requested_color(kwargs, brightness)
         if color is not None:
             channels, rgb, rgbw = color
-            if await self.device.async_apply_light_channels(channels):
-                self.device.remember_commanded_light(
-                    channels,
-                    rgb=rgb,
-                    rgbw=rgbw,
-                    brightness=brightness,
-                )
-            self.internal_update()
-            return
-
-        if ATTR_BRIGHTNESS in kwargs:
-            await self._async_set_brightness(brightness)
-            self.internal_update()
-            return
-
-        if self.device.master_brightness() > 0:
-            await self.device.async_set_switch("led_on_off", True)
-            self.internal_update()
-            return
-
-        channels, rgb, rgbw = self._default_color(brightness)
-        if await self.device.async_apply_light_channels(channels):
+            if not await self.device.async_apply_light_channels(channels):
+                self._raise_command_error()
             self.device.remember_commanded_light(
                 channels,
                 rgb=rgb,
                 rgbw=rgbw,
                 brightness=brightness,
             )
+            self.internal_update()
+            return
+
+        if ATTR_BRIGHTNESS in kwargs:
+            if not await self._async_set_brightness(brightness):
+                self._raise_command_error()
+            self.internal_update()
+            return
+
+        if self.device.master_brightness() > 0:
+            if not await self.device.async_set_switch("led_on_off", True):
+                self._raise_command_error()
+            self.internal_update()
+            return
+
+        channels, rgb, rgbw = self._default_color(brightness)
+        if not await self.device.async_apply_light_channels(channels):
+            self._raise_command_error()
+        self.device.remember_commanded_light(
+            channels,
+            rgb=rgb,
+            rgbw=rgbw,
+            brightness=brightness,
+        )
         self.internal_update()
 
     def _update_effect_capabilities(self) -> None:
         """Expose native effects only for positively identified controllers."""
         self._attr_effect_list = self.device.effect_list()
-        self._attr_supported_features = LightEntityFeature.EFFECT if self._attr_effect_list else 0
+        if self._attr_effect_list:
+            self._attr_effect = self.device.values.get("effect") or EFFECT_NONE
+            self._attr_supported_features = LightEntityFeature.EFFECT
+        else:
+            self._attr_effect = None
+            self._attr_supported_features = 0
 
     def _requested_color(
         self,
@@ -225,6 +249,10 @@ class FluvalLight(FluvalEntity, LightEntity):
         """Turn off the fixture without rewriting its colour channels."""
         if not await self.device.async_set_switch("led_on_off", False):
             self.internal_update()
-            return
+            self._raise_command_error()
         self._attr_is_on = False
         self._async_write_ha_state()
+
+    def _raise_command_error(self) -> None:
+        """Report a failed BLE command through Home Assistant's service call."""
+        raise HomeAssistantError(self.device.command_error_message())

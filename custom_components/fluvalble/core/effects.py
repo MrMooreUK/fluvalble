@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-EFFECT_NONE = "None"
+# Home Assistant's standard sentinel for a light that supports effects but is
+# currently rendering none. The Fluval APK has no wire-level "off effect"
+# command; selecting this value restores the preceding static channel mix.
+EFFECT_NONE = "off"
 
 # FluvalConnect maps these names to classic command 0x0A effect IDs. The APK
 # presents its icons in the order 9, 10, 11, 5, 6, 7, 8, 1, 2, 3, 4.

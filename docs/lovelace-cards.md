@@ -205,8 +205,9 @@ sunset times, ramp durations, optional sleep time, and day/night channel levels.
 **Save Auto to fixture** uploads the complete Auto schedule once and activates
 Automatic mode. **Load Auto from fixture** explicitly refreshes and imports the
 controller's Auto readback without modifying the Professional editor. Channel
-labels follow the configured fixture profile, including four-channel AquaSky and
-five-channel Plant/Plant Pro layouts.
+labels follow the APK product identity, or the configured fixture profile when
+that identity is unavailable, including four-channel AquaSky and five-channel
+Plant/Plant Pro layouts.
 
 Card schedule points use positional `channel_1` through `channel_5` keys. Their
 display labels come from the detected fixture's APK-backed product profile, so

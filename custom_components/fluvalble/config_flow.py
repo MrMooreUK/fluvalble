@@ -337,7 +337,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                     default=options.get(CONF_LAMP_PROFILE, DEFAULT_LAMP_PROFILE),
                 ): vol.In(
                     {
-                        LAMP_PROFILE_AUTO: "Auto-detect from BLE name / protocol",
+                        LAMP_PROFILE_AUTO: "Auto-detect (APK product ID first)",
                         LAMP_PROFILE_PLANT: "Plant 5-channel (Pink–Warm White)",
                         LAMP_PROFILE_PLANT_PRO: "Current Plant 5-channel (Pink–Warm White)",
                         LAMP_PROFILE_MARINE: "Marine/Reef 5-channel spectrum",
