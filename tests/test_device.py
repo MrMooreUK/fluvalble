@@ -53,6 +53,19 @@ def test_apk_product_identity_drives_auto_model_and_channel_count():
     assert plant.entity_name("channel_1") == "Pink"
 
 
+def test_apk_product_identity_drives_spectrum_profile():
+    assert _make_device(product_id=532).spectrum_profile() == "aquasky_current"
+    assert _make_device(product_id=305).spectrum_profile() == "plant_legacy"
+    assert _make_device(product_id=546).spectrum_profile() == "reef_current"
+
+
+def test_explicit_fixture_profile_is_only_spectrum_fallback_without_product_id():
+    assert _make_device(lamp_profile=LAMP_PROFILE_AQUASKY3).spectrum_profile() == "aquasky_current"
+    assert _make_device(lamp_profile=LAMP_PROFILE_PLANT).spectrum_profile() == "plant_legacy"
+    assert _make_device(lamp_profile=LAMP_PROFILE_MARINE).spectrum_profile() == "reef_legacy"
+    assert _make_device().spectrum_profile() is None
+
+
 def test_connection_attribute_uses_recent_activity_or_live_gatt():
     device = _make_device()
     device.connected = False

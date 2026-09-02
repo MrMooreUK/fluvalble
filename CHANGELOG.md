@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added product-aware wavelength previews backed by FluvalConnect's six current
+  and legacy AquaSky, Plant, and Reef spectrum datasets. Five-channel previews
+  now use the APK's real fifth curve instead of a synthetic approximation.
 - Added APK-backed product-ID detection for Fluval advertisements. Classic
   fixtures now reconstruct the split ASCII product ID correctly (rather than
   mistaking the following firmware bytes for it), use the exact APK model name,

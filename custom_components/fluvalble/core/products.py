@@ -18,6 +18,7 @@ class FluvalProduct:
 
     model: str | None
     spectrum: str
+    spectrum_profile: str
     channel_count: int
     native_effect_count: int
 
@@ -25,11 +26,18 @@ class FluvalProduct:
 def _products(
     ids: dict[int, str | None],
     spectrum: str,
+    spectrum_profile: str,
     channel_count: int,
     native_effect_count: int,
 ) -> dict[int, FluvalProduct]:
     return {
-        product_id: FluvalProduct(model, spectrum, channel_count, native_effect_count)
+        product_id: FluvalProduct(
+            model,
+            spectrum,
+            spectrum_profile,
+            channel_count,
+            native_effect_count,
+        )
         for product_id, model in ids.items()
     }
 
@@ -39,7 +47,17 @@ def _products(
 PRODUCTS: dict[int, FluvalProduct] = {
     **_products(
         {
+            # LightDeviceUtils.getLightTypeAndOld() falls product 281 through
+            # to type 1, which ManFragment maps to the current Reef asset.
             281: None,
+        },
+        "marine",
+        "reef_current",
+        5,
+        0,
+    ),
+    **_products(
+        {
             289: "Marine & Reef 500mm",
             290: "Marine & Reef 800mm",
             291: "Marine & Reef 1100mm",
@@ -51,6 +69,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
             640: None,
         },
         "marine",
+        "reef_legacy",
         5,
         0,
     ),
@@ -61,6 +80,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
             547: "Fluval Reef Nano 4.0 LED",
         },
         "marine",
+        "reef_current",
         5,
         4,
     ),
@@ -86,6 +106,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
             29058: None,
         },
         "plant",
+        "plant_legacy",
         5,
         0,
     ),
@@ -100,6 +121,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
             563: "Fluval Siena 2.0",
         },
         "plant",
+        "plant_current",
         5,
         4,
     ),
@@ -120,12 +142,21 @@ PRODUCTS: dict[int, FluvalProduct] = {
             371: "Roma200",
             372: "Roma240",
             384: "A-Sky Aqua 679mm",
-            532: "Fluval Aquasky 3.0 LED",
-            564: "Fluval Roma & Shaker 2.0",
             609: None,
             29057: None,
         },
         "rgbw",
+        "aquasky_legacy",
+        4,
+        11,
+    ),
+    **_products(
+        {
+            532: "Fluval Aquasky 3.0 LED",
+            564: "Fluval Roma & Shaker 2.0",
+        },
+        "rgbw",
+        "aquasky_current",
         4,
         11,
     ),

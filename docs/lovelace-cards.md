@@ -37,8 +37,9 @@ The same JavaScript resource registers four custom cards:
   mode and data source, physical preview controls, and the selected time slider.
 - `custom:fluvalble-spectrum-card` shows editable channel bars for the selected
   schedule time.
-- `custom:fluvalble-wavelength-card` shows a wavelength-style preview based on
-  the selected schedule time and channel levels.
+- `custom:fluvalble-wavelength-card` shows the selected schedule levels against
+  the exact current or legacy AquaSky, Plant, or Reef spectrum data bundled in
+  FluvalConnect.
 - `custom:fluvalble-effect-schedule-card` edits up to seven timed native-effect
   windows stored and executed by a supported Fluval controller.
 
@@ -162,6 +163,22 @@ The complete dashboard example is available in
 When more than one Fluval light is configured, set `entry_id` or `mac` on each
 card so its editor and actions target the intended fixture. With one configured
 light, the integration resolves that single entry automatically.
+
+The wavelength card loads the fixture profile itself, so it also works outside
+the example vertical stack. Product-ID detection selects the matching APK asset.
+For a manually configured fixture whose product ID cannot be read, an explicit
+card override may be set to `aquasky_current`, `aquasky_legacy`,
+`plant_current`, `plant_legacy`, `reef_current`, or `reef_legacy`:
+
+```yaml
+type: custom:fluvalble-wavelength-card
+entry_id: your_config_entry_id
+spectrum_profile: plant_current
+```
+
+Without a positively identified product or explicit override, the card reports
+that wavelength data is unavailable instead of displaying another fixture's
+spectrum.
 
 ## Using the cards
 

@@ -168,6 +168,11 @@ those positions with the detected product's APK-defined channel names. Earlier
 RGB-style and Plant-specific field names remain accepted as compatibility
 aliases.
 
+The wavelength preview likewise selects one of FluvalConnect's six current or
+legacy AquaSky, Plant, and Reef spectrum datasets from the exact product ID. It
+does not synthesize a fifth LED curve or silently substitute AquaSky data for an
+unknown fixture.
+
 **Preview fixture time** and **Play fixture schedule** use FluvalConnect's
 native preview commands against the schedule already stored by the controller.
 They never upload unsaved editor values. Classic controllers receive their

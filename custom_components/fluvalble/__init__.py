@@ -609,7 +609,8 @@ async def _register_static_paths(hass: HomeAssistant) -> None:
         else:
             _LOGGER.warning(
                 "Unable to register Fluval BLE Lovelace card static path; "
-                "copy fluvalble-schedule-card.js to /config/www manually"
+                "copy both fluvalble-schedule-card.js and "
+                "fluvalble-spectrum-data.js to /config/www manually"
             )
             return
     except Exception:  # noqa: BLE001
@@ -976,6 +977,7 @@ def _native_schedule_readback(device: Device | None) -> dict[str, Any]:
             "channels": [],
             "effect_options": [],
             "effect_readback_complete": False,
+            "spectrum_profile": None,
             "protocol": None,
             "read_at": None,
         }
@@ -992,6 +994,7 @@ def _native_schedule_readback(device: Device | None) -> dict[str, Any]:
         "channels": [device.entity_name(channel) for channel in device.numbers()],
         "effect_options": [effect for effect in device.effect_list() if effect != EFFECT_NONE],
         "effect_readback_complete": protocol_name in {"facebd", "plant_pro"},
+        "spectrum_profile": device.spectrum_profile(),
         "protocol": protocol_name,
         "read_at": device.diagnostics.get("native_schedule_readback_at"),
     }
