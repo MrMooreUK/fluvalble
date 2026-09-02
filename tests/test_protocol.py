@@ -144,6 +144,35 @@ def test_wifi_native_auto_schedule_matches_apk_cbor_shape():
     }
 
 
+def test_wifi_five_channel_auto_schedule_preserves_apk_level_arrays():
+    packet = protocol.wifi_auto_schedule_packet(
+        sunrise=(8, 0, 60),
+        sunset=(21, 0, 45),
+        sleep=None,
+        day_levels=[80, 70, 60, 50, 40],
+        night_levels=[0, 10, 0, 0, 5],
+        channel_count=5,
+    )
+
+    decoded = protocol.decode_cbor_map(packet)
+
+    assert decoded[protocol.WIFI_AUTO_DAY_LEVELS_KEY] == bytes([80, 70, 60, 50, 40])
+    assert decoded[protocol.WIFI_AUTO_NIGHT_LEVELS_KEY] == bytes([0, 10, 0, 0, 5])
+    assert protocol.decode_wifi_auto_schedule(decoded)["day_levels"] == [80, 70, 60, 50, 40]
+
+
+def test_wifi_auto_schedule_rejects_non_apk_channel_count():
+    with pytest.raises(ValueError, match="four or five channels"):
+        protocol.wifi_auto_schedule_packet(
+            sunrise=(8, 0, 60),
+            sunset=(21, 0, 45),
+            sleep=None,
+            day_levels=[80, 70, 60],
+            night_levels=[0, 10, 0],
+            channel_count=3,
+        )
+
+
 def test_wifi_native_pro_schedule_matches_apk_cbor_shape():
     packet = protocol.wifi_pro_schedule_packet(
         [

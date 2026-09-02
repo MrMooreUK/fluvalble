@@ -828,6 +828,7 @@ class Device:
                 sleep=schedule.get("sleep"),
                 day_levels=schedule["day_levels"],
                 night_levels=schedule["night_levels"],
+                channel_count=self._resolved_channel_count(),
             )
             native_protocol = "facebd"
         elif self._uses_plant_pro_protocol():

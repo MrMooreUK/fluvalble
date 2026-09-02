@@ -50,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Corrected five-channel FACEBD Auto schedules to retain the APK-provided fifth
+  day and night level. Four-channel AquaSky schedule packets remain unchanged.
 - Corrected five-channel FACEBD manual control and readback to include the APK's
   key 114 fifth channel. Four-channel AquaSky packets remain unchanged.
 - Corrected APK-identified Marine and Reef fixtures to use Home Assistant's RGB
