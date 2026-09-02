@@ -40,7 +40,7 @@
           "active_time": "Active connection window (seconds)"
         },
         "data_description": {
-          "lamp_profile": "Override auto-detection when the wrong model or channel count is shown. Plant uses Pink / Blue / Cold White / White / Warm White labels.",
+          "lamp_profile": "Override auto-detection when the wrong model or channel count is shown. Plant and Marine/Reef use their distinct five-channel spectral layouts.",
           "ping_interval": "How often Home Assistant reads from the light to keep the BLE connection alive. Lower values improve reliability at the cost of slightly more radio traffic. Default: 10 s.",
           "active_time": "How long to maintain the BLE connection after the last command. Use 0 for a persistent connection with the lowest command latency, or 30–600 seconds to disconnect when idle. Persistent connections consume a Bluetooth connection slot and can prevent the Fluval app or gateway from connecting. Default: 120 s."
         }

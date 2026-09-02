@@ -5,7 +5,13 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGBW_COLOR
+from homeassistant.components.light import (
+    ATTR_BRIGHTNESS,
+    ATTR_EFFECT,
+    ATTR_RGB_COLOR,
+    ATTR_RGBW_COLOR,
+    ColorMode,
+)
 
 from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor, switch
 from custom_components.fluvalble.core.device import Device
@@ -246,6 +252,39 @@ async def _async_test_light_internal_update_and_actions():
         }
     )
     device.async_set_switch.assert_awaited_once_with("led_on_off", False)
+
+
+def test_marine_light_uses_standard_rgb_control_for_all_five_channels():
+    asyncio.run(_async_test_marine_light_uses_standard_rgb_control_for_all_five_channels())
+
+
+async def _async_test_marine_light_uses_standard_rgb_control_for_all_five_channels():
+    device = Device(
+        "Reef4_Test",
+        config_data={
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "model": "Bluetooth LED",
+            "product_id": 546,
+        },
+    )
+    device.connected = True
+    device.async_apply_light_channels = AsyncMock(return_value=True)
+    entity = light.FluvalLight(device, "light")
+
+    assert entity._attr_color_mode == ColorMode.RGB
+    assert entity._attr_supported_color_modes == {ColorMode.RGB}
+
+    await entity.async_turn_on(**{ATTR_BRIGHTNESS: 255, ATTR_RGB_COLOR: (255, 0, 255)})
+
+    device.async_apply_light_channels.assert_awaited_once_with(
+        {
+            "channel_1": 0,
+            "channel_2": 0,
+            "channel_3": 0,
+            "channel_4": 100,
+            "channel_5": 0,
+        }
+    )
 
 
 def test_light_entity_handles_power_only_actions():

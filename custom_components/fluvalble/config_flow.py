@@ -27,6 +27,7 @@ from .core import (
     LAMP_PROFILE_AQUASKY,
     LAMP_PROFILE_AQUASKY3,
     LAMP_PROFILE_AUTO,
+    LAMP_PROFILE_MARINE,
     LAMP_PROFILE_PLANT,
     LAMP_PROFILE_PLANT_PRO,
 )
@@ -339,6 +340,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                         LAMP_PROFILE_AUTO: "Auto-detect from BLE name / protocol",
                         LAMP_PROFILE_PLANT: "Plant 5-channel (Pink–Warm White)",
                         LAMP_PROFILE_PLANT_PRO: "Current Plant 5-channel (Pink–Warm White)",
+                        LAMP_PROFILE_MARINE: "Marine/Reef 5-channel spectrum",
                         LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
                         LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (4-channel RGBW)",
                     }

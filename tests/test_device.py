@@ -7,11 +7,13 @@ from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.fluvalble.core import (
     LAMP_PROFILE_AQUASKY3,
+    LAMP_PROFILE_MARINE,
     LAMP_PROFILE_PLANT,
 )
 from custom_components.fluvalble.core import protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
+    CHANNEL_NAMES_MARINE,
     CHANNEL_NAMES_PLANT,
     CHANNEL_NAMES_PLANT_PRO,
     Device,
@@ -431,6 +433,101 @@ def test_plant_pro_and_plant_4_keep_separate_models_with_same_apk_channel_order(
         "White",
         "Warm White",
     ]
+
+
+def test_apk_marine_products_use_five_channel_rgb_translation():
+    classic_marine = _make_device(product_id=289)
+    reef_4 = _make_device(product_id=546)
+
+    for device in (classic_marine, reef_4):
+        assert device.numbers() == NUMBERS
+        assert device.light_mode() == "rgb"
+        assert [device.entity_name(channel) for channel in NUMBERS] == [
+            "Pink",
+            "Cyan",
+            "Blue",
+            "Purple",
+            "Cold White",
+        ]
+
+
+def test_marine_profile_override_uses_marine_channel_layout():
+    device = _make_device(
+        name="Fish Tank",
+        model="Unknown Bluetooth LED",
+        lamp_profile=LAMP_PROFILE_MARINE,
+    )
+
+    assert device.numbers() == NUMBERS
+    assert device.light_mode() == "rgb"
+    assert device.entity_name("channel_1") == CHANNEL_NAMES_MARINE["channel_1"]
+    assert device.entity_name("channel_5") == CHANNEL_NAMES_MARINE["channel_5"]
+
+
+def test_marine_name_fallback_uses_marine_channel_layout():
+    device = _make_device(
+        name="Marine Nano",
+        model="Unknown Bluetooth LED",
+    )
+
+    assert device.numbers() == NUMBERS
+    assert device.light_mode() == "rgb"
+    assert device.entity_name("channel_2") == CHANNEL_NAMES_MARINE["channel_2"]
+    assert device.entity_name("channel_4") == CHANNEL_NAMES_MARINE["channel_4"]
+
+
+def test_marine_rgb_maps_to_apk_channel_semantics():
+    device = _make_device(product_id=546)
+
+    assert device.channels_from_rgb((255, 0, 0), 255) == {
+        "channel_1": 100,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 0,
+        "channel_5": 0,
+    }
+    assert device.channels_from_rgb((0, 255, 255), 255) == {
+        "channel_1": 0,
+        "channel_2": 100,
+        "channel_3": 0,
+        "channel_4": 0,
+        "channel_5": 0,
+    }
+    assert device.channels_from_rgb((0, 0, 255), 255) == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 100,
+        "channel_4": 0,
+        "channel_5": 0,
+    }
+    assert device.channels_from_rgb((255, 0, 255), 255) == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 100,
+        "channel_5": 0,
+    }
+    assert device.channels_from_rgb((255, 255, 255), 255) == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 0,
+        "channel_5": 100,
+    }
+
+
+def test_marine_state_mix_uses_all_five_channels():
+    device = _make_device(product_id=546)
+    device.values.update({channel: 0 for channel in NUMBERS})
+    device.values["channel_2"] = 100
+
+    assert device.light_rgb_255() == (0, 255, 255)
+
+    device.values["channel_2"] = 0
+    device.values["channel_5"] = 100
+    red, green, blue = device.light_rgb_255()
+    assert blue == 255
+    assert red < green < blue
 
 
 def test_aquasky_uses_rgbw_and_maps_channels_at_requested_brightness():

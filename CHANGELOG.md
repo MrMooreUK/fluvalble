@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Corrected APK-identified Marine and Reef fixtures to use Home Assistant's RGB
+  light mode with a dedicated Pink/Cyan/Blue/Purple/Cold White translation,
+  rather than treating their first four channels as AquaSky RGBW. A matching
+  Marine/Reef manual lamp-profile override is also available.
 - Normalized saved and fixture-native schedule payloads to positional
   `channel_1` through `channel_5` fields, with product-specific labels supplied
   from the APK-backed fixture profile. Existing RGB-style and Plant-specific

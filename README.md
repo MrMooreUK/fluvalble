@@ -114,7 +114,8 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 For fixtures whose advertisement contains an APK-known product ID, the device
 page uses FluvalConnect's exact model name and Auto profile channel count. The
-manual lamp-profile option remains available as an explicit override.
+manual lamp-profile option remains available as an explicit override, including
+distinct Plant and Marine/Reef five-channel layouts.
 For AquaSky 3.0/FACEBD and FFF0/SPP controllers, the fixture's locally
 reported firmware version appears in Home Assistant's standard device information.
 
