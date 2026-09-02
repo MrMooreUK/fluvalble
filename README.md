@@ -113,6 +113,9 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 4. After setup, the light and supporting entities appear on the device. If you only see the integration card (for example, "Update") and no light entity, see [Troubleshooting](#troubleshooting) below.
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
+For fixtures whose advertisement contains an APK-known product ID, the device
+page uses FluvalConnect's exact model name and Auto profile channel count. The
+manual lamp-profile option remains available as an explicit override.
 For AquaSky 3.0/FACEBD and Plant Pro/MESH controllers, the fixture's locally
 reported firmware version appears in Home Assistant's standard device information.
 

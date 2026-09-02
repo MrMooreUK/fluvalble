@@ -32,6 +32,25 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
     )
 
 
+def test_apk_product_identity_drives_auto_model_and_channel_count():
+    aquasky = _make_device(
+        name="Generic Light",
+        model="Bluetooth LED",
+        product_id=328,
+    )
+    plant = _make_device(
+        name="Generic Light",
+        model="Bluetooth LED",
+        product_id=305,
+    )
+
+    assert aquasky.model_name == "Aquasky 750mm"
+    assert aquasky.numbers() == AQUASKY_NUMBERS
+    assert plant.model_name == "Fresh & Plant 500mm"
+    assert plant.numbers() == NUMBERS
+    assert plant.entity_name("channel_1") == "Rose"
+
+
 def test_connection_attribute_uses_recent_activity_or_live_gatt():
     device = _make_device()
     device.connected = False

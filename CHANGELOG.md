@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added APK-backed product-ID detection for Fluval advertisements. Classic
+  fixtures now reconstruct the split ASCII product ID correctly (rather than
+  mistaking the following firmware bytes for it), use the exact APK model name,
+  and select the APK channel count when the lamp profile is Auto.
 - Added locally reported fixture firmware versions to standard Home Assistant
   device information for AquaSky 3.0/FACEBD and Plant Pro/MESH controllers.
 - Added a FACEBD-only Daylight saving time configuration switch backed by
