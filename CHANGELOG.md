@@ -50,6 +50,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Aligned one-channel FACEBD and Plant Pro/SPP manual adjustments with the
+  FluvalConnect APK's single-zone commands. Multi-channel and classic writes
+  retain their existing all-zone packets.
+- Corrected the APK four-effect catalogue to Crescent moon, Partly cloudy,
+  Lightning, and Sun and lightning with wire IDs 4, 3, 1, and 2. The classic
+  11-effect catalogue remains unchanged.
 - Corrected five-channel FACEBD Auto schedules to retain the APK-provided fifth
   day and night level. Four-channel AquaSky schedule packets remain unchanged.
 - Corrected five-channel FACEBD manual control and readback to include the APK's
