@@ -11,6 +11,11 @@ import voluptuous as vol
 from homeassistant.components import bluetooth
 from homeassistant import config_entries
 from homeassistant.config_entries import ConfigFlowResult
+
+try:
+    from homeassistant.config_entries import OptionsFlowWithReload as OptionsFlowBase
+except ImportError:  # Home Assistant before 2025.8
+    from homeassistant.config_entries import OptionsFlow as OptionsFlowBase  # type: ignore[no-redef]
 from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -53,6 +58,27 @@ def validate_active_time(value: Any) -> int:
     if active_time == 0 or 30 <= active_time <= 600:
         return active_time
     raise vol.Invalid("Active connection window must be 0 or between 30 and 600 seconds")
+
+
+OPTIONS_SCHEMA = vol.Schema(
+    {
+        vol.Optional(CONF_LAMP_PROFILE, default=DEFAULT_LAMP_PROFILE): vol.In(
+            {
+                LAMP_PROFILE_AUTO: "Auto-detect (APK product ID first)",
+                LAMP_PROFILE_PLANT: "Plant 5-channel (Pink–Warm White)",
+                LAMP_PROFILE_PLANT_PRO: "Current Plant 5-channel (Pink–Warm White)",
+                LAMP_PROFILE_MARINE: "Marine/Reef 5-channel spectrum",
+                LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
+                LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (4-channel RGBW)",
+            }
+        ),
+        vol.Optional(CONF_PING_INTERVAL, default=DEFAULT_PING_INTERVAL): vol.All(
+            int,
+            vol.Range(min=5, max=60),
+        ),
+        vol.Optional(CONF_ACTIVE_TIME, default=DEFAULT_ACTIVE_TIME): validate_active_time,
+    }
+)
 
 
 def normalize_mac(mac: str) -> str:
@@ -317,45 +343,21 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return OptionsFlowHandler()
 
 
-class OptionsFlowHandler(config_entries.OptionsFlow):
-    """Handle options for Fluval Aquarium LED.
-
-    Uses OptionsFlow (not OptionsFlowWithConfigEntry) so HA injects
-    ``self.config_entry`` correctly — fixing the Configure gear 500 (#16).
-    """
+class OptionsFlowHandler(OptionsFlowBase):
+    """Handle options and let Home Assistant reload the config entry once."""
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and handle the options form."""
         if user_input is not None:
-            return self.async_create_entry(data=user_input)
+            return self.async_create_entry(title="", data=user_input)
 
-        options = self.config_entry.options
-        schema = vol.Schema(
-            {
-                vol.Optional(
-                    CONF_LAMP_PROFILE,
-                    default=options.get(CONF_LAMP_PROFILE, DEFAULT_LAMP_PROFILE),
-                ): vol.In(
-                    {
-                        LAMP_PROFILE_AUTO: "Auto-detect (APK product ID first)",
-                        LAMP_PROFILE_PLANT: "Plant 5-channel (Pink–Warm White)",
-                        LAMP_PROFILE_PLANT_PRO: "Current Plant 5-channel (Pink–Warm White)",
-                        LAMP_PROFILE_MARINE: "Marine/Reef 5-channel spectrum",
-                        LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
-                        LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (4-channel RGBW)",
-                    }
-                ),
-                vol.Optional(
-                    CONF_PING_INTERVAL,
-                    default=options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL),
-                ): vol.All(int, vol.Range(min=5, max=60)),
-                vol.Optional(
-                    CONF_ACTIVE_TIME,
-                    default=options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME),
-                ): validate_active_time,
-            }
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(
+                OPTIONS_SCHEMA,
+                self.config_entry.options,
+            ),
         )
-        return self.async_show_form(step_id="init", data_schema=schema)
 
 
 class InvalidFormat(HomeAssistantError):

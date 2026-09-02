@@ -4,20 +4,68 @@ Tests for config flow helpers — MAC normalisation, validation, and title gener
 All HA stubs are registered by conftest.py before this module loads.
 """
 
-import sys
+import asyncio
 import os
+import sys
+from unittest.mock import MagicMock
+
 import pytest
 import voluptuous as vol
+
+from homeassistant import config_entries
 
 # conftest.py registers all stubs before collection; just ensure path is set.
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.fluvalble.config_flow import (
+    OptionsFlowHandler,
     normalize_mac,
     unique_id_from_mac,
     validate_active_time,
     MAC_REGEX,
 )
+
+
+def test_options_flow_uses_home_assistant_reload_helper():
+    """Options changes rely on HA's single automatic reload path."""
+    assert issubclass(OptionsFlowHandler, config_entries.OptionsFlowWithReload)
+
+
+def test_options_flow_uses_saved_values_as_suggestions():
+    """Stored options are supplied through HA's suggested-value helper."""
+    options = {
+        "lamp_profile": "plant",
+        "ping_interval": 15,
+        "active_time": 0,
+    }
+    flow = OptionsFlowHandler()
+    flow.config_entry.options = options
+    suggested_schema = object()
+    flow.add_suggested_values_to_schema = MagicMock(return_value=suggested_schema)
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+
+    result = asyncio.run(flow.async_step_init())
+
+    assert result == {"type": "form"}
+    flow.add_suggested_values_to_schema.assert_called_once()
+    assert flow.add_suggested_values_to_schema.call_args.args[1] is options
+    flow.async_show_form.assert_called_once_with(step_id="init", data_schema=suggested_schema)
+
+
+def test_options_flow_submission_is_owned_by_reload_helper():
+    """The handler only creates options; its HA base class owns the reload."""
+    flow = OptionsFlowHandler()
+    flow.async_create_entry = MagicMock(return_value={"type": "create_entry"})
+    submitted = {
+        "lamp_profile": "auto",
+        "ping_interval": 10,
+        "active_time": 120,
+    }
+
+    result = asyncio.run(flow.async_step_init(submitted))
+
+    assert result == {"type": "create_entry"}
+    flow.async_create_entry.assert_called_once_with(title="", data=submitted)
 
 
 class TestActiveTimeSchema:
