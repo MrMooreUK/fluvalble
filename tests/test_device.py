@@ -32,6 +32,25 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
     )
 
 
+def test_apk_product_identity_drives_auto_model_and_channel_count():
+    aquasky = _make_device(
+        name="Generic Light",
+        model="Bluetooth LED",
+        product_id=328,
+    )
+    plant = _make_device(
+        name="Generic Light",
+        model="Bluetooth LED",
+        product_id=305,
+    )
+
+    assert aquasky.model_name == "Aquasky 750mm"
+    assert aquasky.numbers() == AQUASKY_NUMBERS
+    assert plant.model_name == "Fresh & Plant 500mm"
+    assert plant.numbers() == NUMBERS
+    assert plant.entity_name("channel_1") == "Rose"
+
+
 def test_connection_attribute_uses_recent_activity_or_live_gatt():
     device = _make_device()
     device.connected = False
@@ -143,6 +162,20 @@ def test_plant_pro_identity_exposes_only_plant_pro_effects():
     device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
 
     assert device.effect_list() == ["None", *PLANT_PRO_EFFECTS]
+
+
+def test_product_id_drives_apk_effect_catalogue():
+    no_effects = _make_device(product_id=305, service_uuids=["00001002-0000-1000-8000-00805f9b34fb"])
+    aquasky = _make_device(product_id=328)
+    plant_4 = _make_device(product_id=545)
+    reef_4 = _make_device(product_id=546)
+    roma_shaker = _make_device(product_id=564)
+
+    assert no_effects.effect_list() == []
+    assert aquasky.effect_list() == ["None", *WEATHER_EFFECTS]
+    assert plant_4.effect_list() == ["None", *PLANT_PRO_EFFECTS]
+    assert reef_4.effect_list() == ["None", *PLANT_PRO_EFFECTS]
+    assert roma_shaker.effect_list() == ["None", *WEATHER_EFFECTS]
 
 
 def test_native_weather_effect_uses_apk_packet():

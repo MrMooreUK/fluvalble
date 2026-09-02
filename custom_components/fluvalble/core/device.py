@@ -25,6 +25,7 @@ from . import (
 from .client import Client
 from .discovery import (
     CONF_MODEL,
+    CONF_PRODUCT_ID,
     detect_model,
 )
 from .effects import (
@@ -36,6 +37,7 @@ from .effects import (
     plant_pro_effect_name,
 )
 from . import protocol
+from .products import product_from_id, product_id_from_manufacturer_data
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -60,6 +62,13 @@ CHANNEL_NAMES_PLANT = {
     "channel_3": "Cold White",
     "channel_4": "Pure White",
     "channel_5": "Warm White",
+}
+CHANNEL_NAMES_MARINE = {
+    "channel_1": "Pink",
+    "channel_2": "Cyan",
+    "channel_3": "Blue",
+    "channel_4": "Purple",
+    "channel_5": "Cold White",
 }
 CHANNEL_NAMES_PLANT_PRO = {
     "channel_1": "Red",
@@ -126,8 +135,19 @@ class Device:
         config_data = config_data or {}
         self.hass = hass
         self.name = name or (device.name if device else None) or "Fluval"
-        self.model = config_data.get(CONF_MODEL) or detect_model(
-            (device.name if device else None) or name, advertisement
+        configured_product_id = config_data.get(CONF_PRODUCT_ID)
+        self.product_id = (
+            configured_product_id
+            if isinstance(configured_product_id, int) and not isinstance(configured_product_id, bool)
+            else None
+        )
+        if self.product_id is None and advertisement is not None:
+            self.product_id = product_id_from_manufacturer_data(advertisement.manufacturer_data)
+        product = product_from_id(self.product_id)
+        self.model = (
+            (product.model if product is not None else None)
+            or config_data.get(CONF_MODEL)
+            or detect_model((device.name if device else None) or name, advertisement)
         )
         self.lamp_profile = config_data.get(CONF_LAMP_PROFILE, DEFAULT_LAMP_PROFILE)
         self._channel_count_hint: int | None = None
@@ -141,6 +161,7 @@ class Device:
         self.conn_info = {
             "mac": self.address,
             "model": self.model,
+            "product_id": self.product_id,
             "service_uuids": config_data.get("service_uuids", []),
             "service_data": config_data.get("service_data", {}),
         }
@@ -255,6 +276,15 @@ class Device:
         self.touch_seen(rssi=advertisement.rssi, notify=False)
         self.conn_info["service_uuids"] = list(advertisement.service_uuids)
         self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisement.service_data.items()}
+        product_id = product_id_from_manufacturer_data(advertisement.manufacturer_data)
+        if product_id is not None:
+            self.product_id = product_id
+            self.conn_info["product_id"] = product_id
+            self.diagnostics["product_id"] = product_id
+            product = product_from_id(product_id)
+            if product is not None and product.model is not None:
+                self.model = product.model
+                self.conn_info["model"] = self.model
         self.facebd = self._uses_facebd_protocol(
             device.name,
             advertisement.service_uuids,
@@ -377,6 +407,8 @@ class Device:
             return 4
         if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_PLANT_PRO):
             return 5
+        if (product := product_from_id(self.product_id)) is not None:
+            return product.channel_count
         if self._channel_count_hint in (4, 5):
             return self._channel_count_hint
         if self.facebd:
@@ -404,6 +436,13 @@ class Device:
             return CHANNEL_NAMES_PLANT
         if profile in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
             return CHANNEL_NAMES_AQUASKY
+        if (product := product_from_id(self.product_id)) is not None:
+            if product.spectrum == "plant":
+                return CHANNEL_NAMES_PLANT
+            if product.spectrum == "rgbw":
+                return CHANNEL_NAMES_AQUASKY
+            if product.spectrum == "marine":
+                return CHANNEL_NAMES_MARINE
         model_l = (self.model or "").lower()
         name_l = (self.name or "").lower()
         if "plant pro" in model_l or "plantpro" in name_l or "plant pro" in name_l:
@@ -570,6 +609,9 @@ class Device:
 
     def supports_classic_effects(self) -> bool:
         """Return whether available BLE evidence identifies a classic controller."""
+        product = product_from_id(self.product_id)
+        if product is not None and product.native_effect_count != 11:
+            return False
         if self.client is not None and self.client.command_write_uuid:
             return self.client.command_write_uuid.lower().startswith("00001001")
 
@@ -579,22 +621,35 @@ class Device:
         )
 
     def effect_list(self) -> list[str]:
-        """Return effects supported by the positively identified controller."""
+        """Return the APK-defined effect catalogue for this product."""
+        product = product_from_id(self.product_id)
+        if product is not None:
+            if product.native_effect_count == 4:
+                return plant_pro_effect_list()
+            if product.native_effect_count == 11:
+                return classic_effect_list()
+            return []
         if self.supports_plant_pro_effects():
             return plant_pro_effect_list()
         return classic_effect_list() if self.supports_classic_effects() or self.supports_facebd_effects() else []
 
     def supports_facebd_effects(self) -> bool:
-        """Return whether BLE evidence identifies an AquaSky FACEBD controller."""
+        """Return whether BLE evidence identifies an effect-capable FACEBD controller."""
         if not self._uses_wifi_protocol():
             return False
+        product = product_from_id(self.product_id)
+        if product is not None:
+            return product.native_effect_count in (4, 11)
         if self.lamp_profile == LAMP_PROFILE_AQUASKY3:
             return True
         identity = f"{self.name} {self.model}".lower().replace(" ", "")
         return "aquasky" in identity
 
     def supports_plant_pro_effects(self) -> bool:
-        """Return whether available evidence identifies a Plant Pro controller."""
+        """Return whether available evidence identifies a four-effect controller."""
+        product = product_from_id(self.product_id)
+        if product is not None:
+            return product.native_effect_count == 4
         if self._uses_plant_pro_protocol():
             return True
         if self.lamp_profile == LAMP_PROFILE_PLANT_PRO:

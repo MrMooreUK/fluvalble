@@ -7,8 +7,12 @@ from typing import Any
 
 from bleak import AdvertisementData
 
-# Fluval/Hagen manufacturer/company ID seen in Fluval LED advertisements.
-FLUVAL_MANUFACTURER_IDS = frozenset({12592})
+from .products import product_from_id, product_id_from_manufacturer_data
+
+# Classic fixtures encode the first two ASCII product-ID characters in the
+# manufacturer/company field: ``01``, ``02``, or the APK's ``71`` legacy
+# remaps. Current binary advertisements use raw FFFF or FF01 company bytes.
+FLUVAL_MANUFACTURER_IDS = frozenset({12592, 12599, 12848, 511, 65535})
 
 CLASSIC_FLUVAL_SERVICE_UUIDS = frozenset(
     {
@@ -24,9 +28,11 @@ FACEBD_FLUVAL_SERVICE_UUIDS = frozenset(
     }
 )
 
-# Exact Fluval GATT / FACEBD service UUIDs. Do NOT match generic prefixes like
-# 0000fff0 (common on many BLE mesh devices) — that floods discovery prompts.
-FLUVAL_SERVICE_UUIDS = CLASSIC_FLUVAL_SERVICE_UUIDS | FACEBD_FLUVAL_SERVICE_UUIDS
+SPP_FLUVAL_SERVICE_UUIDS = frozenset({"0000fff0-0000-1000-8000-00805f9b34fb"})
+
+# Exact Fluval GATT service UUIDs. FFF0 remains product-gated below because it
+# is common on unrelated BLE devices and must never qualify on its own.
+FLUVAL_SERVICE_UUIDS = CLASSIC_FLUVAL_SERVICE_UUIDS | FACEBD_FLUVAL_SERVICE_UUIDS | SPP_FLUVAL_SERVICE_UUIDS
 
 # Name tokens that are Fluval-branded on their own.
 _FLUVAL_BRAND_NAMES = ("fluval", "aquasky")
@@ -48,6 +54,7 @@ CONF_MODEL = "model"
 CONF_SERVICE_UUIDS = "service_uuids"
 CONF_SERVICE_DATA = "service_data"
 CONF_MANUFACTURER_DATA = "manufacturer_data"
+CONF_PRODUCT_ID = "product_id"
 
 
 def _data_as_hex(data: bytes | bytearray) -> str:
@@ -90,10 +97,13 @@ def has_fluval_service_uuid(advertisement: AdvertisementData | None) -> bool:
     # identify current Fluval advertisements on their own.
     if any(key in FACEBD_FLUVAL_SERVICE_UUIDS or key.startswith("facebd") for key in keys):
         return True
-    # Classic UUIDs are not unique to Fluval; require the Fluval manufacturer
-    # payload as corroborating evidence before prompting discovery.
-    if any(key in CLASSIC_FLUVAL_SERVICE_UUIDS for key in keys):
-        return has_fluval_manufacturer_data(advertisement)
+    # Classic and FFF0 UUIDs are not unique to Fluval; require a manufacturer
+    # payload that decodes to an APK-known product ID before prompting.
+    if any(key in CLASSIC_FLUVAL_SERVICE_UUIDS | SPP_FLUVAL_SERVICE_UUIDS for key in keys):
+        return (
+            has_fluval_manufacturer_data(advertisement)
+            and product_id_from_manufacturer_data(advertisement.manufacturer_data) is not None
+        )
     return False
 
 
@@ -126,10 +136,16 @@ def is_likely_fluval(
 
 
 def detect_model(name: str | None, advertisement: AdvertisementData | None) -> str:
-    """Infer a friendly model name from the BLE advertisement."""
+    """Return the APK product model, falling back to name/protocol hints."""
     display_name = name or ""
     lowered = display_name.lower()
     facebd = has_facebd_advertisement(advertisement)
+
+    if advertisement is not None:
+        product_id = product_id_from_manufacturer_data(advertisement.manufacturer_data)
+        product = product_from_id(product_id)
+        if product is not None and product.model is not None:
+            return product.model
 
     if "plant" in lowered and name_looks_fluval(display_name):
         if "pro" in lowered:
@@ -172,7 +188,7 @@ def detect_model(name: str | None, advertisement: AdvertisementData | None) -> s
 
 def discovery_metadata(name: str | None, advertisement: AdvertisementData) -> dict[str, Any]:
     """Build config-entry metadata from the latest BLE advertisement."""
-    return {
+    metadata = {
         CONF_MODEL: detect_model(name, advertisement),
         CONF_SERVICE_UUIDS: list(advertisement.service_uuids),
         CONF_SERVICE_DATA: {key: _data_as_hex(value) for key, value in advertisement.service_data.items()},
@@ -180,3 +196,6 @@ def discovery_metadata(name: str | None, advertisement: AdvertisementData) -> di
             str(key): _data_as_hex(value) for key, value in advertisement.manufacturer_data.items()
         },
     }
+    if (product_id := product_id_from_manufacturer_data(advertisement.manufacturer_data)) is not None:
+        metadata[CONF_PRODUCT_ID] = product_id
+    return metadata

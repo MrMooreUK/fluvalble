@@ -27,8 +27,8 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant, Plant Pro, and Marine spectra are translated to RGB. |
-| **Weather effects** | Positively identified classic and AquaSky 3.0/FACEBD controllers expose the 11 native FluvalConnect weather effects, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
-| **Plant Pro effects** | Plant Pro / Plant 4.0 exposes its four native effects—Thunderstorm, Lightning, Sun and lightning, and Colour cycle—through the standard light effect control. |
+| **Weather effects** | Product IDs for the APK's 11-effect fixtures expose the native FluvalConnect weather catalogue, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
+| **Four-effect fixtures** | Product IDs for the APK's newer four-effect fixtures expose Thunderstorm, Lightning, Sun and lightning, and Colour cycle through the standard light effect control. |
 | **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
 | **Daylight-saving control** | FACEBD controllers expose their fixture-owned daylight-saving setting as a configuration switch, using the same state and command as FluvalConnect. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
@@ -42,16 +42,15 @@ Entities are created per device around one native colour light, with mode and co
 
 ## Supported devices
 
-Designed for Fluval aquarium LED fixtures that use BLE (Bluetooth Low Energy), including series such as:
+The integration recognizes the light catalogue defined by the current FluvalConnect APK, including:
 
-- **Plant 3.0** (5 channels)
-- **Plant Pro / Plant 4.0** (5 channels)
-- **Reef 3.0** (5 channels)
-- **Aquasky 2.0 / 3.0** (4 channels)
-- **Marine 3.0** (5 channels)
-- Other 1st‑gen BLE Fluval LED lights
+- **Aquasky 2.0 and 3.0** (4-channel RGBW)
+- **Plant 3.0, Plant 4.0, Plant Nano 4.0, and Plant PRO** (5 channels)
+- **Marine/Reef 3.0, Reef 4.0, and Reef Nano 4.0** (5 channels)
+- **Siena 2.0 and Roma & Shaker 2.0**
+- First-generation **Wing Nano, Roma, Vicenza, Venezia, A-Sky Aqua, and Plant Aqua** fixtures
 
-Your light must be controllable via the Fluval (e.g. FluvalSmart / FluvalConnect) app over Bluetooth. If the app can see and control it, this integration can too.
+The exact product ID selects the APK-defined model, channel layout, and native-effect catalogue. BLE transport selection still comes from the fixture's live GATT services, covering the legacy encrypted, FACEBD, and FFF0/SPP protocols implemented by the integration.
 
 ---
 
@@ -113,6 +112,9 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 4. After setup, the light and supporting entities appear on the device. If you only see the integration card (for example, "Update") and no light entity, see [Troubleshooting](#troubleshooting) below.
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
+For fixtures whose advertisement contains an APK-known product ID, the device
+page uses FluvalConnect's exact model name and Auto profile channel count. The
+manual lamp-profile option remains available as an explicit override.
 For AquaSky 3.0/FACEBD and Plant Pro/MESH controllers, the fixture's locally
 reported firmware version appears in Home Assistant's standard device information.
 

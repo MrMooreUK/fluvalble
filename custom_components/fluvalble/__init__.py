@@ -30,6 +30,7 @@ from .core import (
     DOMAIN,
 )
 from .core.device import Device
+from .core.discovery import CONF_MODEL, CONF_PRODUCT_ID
 from .core.effects import EFFECT_NONE, WEATHER_EFFECTS, effect_name
 
 try:
@@ -75,6 +76,28 @@ def _sync_firmware_version_to_device_registry(hass: HomeAssistant, device: Devic
     if registry_device is None or registry_device.sw_version == device.firmware_version:
         return
     registry.async_update_device(registry_device.id, sw_version=device.firmware_version)
+
+
+@callback
+def _sync_product_identity(hass: HomeAssistant, entry: FluvalConfigEntry, device: Device) -> None:
+    """Persist an APK product identity and publish its model to Home Assistant."""
+    if device.product_id is None:
+        return
+
+    data = dict(entry.data)
+    changed = data.get(CONF_PRODUCT_ID) != device.product_id
+    if changed:
+        data[CONF_PRODUCT_ID] = device.product_id
+    if device.model_name and data.get(CONF_MODEL) != device.model_name:
+        data[CONF_MODEL] = device.model_name
+        changed = True
+    if changed:
+        hass.config_entries.async_update_entry(entry, data=data)
+
+    registry = dr.async_get(hass)
+    registry_device = registry.async_get_device(identifiers={(DOMAIN, device.mac.upper())})
+    if registry_device is not None and registry_device.model != device.model_name:
+        registry.async_update_device(registry_device.id, model=device.model_name)
 
 
 DISCOVERY_LOG_INTERVAL = 5
@@ -412,6 +435,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             "firmware_version",
             lambda: _sync_firmware_version_to_device_registry(hass, device),
         )
+        _sync_product_identity(hass, entry, device)
 
         # Retroactively add entities for platforms that set up before the
         # device was available (they stashed their add_entities callback).
@@ -472,6 +496,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         log_discovery_update("Fluval BLE update: %s %s", service_info, change)
         if device := runtime.device:
             device.update_ble(service_info.device, service_info.advertisement)
+            _sync_product_identity(hass, entry, device)
             return
 
         # First time seeing the device via BLE advertisement

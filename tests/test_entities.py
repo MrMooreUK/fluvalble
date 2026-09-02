@@ -381,3 +381,25 @@ def test_reported_firmware_updates_standard_device_registry_info():
 
     registry.async_get_device.assert_called_once_with(identifiers={("fluvalble", "AA:BB:CC:DD:EE:FF")})
     registry.async_update_device.assert_called_once_with("device_1", sw_version="14")
+
+
+def test_product_identity_updates_config_entry_and_device_registry():
+    import custom_components.fluvalble as integration
+
+    device = _make_device()
+    device.product_id = 328
+    device.model = "Aquasky 750mm"
+    entry = SimpleNamespace(data={"mac": device.mac})
+    hass = MagicMock()
+    registry_device = SimpleNamespace(id="device_1", model="AquaSky Bluetooth LED")
+    registry = MagicMock()
+    registry.async_get_device.return_value = registry_device
+
+    with patch.object(integration.dr, "async_get", return_value=registry, create=True):
+        integration._sync_product_identity(hass, entry, device)
+
+    hass.config_entries.async_update_entry.assert_called_once_with(
+        entry,
+        data={"mac": device.mac, "product_id": 328, "model": "Aquasky 750mm"},
+    )
+    registry.async_update_device.assert_called_once_with("device_1", model="Aquasky 750mm")
