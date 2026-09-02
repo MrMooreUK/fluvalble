@@ -104,6 +104,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - BLE reconnects now replace stale clients, use one bounded connector retry
   cycle, and cannot race an in-flight command or integration unload.
 
+### Fixed
+- Restored device command-error reporting so failed preview and schedule actions
+  raise the underlying BLE error instead of an `AttributeError`.
+
 ### Added
 - Plant Pro / Plant 4.0 core BLE support using its native unencrypted SPP
   transport for discovery, power, mode, five-channel colour, and live state.

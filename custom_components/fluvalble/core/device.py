@@ -340,6 +340,12 @@ class Device:
             last_seen = last_seen.replace(tzinfo=UTC)
         return (datetime.now(UTC) - last_seen).total_seconds() <= REACHABLE_SECONDS
 
+    def command_error_message(self) -> str:
+        """Return the most useful available BLE command error."""
+        if self.client is not None and self.client.last_error:
+            return self.client.last_error
+        return self.diagnostics.get("last_error") or "Fluval BLE command failed"
+
     def _notify_diagnostics_throttled(self):
         """Notify diagnostic entities at most once per interval."""
         now = monotonic()

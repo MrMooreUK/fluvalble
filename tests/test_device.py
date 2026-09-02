@@ -98,6 +98,18 @@ def test_connection_attribute_uses_recent_activity_or_live_gatt():
     assert device.attribute("connection")["extra"]["gatt_connected"] is True
 
 
+def test_command_error_message_prefers_client_then_diagnostics_then_default():
+    device = _make_device()
+
+    assert device.command_error_message() == "Fluval BLE command failed"
+
+    device.diagnostics["last_error"] = "diagnostic write failure"
+    assert device.command_error_message() == "diagnostic write failure"
+
+    device.client = SimpleNamespace(last_error="live client failure")
+    assert device.command_error_message() == "live client failure"
+
+
 def test_reachability_expiry_notifies_connection_entities():
     device = _make_device()
     handler = MagicMock()

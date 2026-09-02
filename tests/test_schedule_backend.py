@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 import pytest
 import voluptuous as vol
@@ -394,7 +394,7 @@ async def _async_test_failed_native_mode_upload_does_not_replace_working_mode(mo
 
     device = _make_device()
     device.async_set_native_pro_schedule = AsyncMock(return_value=False)
-    device.command_error_message = MagicMock(return_value="write failed")
+    device.diagnostics["last_error"] = "write failed"
     hass = _FakeHass(device)
     points = _schedule_points()
     _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "manual"}}}
