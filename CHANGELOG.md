@@ -50,6 +50,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Corrected classic and Plant Pro clock synchronization to encode weekdays as
+  Monday `1` through Sunday `7`, matching FluvalConnect's `TimeUtil.getWeeks`.
 - Corrected classic `6804` channel writes to encode each scaled 16-bit level
   high-byte first, matching FluvalConnect's actual hexadecimal word output.
 - Aligned classic state readback with FluvalConnect's exact `6805` response
