@@ -12,6 +12,7 @@ MAX_CBOR_CONTAINER_ITEMS = 64
 MAX_CBOR_BYTE_STRING_LENGTH = 4096
 MAX_CBOR_NESTING_DEPTH = 8
 
+WIFI_DST_KEY = 99
 WIFI_TZ_OFFSET_KEY = 101
 WIFI_CLOCK_MS_KEY = 102
 FIND_KEY = 52
@@ -76,6 +77,11 @@ MESH_OPCODE_CLOCK = 0xCD
 def wifi_switch_packet(is_on: bool) -> bytes:
     """Build the FACEBD WiFi-over-BLE on/off packet."""
     return cbor_map({WIFI_SWITCH_KEY: is_on})
+
+
+def wifi_dst_packet(enabled: bool) -> bytes:
+    """Build FluvalConnect's FACEBD daylight-saving toggle packet."""
+    return cbor_map({WIFI_DST_KEY: enabled})
 
 
 def wifi_mode_packet(mode: int) -> bytes:

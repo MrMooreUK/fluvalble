@@ -916,6 +916,10 @@ class Device:
         """List of diagnostics sensors provided by the device."""
         return list(SENSORS)
 
+    def supports_facebd_dst_control(self) -> bool:
+        """Return whether this fixture uses FluvalConnect's FACEBD DST setting."""
+        return self._uses_wifi_protocol()
+
     def attribute(self, attr: str) -> Attribute:
         """Provide attributes to the entities like switches, numbers etc."""
         if attr == "connection":
@@ -930,6 +934,9 @@ class Device:
             return Attribute(options=SCHEDULE_MODES, default=self.schedule_mode)
         if attr == "led_on_off":
             return Attribute(is_on=self.values[attr])
+        if attr == "daylight_saving_time":
+            value = self.values.get(attr)
+            return Attribute(is_on=value) if isinstance(value, bool) else Attribute()
         if attr == "rssi":
             return Attribute(
                 value=self.conn_info.get("rssi"),
@@ -1430,6 +1437,32 @@ class Device:
                 handler()
         return ok
 
+    async def async_set_daylight_saving_time(self, enabled: bool) -> bool:
+        """Set the fixture-owned FACEBD daylight-saving flag."""
+        if not await self._async_prepare_command():
+            _LOGGER.warning("Cannot set Fluval daylight-saving time before BLE is available")
+            return False
+        if not self._uses_wifi_protocol():
+            self._set_diagnostic_error(
+                "unsupported_daylight_saving_time",
+                "Daylight-saving control is supported only by FACEBD fixtures",
+            )
+            return False
+
+        previous = self.values.get("daylight_saving_time")
+        self.values["daylight_saving_time"] = enabled
+        if not await self._async_send_packet(protocol.wifi_dst_packet(enabled)):
+            if isinstance(previous, bool):
+                self.values["daylight_saving_time"] = previous
+            else:
+                self.values.pop("daylight_saving_time", None)
+            for handler in self.updates_component:
+                handler()
+            return False
+
+        self.diagnostics["daylight_saving_time"] = enabled
+        return True
+
     async def async_identify(self) -> bool:
         """Ask the fixture to identify itself using FluvalConnect's Find command."""
         if not await self._async_prepare_command():
@@ -1640,6 +1673,7 @@ class Device:
             supported_keys = {
                 protocol.WIFI_MODE_KEY,
                 protocol.WIFI_SWITCH_KEY,
+                protocol.WIFI_DST_KEY,
                 *(protocol.WIFI_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
             }
         return {key: value for key, value in decoded.items() if key in supported_keys}
@@ -1955,6 +1989,11 @@ class Device:
 
         if protocol.WIFI_SWITCH_KEY in data:
             self.values["led_on_off"] = bool(data[protocol.WIFI_SWITCH_KEY])
+            updated = True
+
+        if protocol.WIFI_DST_KEY in data and isinstance(data[protocol.WIFI_DST_KEY], bool):
+            self.values["daylight_saving_time"] = data[protocol.WIFI_DST_KEY]
+            self.diagnostics["daylight_saving_time"] = data[protocol.WIFI_DST_KEY]
             updated = True
 
         if (

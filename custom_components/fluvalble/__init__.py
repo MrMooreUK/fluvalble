@@ -101,7 +101,8 @@ RETIRED_DIAGNOSTIC_SUFFIXES = (
     "_refresh_diagnostics",
     "_test_led_channels",
 )
-RETIRED_ENTITY_DOMAINS = frozenset({Platform.NUMBER.value, Platform.SWITCH.value})
+RETIRED_ENTITY_DOMAINS = frozenset({Platform.NUMBER.value})
+RETIRED_SWITCH_SUFFIXES = ("_led_on_off",)
 
 
 def _validate_schedule_points(points: object) -> list[dict]:
@@ -321,6 +322,7 @@ PLATFORMS: list[Platform] = [
     Platform.BUTTON,
     Platform.SELECT,
     Platform.SENSOR,
+    Platform.SWITCH,
     Platform.LIGHT,
 ]
 
@@ -400,6 +402,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         from .light import create_entities as light_entities  # noqa: PLC0415
         from .button import create_entities as button_entities  # noqa: PLC0415
         from .sensor import create_entities as diagnostics_entities  # noqa: PLC0415
+        from .switch import create_entities as switch_entities  # noqa: PLC0415
 
         factories = {
             Platform.BINARY_SENSOR: sensor_entities,
@@ -407,6 +410,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             Platform.LIGHT: light_entities,
             Platform.BUTTON: button_entities,
             Platform.SENSOR: diagnostics_entities,
+            Platform.SWITCH: switch_entities,
         }
 
         for platform, add_fn in runtime.pending_add_entities.items():
@@ -504,9 +508,10 @@ def _remove_retired_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
         domain = str(getattr(entity, "domain", "") or str(entity.entity_id).partition(".")[0])
         unique_id = str(getattr(entity, "unique_id", ""))
         retired_platform = domain in RETIRED_ENTITY_DOMAINS
+        retired_switch = domain == Platform.SWITCH.value and unique_id.endswith(RETIRED_SWITCH_SUFFIXES)
         retired_channel = unique_id.endswith(RETIRED_CHANNEL_SUFFIXES)
         retired_diagnostics = unique_id.endswith(RETIRED_DIAGNOSTIC_SUFFIXES)
-        if retired_platform or retired_channel or retired_diagnostics:
+        if retired_platform or retired_switch or retired_channel or retired_diagnostics:
             _LOGGER.info("Removing retired Fluval entity %s", entity.entity_id)
             registry.async_remove(entity.entity_id)
 

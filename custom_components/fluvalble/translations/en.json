@@ -71,6 +71,11 @@
         }
       }
     },
+    "switch": {
+      "daylight_saving_time": {
+        "name": "Daylight saving time"
+      }
+    },
     "light": {
       "light": {
         "name": "Light"
