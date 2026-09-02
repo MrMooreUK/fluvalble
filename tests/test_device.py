@@ -858,7 +858,70 @@ async def _async_test_plant_pro_commands_use_spp_packets():
     device.values["led_on_off"] = True
     device._async_send_packet.reset_mock()
     assert await device.async_set_channels({"channel_1": 75})
-    device._async_send_packet.assert_awaited_once_with(protocol.spp_all_zone_packet([75, 0, 0, 0, 0]))
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_single_zone_packet(0, 75))
+
+
+def test_facebd_single_channel_change_uses_apk_single_zone_packet():
+    asyncio.run(_async_test_facebd_single_channel_change_uses_apk_single_zone_packet())
+
+
+async def _async_test_facebd_single_channel_change_uses_apk_single_zone_packet():
+    device = _make_device(product_id=546)
+    device.client = _facebd_client()
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_5": 75})
+    device._async_send_packet.assert_awaited_once_with(protocol.wifi_single_zone_packet(4, 75))
+
+
+def test_spp_multi_channel_change_keeps_all_zone_packet():
+    asyncio.run(_async_test_spp_multi_channel_change_keeps_all_zone_packet())
+
+
+async def _async_test_spp_multi_channel_change_keeps_all_zone_packet():
+    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED")
+    device.client = SimpleNamespace(plant_pro_spp=True, wifi_facebd=False)
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 75, "channel_2": 25})
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_all_zone_packet([75, 25, 0, 0, 0]))
+
+
+def test_classic_single_channel_change_keeps_apk_all_zone_packet():
+    asyncio.run(_async_test_classic_single_channel_change_keeps_apk_all_zone_packet())
+
+
+async def _async_test_classic_single_channel_change_keeps_apk_all_zone_packet():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 75})
+    device._async_send_packet.assert_awaited_once_with(protocol.old_all_zone_packet([75, 0, 0, 0]))
+
+
+def test_effect_restore_keeps_complete_channel_packet():
+    asyncio.run(_async_test_effect_restore_keeps_complete_channel_packet())
+
+
+async def _async_test_effect_restore_keeps_complete_channel_packet():
+    device = _make_device(product_id=546)
+    device.client = _facebd_client()
+    device.values.update({"mode": "manual", "led_on_off": True, "effect": "Lightning"})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 75})
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.wifi_switch_packet(True),
+        protocol.wifi_all_zone_packet([75, 0, 0, 0, 0]),
+    ]
 
 
 async def _assert_identify_packet(device, expected_packet):

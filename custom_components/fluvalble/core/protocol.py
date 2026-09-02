@@ -117,6 +117,18 @@ def wifi_all_zone_packet(values: Iterable[int]) -> bytes:
     return cbor_map(packet)
 
 
+def wifi_single_zone_packet(channel_index: int, value: int) -> bytes:
+    """Build the APK FACEBD packet for one manual color channel."""
+    if not 0 <= channel_index < len(WIFI_CHANNEL_KEYS):
+        raise ValueError("FACEBD Fluval channel index must be between 0 and 4")
+    return cbor_map(
+        {
+            WIFI_CHANNEL_KEYS[channel_index]: _clamp_percent(value),
+            WIFI_MANUAL_KEY: 0,
+        }
+    )
+
+
 def wifi_clock_packet(now: datetime | None = None) -> bytes:
     """Build FACEBD clock sync (milliseconds since Unix epoch)."""
     moment = now or datetime.now().astimezone()
@@ -283,6 +295,18 @@ def spp_all_zone_packet(values: Iterable[int]) -> bytes:
     packet = {key: _clamp_percent(value) for key, value in zip(SPP_CHANNEL_KEYS, values, strict=False)}
     packet[SPP_MANUAL_KEY] = 0
     return spp_command(packet)
+
+
+def spp_single_zone_packet(channel_index: int, value: int) -> bytes:
+    """Build the APK Plant Pro/MESH packet for one manual color channel."""
+    if not 0 <= channel_index < len(SPP_CHANNEL_KEYS):
+        raise ValueError("Plant Pro channel index must be between 0 and 4")
+    return spp_command(
+        {
+            SPP_CHANNEL_KEYS[channel_index]: _clamp_percent(value),
+            SPP_MANUAL_KEY: 0,
+        }
+    )
 
 
 def spp_effect_packet(effect_id: int) -> bytes:

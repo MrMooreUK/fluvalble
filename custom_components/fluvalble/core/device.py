@@ -1136,6 +1136,8 @@ class Device:
             return True
 
         old_values = dict(self.values)
+        changed_channels = [channel for channel, value in targets.items() if int(old_values.get(channel, -1)) != value]
+        single_channel = changed_channels[0] if len(changed_channels) == 1 and not force else None
         if not await self._async_prepare_command():
             _LOGGER.warning("Cannot set Fluval channel before BLE device is available")
             self.values = old_values
@@ -1159,6 +1161,7 @@ class Device:
             ok = await self._async_send_channel_state(
                 old_values,
                 force_power=force,
+                single_channel=single_channel,
             )
             if ok and effect_active:
                 self._clear_effect_state()
@@ -1177,6 +1180,7 @@ class Device:
             if not await self._async_send_channel_state(
                 old_values,
                 force_power=force,
+                single_channel=single_channel,
             ):
                 self.values = old_values
                 return False
@@ -1194,8 +1198,10 @@ class Device:
         old_values: dict[str, Any],
         *,
         force_power: bool = False,
+        single_channel: str | None = None,
     ) -> bool:
         """Send the current channel values to the controller."""
+        channel_index = self.numbers().index(single_channel) if single_channel is not None else None
         if self._uses_wifi_protocol():
             any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
@@ -1203,7 +1209,12 @@ class Device:
                 if not await self._async_send_packet(protocol.wifi_switch_packet(True)):
                     self.values = old_values
                     return False
-            ok = await self._async_send_packet(protocol.wifi_all_zone_packet(self._channel_values()))
+            packet = (
+                protocol.wifi_single_zone_packet(channel_index, self.values[single_channel])
+                if channel_index is not None and single_channel is not None
+                else protocol.wifi_all_zone_packet(self._channel_values())
+            )
+            ok = await self._async_send_packet(packet)
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
                 ok = await self._async_send_packet(protocol.wifi_switch_packet(False))
                 if ok:
@@ -1215,7 +1226,12 @@ class Device:
                 if not await self._async_send_packet(protocol.spp_switch_packet(True)):
                     self.values = old_values
                     return False
-            ok = await self._async_send_packet(protocol.spp_all_zone_packet(self._channel_values()))
+            packet = (
+                protocol.spp_single_zone_packet(channel_index, self.values[single_channel])
+                if channel_index is not None and single_channel is not None
+                else protocol.spp_all_zone_packet(self._channel_values())
+            )
+            ok = await self._async_send_packet(packet)
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
                 ok = await self._async_send_packet(protocol.spp_switch_packet(False))
                 if ok:

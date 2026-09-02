@@ -45,6 +45,22 @@ def test_wifi_values_are_clamped_to_percent_range():
     assert decoded[protocol.WIFI_CHANNEL_KEYS[1]] == 100
 
 
+def test_wifi_single_zone_packet_matches_apk_channel_and_manual_keys():
+    packet = protocol.wifi_single_zone_packet(4, 75)
+
+    assert packet == bytes.fromhex("a2 18 72 18 4b 18 6d 00")
+    assert protocol.decode_cbor_map(packet) == {
+        protocol.WIFI_CHANNEL_KEYS[4]: 75,
+        protocol.WIFI_MANUAL_KEY: 0,
+    }
+
+
+def test_wifi_single_zone_packet_validates_index_and_clamps_level():
+    assert protocol.decode_cbor_map(protocol.wifi_single_zone_packet(0, 101))[protocol.WIFI_CHANNEL_KEYS[0]] == 100
+    with pytest.raises(ValueError, match="between 0 and 4"):
+        protocol.wifi_single_zone_packet(5, 50)
+
+
 def test_wifi_mode_packet_uses_mode_key():
     packet = protocol.wifi_mode_packet(1)
 
@@ -356,6 +372,22 @@ def test_plant_pro_all_zone_packet_matches_reference_capture():
         protocol.SPP_CHANNEL_KEYS[4]: 50,
         protocol.SPP_MANUAL_KEY: 0,
     }
+
+
+def test_plant_pro_single_zone_packet_matches_apk_mesh_command():
+    packet = protocol.spp_single_zone_packet(0, 75)
+
+    assert packet == bytes.fromhex("d1 a2 03 18 4b 0e 00")
+    assert protocol.decode_cbor_update(packet) == {
+        protocol.SPP_CHANNEL_KEYS[0]: 75,
+        protocol.SPP_MANUAL_KEY: 0,
+    }
+
+
+def test_plant_pro_single_zone_packet_validates_index_and_clamps_level():
+    assert protocol.decode_cbor_update(protocol.spp_single_zone_packet(4, -1))[protocol.SPP_CHANNEL_KEYS[4]] == 0
+    with pytest.raises(ValueError, match="between 0 and 4"):
+        protocol.spp_single_zone_packet(-1, 50)
 
 
 def test_plant_pro_effect_packet_matches_apk_cbor_command():
