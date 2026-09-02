@@ -164,6 +164,20 @@ def test_plant_pro_identity_exposes_only_plant_pro_effects():
     assert device.effect_list() == ["None", *PLANT_PRO_EFFECTS]
 
 
+def test_product_id_drives_apk_effect_catalogue():
+    no_effects = _make_device(product_id=305, service_uuids=["00001002-0000-1000-8000-00805f9b34fb"])
+    aquasky = _make_device(product_id=328)
+    plant_4 = _make_device(product_id=545)
+    reef_4 = _make_device(product_id=546)
+    roma_shaker = _make_device(product_id=564)
+
+    assert no_effects.effect_list() == []
+    assert aquasky.effect_list() == ["None", *WEATHER_EFFECTS]
+    assert plant_4.effect_list() == ["None", *PLANT_PRO_EFFECTS]
+    assert reef_4.effect_list() == ["None", *PLANT_PRO_EFFECTS]
+    assert roma_shaker.effect_list() == ["None", *WEATHER_EFFECTS]
+
+
 def test_native_weather_effect_uses_apk_packet():
     asyncio.run(_async_test_native_weather_effect_uses_apk_packet())
 

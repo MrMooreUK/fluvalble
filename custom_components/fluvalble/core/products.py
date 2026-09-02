@@ -19,10 +19,19 @@ class FluvalProduct:
     model: str | None
     spectrum: str
     channel_count: int
+    native_effect_count: int
 
 
-def _products(ids: dict[int, str | None], spectrum: str, channel_count: int) -> dict[int, FluvalProduct]:
-    return {product_id: FluvalProduct(model, spectrum, channel_count) for product_id, model in ids.items()}
+def _products(
+    ids: dict[int, str | None],
+    spectrum: str,
+    channel_count: int,
+    native_effect_count: int,
+) -> dict[int, FluvalProduct]:
+    return {
+        product_id: FluvalProduct(model, spectrum, channel_count, native_effect_count)
+        for product_id, model in ids.items()
+    }
 
 
 # DeviceUtil's exact device-name table, extended only with product families
@@ -38,14 +47,22 @@ PRODUCTS: dict[int, FluvalProduct] = {
             293: "Marine & Reef 380mm",
             294: "Marine & Reef 750mm",
             337: "Wing Nano Marine",
-            385: "A-Sky Aqua 1025mm",
             536: None,
-            546: "Fluval Reef 4.0 LED",
-            547: "Fluval Reef Nano 4.0 LED",
             640: None,
         },
         "marine",
         5,
+        0,
+    ),
+    **_products(
+        {
+            385: "A-Sky Aqua 1025mm",
+            546: "Fluval Reef 4.0 LED",
+            547: "Fluval Reef Nano 4.0 LED",
+        },
+        "marine",
+        5,
+        4,
     ),
     **_products(
         {
@@ -62,18 +79,26 @@ PRODUCTS: dict[int, FluvalProduct] = {
             375: "Venezia 190",
             376: "Venezia 350A",
             377: "Venezia 350B",
-            386: "Plant Aqua 529mm",
             387: "Plant Aqua 875mm",
             388: "Plant Aqua 1075mm",
             537: None,
-            545: "Fluval Plant 4.0 LED",
-            548: "Fluval Plant Nano 4.0 LED",
-            563: "Fluval Siena 2.0",
             641: None,
             29058: None,
         },
         "plant",
         5,
+        0,
+    ),
+    **_products(
+        {
+            386: "Plant Aqua 529mm",
+            545: "Fluval Plant 4.0 LED",
+            548: "Fluval Plant Nano 4.0 LED",
+            563: "Fluval Siena 2.0",
+        },
+        "plant",
+        5,
+        4,
     ),
     **_products(
         {
@@ -99,6 +124,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         },
         "rgbw",
         4,
+        11,
     ),
 }
 

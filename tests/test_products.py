@@ -50,6 +50,51 @@ def test_apk_product_catalog_defines_fixture_model_and_channels():
     assert plant.channel_count == 5
 
 
+def test_apk_product_catalog_defines_native_effect_counts():
+    assert product_from_id(305).native_effect_count == 0
+    assert product_from_id(328).native_effect_count == 11
+    assert product_from_id(532).native_effect_count == 11
+    assert product_from_id(545).native_effect_count == 4
+    assert product_from_id(546).native_effect_count == 4
+    assert product_from_id(547).native_effect_count == 4
+    assert product_from_id(548).native_effect_count == 4
+    assert product_from_id(563).native_effect_count == 4
+    assert product_from_id(564).native_effect_count == 11
+
+
+def test_catalog_matches_apk_native_effect_groups():
+    four_effect = {385, 386, 545, 546, 547, 548, 563}
+    eleven_effect = {
+        321,
+        322,
+        323,
+        324,
+        325,
+        326,
+        327,
+        328,
+        329,
+        336,
+        369,
+        370,
+        371,
+        372,
+        384,
+        532,
+        564,
+        609,
+        29057,
+    }
+
+    assert {product_id for product_id, product in PRODUCTS.items() if product.native_effect_count == 4} == four_effect
+    assert {
+        product_id for product_id, product in PRODUCTS.items() if product.native_effect_count == 11
+    } == eleven_effect
+    assert {product_id for product_id, product in PRODUCTS.items() if product.native_effect_count == 0} == set(
+        PRODUCTS
+    ) - four_effect - eleven_effect
+
+
 def test_catalog_matches_apk_channel_groups_and_excludes_firmware_0103():
     four_channel = {
         321,

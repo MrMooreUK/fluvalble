@@ -76,12 +76,28 @@ def test_classic_service_uuid_rejects_unknown_product_payload():
     assert not is_likely_fluval(None, adv)
 
 
+def test_classic_service_uuid_accepts_all_apk_product_prefixes():
+    service = ["00001000-0000-1000-8000-00805f9b34fb"]
+
+    assert is_likely_fluval(None, _advertisement(service_uuids=service, manufacturer_data={12848: b"140103"}))
+    assert is_likely_fluval(None, _advertisement(service_uuids=service, manufacturer_data={12599: b"810103"}))
+
+
 def test_mesh_service_uuid_alone_is_not_fluval():
     """fff0 is common on many BLE mesh devices — must not prompt discovery alone."""
     adv = _advertisement(service_uuids=["0000fff0-0000-1000-8000-00805f9b34fb"])
 
     assert not is_likely_fluval(None, adv)
     assert not is_likely_fluval("Generic Mesh Light", adv)
+
+
+def test_mesh_service_uuid_requires_apk_known_binary_product():
+    service = ["0000fff0-0000-1000-8000-00805f9b34fb"]
+    known = _advertisement(service_uuids=service, manufacturer_data={65535: b"\x00" * 8 + b"\x02\x21"})
+    unknown = _advertisement(service_uuids=service, manufacturer_data={65535: b"\x00" * 8 + b"\xff\xfe"})
+
+    assert is_likely_fluval(None, known)
+    assert not is_likely_fluval(None, unknown)
 
 
 def test_mesh_with_fluval_name_is_likely_fluval():

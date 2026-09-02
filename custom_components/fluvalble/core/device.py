@@ -609,6 +609,9 @@ class Device:
 
     def supports_classic_effects(self) -> bool:
         """Return whether available BLE evidence identifies a classic controller."""
+        product = product_from_id(self.product_id)
+        if product is not None and product.native_effect_count != 11:
+            return False
         if self.client is not None and self.client.command_write_uuid:
             return self.client.command_write_uuid.lower().startswith("00001001")
 
@@ -618,22 +621,35 @@ class Device:
         )
 
     def effect_list(self) -> list[str]:
-        """Return effects supported by the positively identified controller."""
+        """Return the APK-defined effect catalogue for this product."""
+        product = product_from_id(self.product_id)
+        if product is not None:
+            if product.native_effect_count == 4:
+                return plant_pro_effect_list()
+            if product.native_effect_count == 11:
+                return classic_effect_list()
+            return []
         if self.supports_plant_pro_effects():
             return plant_pro_effect_list()
         return classic_effect_list() if self.supports_classic_effects() or self.supports_facebd_effects() else []
 
     def supports_facebd_effects(self) -> bool:
-        """Return whether BLE evidence identifies an AquaSky FACEBD controller."""
+        """Return whether BLE evidence identifies an effect-capable FACEBD controller."""
         if not self._uses_wifi_protocol():
             return False
+        product = product_from_id(self.product_id)
+        if product is not None:
+            return product.native_effect_count in (4, 11)
         if self.lamp_profile == LAMP_PROFILE_AQUASKY3:
             return True
         identity = f"{self.name} {self.model}".lower().replace(" ", "")
         return "aquasky" in identity
 
     def supports_plant_pro_effects(self) -> bool:
-        """Return whether available evidence identifies a Plant Pro controller."""
+        """Return whether available evidence identifies a four-effect controller."""
+        product = product_from_id(self.product_id)
+        if product is not None:
+            return product.native_effect_count == 4
         if self._uses_plant_pro_protocol():
             return True
         if self.lamp_profile == LAMP_PROFILE_PLANT_PRO:

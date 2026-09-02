@@ -64,6 +64,30 @@
       "manufacturer_id": 12592
     },
     {
+      "service_uuid": "00001000-0000-1000-8000-00805f9b34fb",
+      "manufacturer_id": 12848
+    },
+    {
+      "service_uuid": "00001002-0000-1000-8000-00805f9b34fb",
+      "manufacturer_id": 12848
+    },
+    {
+      "service_uuid": "00001000-0000-1000-8000-00805f9b34fb",
+      "manufacturer_id": 12599
+    },
+    {
+      "service_uuid": "00001002-0000-1000-8000-00805f9b34fb",
+      "manufacturer_id": 12599
+    },
+    {
+      "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+      "manufacturer_id": 65535
+    },
+    {
+      "service_uuid": "0000fff0-0000-1000-8000-00805f9b34fb",
+      "manufacturer_id": 511
+    },
+    {
       "service_uuid": "facebd00-7261-6262-6974-696f74626c65"
     },
     {

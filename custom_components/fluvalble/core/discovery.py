@@ -9,8 +9,10 @@ from bleak import AdvertisementData
 
 from .products import product_from_id, product_id_from_manufacturer_data
 
-# Fluval/Hagen manufacturer/company ID seen in Fluval LED advertisements.
-FLUVAL_MANUFACTURER_IDS = frozenset({12592})
+# Classic fixtures encode the first two ASCII product-ID characters in the
+# manufacturer/company field: ``01``, ``02``, or the APK's ``71`` legacy
+# remaps. Current binary advertisements use raw FFFF or FF01 company bytes.
+FLUVAL_MANUFACTURER_IDS = frozenset({12592, 12599, 12848, 511, 65535})
 
 CLASSIC_FLUVAL_SERVICE_UUIDS = frozenset(
     {
@@ -26,9 +28,11 @@ FACEBD_FLUVAL_SERVICE_UUIDS = frozenset(
     }
 )
 
-# Exact Fluval GATT / FACEBD service UUIDs. Do NOT match generic prefixes like
-# 0000fff0 (common on many BLE mesh devices) — that floods discovery prompts.
-FLUVAL_SERVICE_UUIDS = CLASSIC_FLUVAL_SERVICE_UUIDS | FACEBD_FLUVAL_SERVICE_UUIDS
+SPP_FLUVAL_SERVICE_UUIDS = frozenset({"0000fff0-0000-1000-8000-00805f9b34fb"})
+
+# Exact Fluval GATT service UUIDs. FFF0 remains product-gated below because it
+# is common on unrelated BLE devices and must never qualify on its own.
+FLUVAL_SERVICE_UUIDS = CLASSIC_FLUVAL_SERVICE_UUIDS | FACEBD_FLUVAL_SERVICE_UUIDS | SPP_FLUVAL_SERVICE_UUIDS
 
 # Name tokens that are Fluval-branded on their own.
 _FLUVAL_BRAND_NAMES = ("fluval", "aquasky")
@@ -93,9 +97,9 @@ def has_fluval_service_uuid(advertisement: AdvertisementData | None) -> bool:
     # identify current Fluval advertisements on their own.
     if any(key in FACEBD_FLUVAL_SERVICE_UUIDS or key.startswith("facebd") for key in keys):
         return True
-    # Classic UUIDs are not unique to Fluval; require the Fluval manufacturer
-    # payload and an APK-known product ID before prompting discovery.
-    if any(key in CLASSIC_FLUVAL_SERVICE_UUIDS for key in keys):
+    # Classic and FFF0 UUIDs are not unique to Fluval; require a manufacturer
+    # payload that decodes to an APK-known product ID before prompting.
+    if any(key in CLASSIC_FLUVAL_SERVICE_UUIDS | SPP_FLUVAL_SERVICE_UUIDS for key in keys):
         return (
             has_fluval_manufacturer_data(advertisement)
             and product_id_from_manufacturer_data(advertisement.manufacturer_data) is not None
