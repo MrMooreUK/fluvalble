@@ -486,16 +486,32 @@ def test_fresh_connection_uses_one_connector_retry_cycle():
 
 async def _async_test_fresh_connection_uses_one_connector_retry_cycle():
     client = _make_client()
-    connected = SimpleNamespace(is_connected=True, start_notify=AsyncMock())
+    connected_route = client.device
+    later_advertisement_route = SimpleNamespace(
+        address=connected_route.address,
+        details={"source": "later-advertisement"},
+    )
+    connection_ready = MagicMock()
+    client.connection_ready_callback = connection_ready
+    connected = SimpleNamespace(
+        is_connected=True,
+        start_notify=AsyncMock(),
+        _connected_scanner=SimpleNamespace(source="confirmed-connection-route"),
+    )
     client._resolve_characteristics = AsyncMock()
+
+    async def establish_connection(*_args, **_kwargs):
+        client.device = later_advertisement_route
+        return connected
 
     with patch(
         "custom_components.fluvalble.core.client.establish_connection",
-        new=AsyncMock(return_value=connected),
+        new=AsyncMock(side_effect=establish_connection),
     ) as establish:
         result = await client._ensure_client()
 
     assert result is connected
+    connection_ready.assert_called_once_with(connected_route, "confirmed-connection-route")
     establish.assert_awaited_once()
     assert establish.await_args.kwargs["max_attempts"] == client_module.CONNECT_RETRIES
     assert establish.await_args.kwargs["disconnected_callback"] == client._on_disconnected

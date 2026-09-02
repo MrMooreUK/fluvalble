@@ -24,6 +24,9 @@ TO_REDACT = {
     "name",
     "path",
     "service_data",
+    "source",
+    "source_address",
+    "source_name",
     "title",
     "unique_id",
 }

@@ -32,6 +32,14 @@ def _make_device():
     device.connected = True
     device.conn_info["rssi"] = -70
     device.conn_info["rssi_updated_at"] = now
+    device.conn_info["advertisement_source"] = "Aquarium USB adapter"
+    device.conn_info["advertisement_source_address"] = "00:11:22:33:44:55"
+    device.conn_info["advertisement_source_type"] = "usb"
+    device.conn_info["advertisement_updated_at"] = now
+    device.conn_info["active_connection_source"] = "fish"
+    device.conn_info["active_connection_source_address"] = "66:77:88:99:AA:BB"
+    device.conn_info["active_connection_source_type"] = "remote"
+    device.conn_info["active_connection_connected_at"] = now
     device.conn_info["last_seen"] = now
     device.diagnostics["status"] = "ok"
     device.values.update(
@@ -53,7 +61,7 @@ def test_create_entities_for_platforms():
     mode_entities = select.create_entities(device)
     assert len(mode_entities) == 1
     assert mode_entities[0].attr == "mode"
-    assert len(sensor.create_entities(device)) == 2
+    assert len(sensor.create_entities(device)) == 4
     assert len(button.create_entities(device)) == 2
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
@@ -129,16 +137,31 @@ def test_diagnostic_entities_update_from_device_attributes():
     connection = binary_sensor.FluvalSensor(device, "connection")
     rssi = sensor.FluvalSensor(device, "rssi")
     last_seen = sensor.FluvalSensor(device, "last_seen")
+    connection_source = sensor.FluvalSensor(device, "active_connection_source")
+    advertisement_source = sensor.FluvalSensor(device, "advertisement_source")
 
     connection.internal_update()
     rssi.internal_update()
     last_seen.internal_update()
+    connection_source.internal_update()
+    advertisement_source.internal_update()
 
     assert connection._attr_is_on is True
     assert rssi._attr_native_value == -70
     assert rssi._attr_state_class.value == "measurement"
-    assert rssi._attr_extra_state_attributes["last_advertisement"] == device.conn_info["rssi_updated_at"]
+    assert rssi._attr_extra_state_attributes == {
+        "source_name": "Aquarium USB adapter",
+        "source_address": "00:11:22:33:44:55",
+        "source_type": "usb",
+        "last_advertisement": device.conn_info["rssi_updated_at"],
+        "last_updated": device.conn_info["rssi_updated_at"],
+    }
     assert last_seen._attr_native_value == device.conn_info["last_seen"]
+    assert connection_source._attr_native_value == "fish"
+    assert connection_source._attr_extra_state_attributes["source_type"] == "remote"
+    assert connection_source._attr_extra_state_attributes["gatt_connected"] is True
+    assert advertisement_source._attr_native_value == "Aquarium USB adapter"
+    assert advertisement_source._attr_extra_state_attributes["source_type"] == "usb"
 
 
 def test_downloadable_diagnostics_redact_identifiers_but_keep_protocol_fields():
@@ -208,6 +231,12 @@ async def _async_test_downloadable_diagnostics_do_not_touch_ble():
     assert report["entry"]["data"]["mac"] == diagnostics.REDACTED
     assert report["model"] == device.model_name
     assert report["channel_count"] == 4
+    assert report["active_connection"]["source"] == diagnostics.REDACTED
+    assert report["active_connection"]["source_name"] == diagnostics.REDACTED
+    assert report["active_connection"]["source_type"] == "remote"
+    assert report["latest_advertisement"]["source"] == diagnostics.REDACTED
+    assert report["latest_advertisement"]["source_name"] == diagnostics.REDACTED
+    assert report["latest_advertisement"]["rssi"] == -70
 
 
 def test_light_internal_update_and_actions():
