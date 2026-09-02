@@ -581,11 +581,13 @@ def old_mode_packet(mode: int) -> bytes:
 
 
 def old_all_zone_packet(values: Iterable[int]) -> bytes:
-    """Build the old BLE all-channel packet."""
+    """Build the APK-native classic ``6804`` all-channel packet."""
     packet = bytearray((0x68, OLD_ALL_ZONE))
     for value in values:
         scaled = _clamp_percent(value) * 10
-        packet.extend((scaled & 0xFF, scaled >> 8))
+        # Despite its name, the APK's integerToHexLittle() only zero-pads the
+        # hexadecimal word; hexStringToBytes() then emits the high byte first.
+        packet.extend((scaled >> 8, scaled & 0xFF))
     return old_packet(packet)
 
 

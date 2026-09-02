@@ -273,6 +273,18 @@ def test_classic_native_preview_uses_680b_scaled_levels_and_680c_stop():
     assert stop[:-1] == bytes.fromhex("68 0C")
 
 
+def test_old_all_zone_packet_matches_apk_big_endian_words():
+    packet = protocol.old_all_zone_packet([0, 50, 100, 25])
+
+    assert packet == bytes.fromhex("68 04 00 00 01 F4 03 E8 00 FA 88")
+
+
+def test_old_all_zone_packet_clamps_and_encodes_five_channels():
+    packet = protocol.old_all_zone_packet([-1, 20, 30, 40, 101])
+
+    assert packet == bytes.fromhex("68 04 00 00 00 C8 01 2C 01 90 03 E8 F3")
+
+
 def test_old_clock_packet_shape():
     moment = datetime(2026, 7, 19, 12, 30, 45, tzinfo=timezone.utc)
     local = moment.astimezone()
