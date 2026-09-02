@@ -54,7 +54,7 @@ class FluvalbleScheduleCard extends HTMLElement {
 
     const points = this.store.points;
     const time = formatMinute(this.previewMinute);
-    const graph = buildGraph(points);
+    const graph = buildGraph(points, scheduleChannelDefinitions(this.store));
 
     root.innerHTML = `
       <ha-card>
@@ -1032,7 +1032,7 @@ class FluvalbleSpectrumCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="spectrum">${buildChannelBars(channels, true)}</div>
+          <div class="spectrum">${buildChannelBars(channels, true, scheduleChannelDefinitions(this.store))}</div>
         </div>
       </ha-card>
       <style>
@@ -1174,12 +1174,12 @@ class FluvalbleWavelengthCard extends HTMLElement {
 }
 
 const DEFAULT_POINTS = [
-  { time: "00:00", red: 0, green: 0, blue: 0, white: 0, channel_5: 0 },
-  { time: "10:00", red: 0, green: 0, blue: 0, white: 0, channel_5: 0 },
-  { time: "11:00", red: 10, green: 10, blue: 25, white: 5, channel_5: 0 },
-  { time: "16:00", red: 10, green: 10, blue: 25, white: 5, channel_5: 0 },
-  { time: "19:00", red: 3, green: 0, blue: 8, white: 0, channel_5: 0 },
-  { time: "20:00", red: 0, green: 0, blue: 0, white: 0, channel_5: 0 },
+  { time: "00:00", channel_1: 0, channel_2: 0, channel_3: 0, channel_4: 0, channel_5: 0 },
+  { time: "10:00", channel_1: 0, channel_2: 0, channel_3: 0, channel_4: 0, channel_5: 0 },
+  { time: "11:00", channel_1: 10, channel_2: 10, channel_3: 25, channel_4: 5, channel_5: 0 },
+  { time: "16:00", channel_1: 10, channel_2: 10, channel_3: 25, channel_4: 5, channel_5: 0 },
+  { time: "19:00", channel_1: 3, channel_2: 0, channel_3: 8, channel_4: 0, channel_5: 0 },
+  { time: "20:00", channel_1: 0, channel_2: 0, channel_3: 0, channel_4: 0, channel_5: 0 },
 ];
 
 const DEFAULT_AUTO_SCHEDULE = {
@@ -1192,7 +1192,7 @@ const DEFAULT_AUTO_SCHEDULE = {
   night_levels: [0, 5, 0, 0, 0],
 };
 
-const AUTO_SERVICE_CHANNELS = ["red", "blue", "cool_white", "warm_white", "amber"];
+const NATIVE_SERVICE_CHANNELS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"];
 
 const CHANNELS = [
   ["red", "#ff4a3d", "Red"],
@@ -1427,6 +1427,15 @@ function autoChannelLabels(store) {
   return labels.slice(0, 5);
 }
 
+function scheduleChannelDefinitions(store) {
+  const labels = autoChannelLabels(store);
+  return CHANNELS.slice(0, labels.length).map(([key, color, fallback], index) => [
+    key,
+    color,
+    labels[index] || fallback,
+  ]);
+}
+
 function buildAutoLevelRows(period, levels, labels) {
   return labels.map((label, index) => `
     <div class="level-row">
@@ -1439,7 +1448,7 @@ function buildAutoLevelRows(period, levels, labels) {
 
 function autoSchedulePayload(schedule) {
   const levelMap = (levels) => Object.fromEntries(
-    AUTO_SERVICE_CHANNELS.map((channel, index) => [channel, clampPercent(levels[index])]),
+    NATIVE_SERVICE_CHANNELS.map((channel, index) => [channel, clampPercent(levels[index])]),
   );
   return {
     sunrise: schedule.sunrise,
@@ -1536,10 +1545,10 @@ function weekdayLabel(value) {
 function denormalizePoints(points) {
   return points.map((point) => ({
     time: formatMinute(point.minute),
-    red: clampPercent(point.red),
-    green: clampPercent(point.green),
-    blue: clampPercent(point.blue),
-    white: clampPercent(point.white),
+    channel_1: clampPercent(point.red),
+    channel_2: clampPercent(point.green),
+    channel_3: clampPercent(point.blue),
+    channel_4: clampPercent(point.white),
     channel_5: clampPercent(point.channel_5),
   }));
 }
@@ -1646,10 +1655,10 @@ const SPECTRUM_CHANNEL_MAX = {
 function normalizePoints(points) {
   return [...points].map((point) => ({
     minute: parseTime(point.time),
-    red: Number(point.red ?? point.channel_1 ?? 0),
-    green: Number(point.green ?? point.channel_2 ?? 0),
-    blue: Number(point.blue ?? point.channel_3 ?? 0),
-    white: Number(point.white ?? point.channel_4 ?? 0),
+    red: Number(point.channel_1 ?? point.red ?? 0),
+    green: Number(point.channel_2 ?? point.green ?? 0),
+    blue: Number(point.channel_3 ?? point.blue ?? 0),
+    white: Number(point.channel_4 ?? point.white ?? 0),
     channel_5: Number(point.channel_5 ?? 0),
   })).sort((a, b) => a.minute - b.minute);
 }
@@ -1675,8 +1684,8 @@ function interpolate(points, minute) {
   return result;
 }
 
-function buildGraph(points) {
-  return CHANNELS.map(([key, color]) => {
+function buildGraph(points, definitions = CHANNELS) {
+  return definitions.map(([key, color]) => {
     const samples = [];
     for (let minute = 0; minute <= 1440; minute += 10) {
       const channels = interpolate(points, minute % 1440);
@@ -1688,8 +1697,8 @@ function buildGraph(points) {
   }).join("");
 }
 
-function buildChannelBars(channels, editable = false) {
-  return CHANNELS.map(([key, color, label]) => `
+function buildChannelBars(channels, editable = false, definitions = CHANNELS) {
+  return definitions.map(([key, color, label]) => `
     <div class="bar-row">
       <div class="label">${label}</div>
       <div class="bar">

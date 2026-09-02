@@ -47,6 +47,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Normalized saved and fixture-native schedule payloads to positional
+  `channel_1` through `channel_5` fields, with product-specific labels supplied
+  from the APK-backed fixture profile. Existing RGB-style and Plant-specific
+  field names remain accepted as compatibility aliases.
 - Reduced classic encrypted BLE command pacing from 750 ms to the
   FluvalConnect APK's 200 ms affair-queue interval. FACEBD and Plant Pro/SPP
   retain their existing timing.

@@ -69,6 +69,20 @@ def _schedule_points():
     ]
 
 
+def _canonical_schedule_points():
+    return [
+        {
+            "time": point["time"],
+            "channel_1": point.get("red", 0),
+            "channel_2": point.get("green", 0),
+            "channel_3": point.get("blue", 0),
+            "channel_4": point.get("white", 0),
+            "channel_5": point.get("channel_5", 0),
+        }
+        for point in _schedule_points()
+    ]
+
+
 def test_schedule_validator_rejects_malformed_points():
     with pytest.raises(vol.Invalid):
         _validate_schedule_points([{"time": "not-a-time"}, {"time": "20:00"}])
@@ -89,12 +103,29 @@ def test_schedule_validator_normalizes_missing_channels():
     validated = _validate_schedule_points([{"time": "19:00", "blue": 8}, {"time": "20:00"}])
     assert validated[0] == {
         "time": "19:00",
-        "red": 0,
-        "green": 0,
-        "blue": 8,
-        "white": 0,
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 8,
+        "channel_4": 0,
         "channel_5": 0,
     }
+
+
+def test_schedule_validator_accepts_canonical_channels_and_rejects_conflicts():
+    points = [
+        {"time": "19:00", "channel_1": 3, "channel_3": 8},
+        {"time": "20:00"},
+    ]
+    assert _validate_schedule_points(points)[0] == {
+        "time": "19:00",
+        "channel_1": 3,
+        "channel_2": 0,
+        "channel_3": 8,
+        "channel_4": 0,
+        "channel_5": 0,
+    }
+    with pytest.raises(vol.Invalid, match="channel_1 and its legacy alias red"):
+        _validate_schedule_points([{"time": "19:00", "channel_1": 3, "red": 3}, {"time": "20:00"}])
 
 
 def test_native_auto_schedule_validator_normalizes_fixture_payload():
@@ -125,6 +156,22 @@ def test_native_auto_schedule_validator_normalizes_fixture_payload():
     assert schedule["sunrise"] == (8, 0, 60)
     assert schedule["sunset"] == (20, 30, 45)
     assert schedule["day_levels"] == [80, 70, 60, 50, 40]
+
+
+def test_native_auto_schedule_validator_accepts_canonical_channel_order():
+    schedule = _validate_native_auto_schedule(
+        {
+            "sunrise": "08:00",
+            "sunrise_ramp": 60,
+            "sunset": "20:30",
+            "sunset_ramp": 45,
+            "day": {f"channel_{index}": index * 10 for index in range(1, 6)},
+            "night": {f"channel_{index}": 0 for index in range(1, 6)},
+        }
+    )
+
+    assert schedule["day_levels"] == [10, 20, 30, 40, 50]
+    assert schedule["night_levels"] == [0, 0, 0, 0, 0]
 
 
 def test_native_pro_and_effect_validators_normalize_service_objects():
@@ -185,6 +232,20 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
     assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
 
 
+def test_native_pro_validator_accepts_canonical_channel_order():
+    points = _validate_native_pro_points(
+        [
+            {
+                "time": f"{hour:02d}:00",
+                **{f"channel_{index}": hour + index for index in range(1, 6)},
+            }
+            for hour in (8, 12, 20, 22)
+        ]
+    )
+
+    assert points[0] == {"hour": 8, "minute": 0, "levels": [9, 10, 11, 12, 13]}
+
+
 def test_native_effect_validator_accepts_classic_and_facebd_weather_catalog():
     windows = _validate_native_effect_windows(
         [
@@ -237,12 +298,13 @@ async def _async_test_save_and_load_schedule_data(monkeypatch):
     monkeypatch.setattr(integration, "Store", _MemoryStore)
     hass = _FakeHass()
     points = _schedule_points()
+    canonical_points = _canonical_schedule_points()
 
     await _async_save_schedule(hass, "entry_1", points, mode="auto")
 
-    assert await _async_load_schedule(hass, "entry_1") == points
+    assert await _async_load_schedule(hass, "entry_1") == canonical_points
     assert await _async_load_schedule_data(hass, "entry_1") == {
-        "points": points,
+        "points": canonical_points,
         "mode": "auto",
         "effect_windows": None,
     }
@@ -262,7 +324,7 @@ async def _async_test_save_schedule_preserves_existing_mode(monkeypatch):
     await _async_save_schedule(_FakeHass(), "entry_1", points)
 
     assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "auto"
-    assert _MemoryStore.data["schedules"]["entry_1"]["points"] == points
+    assert _MemoryStore.data["schedules"]["entry_1"]["points"] == _canonical_schedule_points()
 
 
 def test_control_schedule_mode_updates_the_saved_schedule(monkeypatch):
@@ -299,7 +361,7 @@ async def _async_test_native_schedule_mode_uploads_once_to_the_fixture(monkeypat
     await async_set_schedule_mode(hass, "entry_1", "native")
 
     assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "native"
-    device.async_set_native_pro_schedule.assert_awaited_once_with(points, activate=True)
+    device.async_set_native_pro_schedule.assert_awaited_once_with(_canonical_schedule_points(), activate=True)
 
 
 def test_native_schedule_upload_rejects_more_than_twelve_points():
@@ -350,7 +412,7 @@ async def _async_test_load_schedule_supports_legacy_list_records(monkeypatch):
     monkeypatch.setattr(integration, "Store", _MemoryStore)
 
     assert await _async_load_schedule_data(_FakeHass(), "entry_1") == {
-        "points": points,
+        "points": _canonical_schedule_points(),
         "mode": "manual",
         "effect_windows": None,
     }
@@ -412,7 +474,7 @@ async def _async_test_saving_effect_schedule_preserves_professional_curve(monkey
     )
 
     assert _MemoryStore.data["schedules"]["entry_1"] == {
-        "points": points,
+        "points": _canonical_schedule_points(),
         "mode": "native",
         "effect_windows": [
             {
@@ -461,7 +523,7 @@ async def _async_test_legacy_auto_schedule_migrates_to_fixture(monkeypatch):
 
     await _async_migrate_legacy_auto_schedule(_FakeHass(device), "entry_1")
 
-    device.async_set_native_pro_schedule.assert_awaited_once_with(points, activate=True)
+    device.async_set_native_pro_schedule.assert_awaited_once_with(_canonical_schedule_points(), activate=True)
     assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "native"
 
 
@@ -505,6 +567,9 @@ def test_schedule_card_exposes_fixture_native_auto_editor():
     assert "Preview fixture time" in source
     assert "Play fixture schedule" in source
     assert "Unsaved editor values are never uploaded by preview" in source
+    assert 'const NATIVE_SERVICE_CHANNELS = ["channel_1"' in source
+    assert "buildGraph(points, scheduleChannelDefinitions(this.store))" in source
+    assert "point.channel_1 ?? point.red" in source
 
 
 def test_fixture_schedule_readback_normalizes_protocol_shapes():
@@ -557,8 +622,22 @@ def test_fixture_schedule_readback_normalizes_protocol_shapes():
         "night_levels": [0, 5, 0, 0],
     }
     assert readback["professional"] == [
-        {"time": "08:00", "red": 10, "green": 20, "blue": 30, "white": 40, "channel_5": 50},
-        {"time": "12:30", "red": 1, "green": 2, "blue": 3, "white": 4, "channel_5": 0},
+        {
+            "time": "08:00",
+            "channel_1": 10,
+            "channel_2": 20,
+            "channel_3": 30,
+            "channel_4": 40,
+            "channel_5": 50,
+        },
+        {
+            "time": "12:30",
+            "channel_1": 1,
+            "channel_2": 2,
+            "channel_3": 3,
+            "channel_4": 4,
+            "channel_5": 0,
+        },
     ]
     assert readback["effects"] == [
         {
