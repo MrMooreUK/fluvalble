@@ -33,6 +33,15 @@ def test_wifi_mode_packet_uses_mode_key():
     assert protocol.decode_cbor_map(packet) == {protocol.WIFI_MODE_KEY: 1}
 
 
+def test_wifi_dst_packet_uses_apk_boolean_key_99():
+    assert protocol.decode_cbor_map(protocol.wifi_dst_packet(True)) == {
+        protocol.WIFI_DST_KEY: True,
+    }
+    assert protocol.decode_cbor_map(protocol.wifi_dst_packet(False)) == {
+        protocol.WIFI_DST_KEY: False,
+    }
+
+
 def test_wifi_weather_effect_packet_uses_apk_manual_key():
     assert protocol.decode_cbor_map(protocol.wifi_effect_packet(2)) == {
         protocol.WIFI_MANUAL_KEY: 2,

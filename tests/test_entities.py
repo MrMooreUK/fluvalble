@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.components.light import ATTR_BRIGHTNESS, ATTR_EFFECT, ATTR_RGBW_COLOR
 
-from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor
+from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor, switch
 from custom_components.fluvalble.core.device import Device
 
 
@@ -46,6 +46,10 @@ def test_create_entities_for_platforms():
     assert len(button.create_entities(device)) == 2
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
+    assert switch.create_entities(device) == []
+
+    device.facebd = True
+    assert len(switch.create_entities(device)) == 1
 
 
 def test_identify_button_routes_to_device_command():
@@ -59,6 +63,36 @@ def test_identify_button_routes_to_device_command():
         device.async_identify.assert_awaited_once_with()
 
     asyncio.run(run_test())
+
+
+def test_daylight_saving_switch_uses_facebd_readback_and_command():
+    asyncio.run(_async_test_daylight_saving_switch_uses_facebd_readback_and_command())
+
+
+async def _async_test_daylight_saving_switch_uses_facebd_readback_and_command():
+    device = _make_device()
+    device.facebd = True
+    device.values["daylight_saving_time"] = False
+    device.async_set_daylight_saving_time = AsyncMock(return_value=True)
+    entity = switch.FluvalDaylightSavingSwitch(device, "daylight_saving_time")
+
+    entity.internal_update()
+    assert entity._attr_available is True
+    assert entity._attr_is_on is False
+
+    await entity.async_turn_on()
+    device.async_set_daylight_saving_time.assert_awaited_once_with(True)
+
+
+def test_daylight_saving_switch_waits_for_fixture_readback():
+    device = _make_device()
+    device.facebd = True
+    entity = switch.FluvalDaylightSavingSwitch(device, "daylight_saving_time")
+
+    entity.internal_update()
+
+    assert entity._attr_available is False
+    assert entity._attr_is_on is None
 
 
 def test_select_internal_update_and_select_option():

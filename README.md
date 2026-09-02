@@ -30,6 +30,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Weather effects** | Positively identified classic and AquaSky 3.0/FACEBD controllers expose the 11 native FluvalConnect weather effects, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
 | **Plant Pro effects** | Plant Pro / Plant 4.0 exposes its four native effects—Thunderstorm, Lightning, Sun and lightning, and Colour cycle—through the standard light effect control. |
 | **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and Plant Pro/4.0 controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
+| **Daylight-saving control** | FACEBD controllers expose their fixture-owned daylight-saving setting as a configuration switch, using the same state and command as FluvalConnect. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
@@ -196,6 +197,12 @@ Classic status readback exposes only its single embedded effect slot even when
 the fixture was sent a longer schedule; the submitted schedule remains recorded
 in diagnostics without being misrepresented as fixture-confirmed readback.
 
+FACEBD fixtures also expose a **Daylight saving time** configuration switch once
+the controller reports CBOR key `99`. This switch changes only the fixture's
+own DST flag. Clock synchronization continues to send the Home Assistant host's
+current UTC offset and Unix time using keys `101` and `102`; the integration
+does not add or subtract another hour and never silently changes the DST flag.
+
 ---
 
 ## Entities
@@ -210,6 +217,7 @@ After setup you'll see one device with entities like:
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
 | **Sensors** | Signal strength / Last seen | Advertisement RSSI, its observation time, and the latest successful BLE activity. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
+| **Switch** | Daylight saving time | FACEBD-only fixture DST setting, available after confirmed controller readback. |
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `light.fluval_aabbccddeeff_light`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
 

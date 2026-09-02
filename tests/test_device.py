@@ -570,6 +570,53 @@ def test_facebd_schedule_readback_is_recorded_for_dashboard():
     assert device.diagnostics["native_schedule_readback_at"]
 
 
+def test_facebd_dst_readback_is_recorded_as_fixture_state():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+
+    assert device._decode_wifi_update({protocol.WIFI_DST_KEY: True})
+    assert device.values["daylight_saving_time"] is True
+    assert device.attribute("daylight_saving_time")["is_on"] is True
+    assert device.diagnostics["daylight_saving_time"] is True
+
+
+def test_facebd_dst_control_uses_apk_key_99_packet():
+    asyncio.run(_async_test_facebd_dst_control_uses_apk_key_99_packet())
+
+
+async def _async_test_facebd_dst_control_uses_apk_key_99_packet():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+    device.client = _facebd_client()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_daylight_saving_time(True)
+    device._async_send_packet.assert_awaited_once_with(protocol.wifi_dst_packet(True))
+    assert device.values["daylight_saving_time"] is True
+    assert device.diagnostics["daylight_saving_time"] is True
+    assert device._expected_state_for_packet(protocol.wifi_dst_packet(True)) == {
+        protocol.WIFI_DST_KEY: True,
+    }
+
+
+def test_classic_dst_control_is_rejected_without_a_write():
+    asyncio.run(_async_test_classic_dst_control_is_rejected_without_a_write())
+
+
+async def _async_test_classic_dst_control_is_rejected_without_a_write():
+    device = _make_device(service_uuids=["00001002-0000-1000-8000-00805f9b34fb"])
+    device.client = SimpleNamespace(
+        command_write_uuid="00001001-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=False,
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert not await device.async_set_daylight_saving_time(True)
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["status"] == "unsupported_daylight_saving_time"
+
+
 def test_plant_pro_switch_mode_and_channels_use_spp_packets():
     asyncio.run(_async_test_plant_pro_commands_use_spp_packets())
 

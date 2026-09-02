@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added a FACEBD-only Daylight saving time configuration switch backed by
+  FluvalConnect CBOR key 99. The entity follows fixture readback and never
+  guesses or silently changes the controller's DST preference.
 - Added APK-native preview controls for fixture-stored Auto and Professional
   schedules across classic (`680B`/`680C`), AquaSky 3.0/FACEBD (CBOR key 119),
   and Plant Pro/MESH (D1 CBOR key 51) controllers.
