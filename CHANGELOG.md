@@ -57,6 +57,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Aligned classic state readback with FluvalConnect's exact `6805` response
   framing, mode-specific lengths, XOR validation, power flag, channel layout,
   and manual weather-effect state.
+- Preserved all four fixture-resident classic manual preset arrays from the
+  APK-defined `6805` manual-state payload instead of discarding that state.
 - Aligned BLE session initialization with FluvalConnect's fixture-clock, state-read,
   and FACEBD timezone sequence so native schedules do not briefly start from a
   stale controller clock after reconnecting.
