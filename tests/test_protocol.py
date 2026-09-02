@@ -7,6 +7,47 @@ import pytest
 from custom_components.fluvalble.core import protocol
 
 
+def _old_state_packet(body: bytes) -> bytes:
+    return protocol.old_packet(protocol.OLD_READ_PARAMS + body)
+
+
+def test_decode_old_manual_state_matches_apk_layout():
+    body = bytearray((0, 0x03, 11))
+    for value in (100, 200, 300, 400, 500):
+        body.extend((value & 0xFF, value >> 8))
+    body.extend(bytes(range(1, 21)))
+
+    assert protocol.decode_old_state_packet(_old_state_packet(body), channel_count=5) == {
+        "mode": 0,
+        "body": bytes(body),
+        "power": True,
+        "effect_id": 11,
+        "channels": [100, 200, 300, 400, 500],
+    }
+
+
+def test_decode_old_state_accepts_only_apk_auto_and_pro_lengths():
+    for length in (17, 20, 23, 26):
+        body = bytes((1,)) + bytes(length - 1)
+        assert protocol.decode_old_state_packet(_old_state_packet(body), channel_count=4) is not None
+    assert protocol.decode_old_state_packet(_old_state_packet(bytes((1,)) + bytes(17)), channel_count=4) is None
+
+    pro_body = bytes((2, 4)) + bytes(4 * (4 + 2))
+    assert protocol.decode_old_state_packet(_old_state_packet(pro_body), channel_count=4) is not None
+    assert protocol.decode_old_state_packet(_old_state_packet(pro_body + bytes(6)), channel_count=4) is not None
+    assert protocol.decode_old_state_packet(_old_state_packet(pro_body + bytes(3)), channel_count=4) is None
+
+
+def test_decode_old_state_rejects_wrong_command_checksum_channel_count_and_mode():
+    body = bytes((0, 1, 0)) + bytes(24)
+    valid = _old_state_packet(body)
+
+    assert protocol.decode_old_state_packet(protocol.old_packet(bytes((0x68, 0x18)) + body), channel_count=4) is None
+    assert protocol.decode_old_state_packet(valid[:-1] + bytes((valid[-1] ^ 1,)), channel_count=4) is None
+    assert protocol.decode_old_state_packet(valid, channel_count=3) is None
+    assert protocol.decode_old_state_packet(_old_state_packet(bytes((3, 0, 0))), channel_count=4) is None
+
+
 def test_wifi_five_channel_all_zone_packet_matches_apk_keys():
     packet = protocol.wifi_all_zone_packet([10, 20, 30, 40, 50])
 

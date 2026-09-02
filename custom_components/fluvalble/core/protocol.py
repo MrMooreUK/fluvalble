@@ -460,6 +460,40 @@ def old_auto_preview_packet(levels: Iterable[int] | None) -> bytes:
     return old_packet(payload)
 
 
+def decode_old_state_packet(packet: bytes | bytearray, *, channel_count: int) -> dict[str, Any] | None:
+    """Validate and decode an APK-native classic ``6805`` state response."""
+    if channel_count not in (4, 5) or len(packet) < 5:
+        return None
+    if bytes(packet[:2]) != OLD_READ_PARAMS or _xor_checksum(packet) != 0:
+        return None
+
+    body = bytes(packet[2:-1])
+    mode = body[0]
+    decoded: dict[str, Any] = {"mode": mode, "body": body}
+
+    if mode == 0:
+        if len(body) != channel_count * 6 + 3:
+            return None
+        decoded.update(
+            {
+                "power": bool(body[1] & 0x01),
+                "effect_id": body[2],
+                "channels": [body[offset] | (body[offset + 1] << 8) for offset in range(3, 3 + channel_count * 2, 2)],
+            }
+        )
+        return decoded
+
+    if mode == 1:
+        base_length = channel_count * 2 + 9
+        return decoded if len(body) in {base_length, base_length + 3, base_length + 6, base_length + 9} else None
+
+    if mode == 2 and len(body) >= 2:
+        base_length = 2 + body[1] * (channel_count + 2)
+        return decoded if len(body) in {base_length, base_length + 6} else None
+
+    return None
+
+
 def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, Any] | None:
     """Decode the body of a classic mode-1 ``6805`` response."""
     base_length = channel_count * 2 + 9
@@ -578,6 +612,14 @@ def old_packet(packet: bytes) -> bytes:
     for item in packet:
         checksum ^= item
     return bytes(packet) + bytes((checksum,))
+
+
+def _xor_checksum(packet: Iterable[int]) -> int:
+    """Return the classic protocol XOR across a complete packet."""
+    checksum = 0
+    for item in packet:
+        checksum ^= item
+    return checksum
 
 
 def encrypted_old_packet(packet: bytes) -> bytearray:

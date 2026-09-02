@@ -2063,29 +2063,6 @@ class Device:
 
         return False
 
-    def _build_state_packet(self) -> bytearray:
-        """Build a command packet from the current entity state.
-
-        The first bytes mirror the status packet shape decoded below. The Fluval
-        protocol is not published, so keeping this in one method makes future
-        packet corrections small and easy to test against real hardware.
-        """
-        packet = bytearray(
-            [
-                0x68,
-                0x18,
-                MODE_TO_CODE.get(self.values["mode"], 0),
-                0x01 if self.values["led_on_off"] else 0x00,
-                0x00,
-            ]
-        )
-
-        for channel in NUMBERS:
-            value = max(0, min(1000, int(self.values[channel])))
-            packet.extend([value & 0xFF, value >> 8])
-
-        return packet
-
     def decode_update_packet(self, data: bytes | bytearray) -> bool:
         """Decode the received Fluval packet and sort into values."""
         if data and data[0] == protocol.SPP_STATUS_HEADER:
@@ -2110,52 +2087,40 @@ class Device:
                 return self._decode_wifi_update(cbor)
             return False
 
-        if len(data) < 13:
-            _LOGGER.debug("Ignoring short Fluval update packet: %s", data.hex())
-            return False
-        if data[0] != 0x68:
-            _LOGGER.debug("Ignoring non-state Fluval packet: %s", data.hex())
+        channel_count = self._resolved_channel_count()
+        decoded = protocol.decode_old_state_packet(data, channel_count=channel_count)
+        if decoded is None:
+            _LOGGER.debug("Ignoring invalid classic Fluval state packet: %s", data.hex())
             return False
 
-        if data[2] == 0x00:
-            self.values["mode"] = MODES[0]
-        elif data[2] == 0x01:
-            self.values["mode"] = MODES[1]
-        elif data[2] == 0x02:
-            self.values["mode"] = MODES[2]
-
-        self.values["led_on_off"] = data[3] > 0x00
+        mode = int(decoded["mode"])
+        body = decoded["body"]
+        self.values["mode"] = MODES[mode]
 
         if self.values["mode"] == "manual":
+            self.values["led_on_off"] = bool(decoded["power"])
+            if self.supports_classic_effects():
+                self.values["effect"] = self._native_effect_name(int(decoded["effect_id"]))
             # Wire scale is 0-1000 (percent * 10); HA entities use 0-100.
-            channels = [
-                ((data[6] << 8) | (data[5] & 0xFF)),
-                ((data[8] << 8) | (data[7] & 0xFF)),
-                ((data[10] << 8) | (data[9] & 0xFF)),
-                ((data[12] << 8) | (data[11] & 0xFF)),
-            ]
-            if self._resolved_channel_count() == 5 and len(data) > 14:
-                channels.append((data[14] << 8) | (data[13] & 0xFF))
-            self._channel_count_hint = 5 if len(channels) >= 5 else 4
+            channels = decoded["channels"]
+            self._channel_count_hint = channel_count
             for index, raw in enumerate(channels):
                 self.values[f"channel_{index + 1}"] = max(0, min(100, round(raw / 10)))
             for index in range(len(channels), 5):
                 self.values[f"channel_{index + 1}"] = 0
         elif self.values["mode"] == "automatic":
-            body = data[2:-1]
-            auto_schedule = protocol.decode_old_auto_schedule(body, channel_count=self._resolved_channel_count())
+            auto_schedule = protocol.decode_old_auto_schedule(body, channel_count=channel_count)
             self._record_native_schedule_readback(protocol_name="classic", auto=auto_schedule)
             self._record_native_effect_schedule_readback(
                 protocol_name="classic",
-                windows=protocol.decode_old_effect_schedule(body, channel_count=self._resolved_channel_count()),
+                windows=protocol.decode_old_effect_schedule(body, channel_count=channel_count),
             )
         elif self.values["mode"] == "professional":
-            body = data[2:-1]
-            pro_schedule = protocol.decode_old_pro_schedule(body, channel_count=self._resolved_channel_count())
+            pro_schedule = protocol.decode_old_pro_schedule(body, channel_count=channel_count)
             self._record_native_schedule_readback(protocol_name="classic", professional=pro_schedule)
             self._record_native_effect_schedule_readback(
                 protocol_name="classic",
-                windows=protocol.decode_old_effect_schedule(body, channel_count=self._resolved_channel_count()),
+                windows=protocol.decode_old_effect_schedule(body, channel_count=channel_count),
             )
 
         _LOGGER.debug(
