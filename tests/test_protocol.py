@@ -501,6 +501,7 @@ def test_plant_pro_status_strips_d2_header_and_skips_schedule_blobs():
 
     decoded = protocol.decode_cbor_update(status)
 
+    assert decoded[protocol.SPP_FIRMWARE_VERSION_KEY] == 14
     assert decoded[protocol.SPP_MODE_KEY] == 0
     assert decoded[protocol.SPP_SWITCH_KEY] is True
     assert decoded[protocol.SPP_CHANNEL_KEYS[0]] == 100

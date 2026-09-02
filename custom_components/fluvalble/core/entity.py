@@ -28,6 +28,7 @@ class FluvalEntity(Entity):
             manufacturer="Fluval",
             model=device.model_name,
             name=device.name or "Fluval",
+            sw_version=device.firmware_version,
         )
         # Channel labels vary by lamp profile (Plant Rose/Blue/CW/PW/WW vs RGBWV).
         if attr.startswith("channel_"):
