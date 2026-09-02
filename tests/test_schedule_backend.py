@@ -11,6 +11,7 @@ import voluptuous as vol
 
 from custom_components.fluvalble import (
     DOMAIN,
+    EFFECT_CATALOG,
     FluvalRuntimeData,
     _async_schedule_payload,
     _async_save_effect_schedule,
@@ -49,13 +50,16 @@ class _FakeHass:
         self.data = {DOMAIN: {"entry_1": runtime}}
 
 
-def _make_device():
+def _make_device(*, product_id=None):
+    config_data = {
+        "mac": "AA:BB:CC:DD:EE:FF",
+        "model": "AquaSky Bluetooth LED",
+    }
+    if product_id is not None:
+        config_data["product_id"] = product_id
     device = Device(
         "AquaSky3.0_Test",
-        config_data={
-            "mac": "AA:BB:CC:DD:EE:FF",
-            "model": "AquaSky Bluetooth LED",
-        },
+        config_data=config_data,
     )
     device.connected = True
     return device
@@ -229,7 +233,7 @@ def test_native_pro_and_effect_validators_normalize_service_objects():
         {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
         {"hour": 22, "minute": 0, "levels": [0, 0, 0, 0, 0]},
     ]
-    assert windows[0]["effect_id"] == 1
+    assert windows[0]["effect"] == "Thunderstorm"
     assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
 
 
@@ -258,7 +262,7 @@ def test_native_effect_validator_accepts_classic_and_facebd_weather_catalog():
         ]
     )
 
-    assert windows[0]["effect_id"] == 11
+    assert windows[0]["effect"] == "Crescent moon"
     assert windows[0]["weekdays"] == [True] * 7
 
 
@@ -308,6 +312,7 @@ async def _async_test_save_and_load_schedule_data(monkeypatch):
         "points": canonical_points,
         "mode": "auto",
         "effect_windows": None,
+        "effect_catalog": None,
     }
 
 
@@ -416,6 +421,7 @@ async def _async_test_load_schedule_supports_legacy_list_records(monkeypatch):
         "points": _canonical_schedule_points(),
         "mode": "manual",
         "effect_windows": None,
+        "effect_catalog": None,
     }
 
 
@@ -486,6 +492,7 @@ async def _async_test_saving_effect_schedule_preserves_professional_curve(monkey
                 "enabled": True,
             }
         ],
+        "effect_catalog": EFFECT_CATALOG,
     }
 
 
@@ -733,3 +740,69 @@ async def _async_test_schedule_payload_refreshes_fixture_only_when_requested(mon
     assert refreshed["refresh_ok"] is True
     assert refreshed["fixture"]["professional"][0]["time"] == "08:00"
     device.async_refresh_state.assert_awaited_once()
+
+
+def test_schedule_payload_relabels_legacy_four_effect_names(monkeypatch):
+    asyncio.run(_async_test_schedule_payload_relabels_legacy_four_effect_names(monkeypatch))
+
+
+async def _async_test_schedule_payload_relabels_legacy_four_effect_names(monkeypatch):
+    import custom_components.fluvalble as integration
+
+    effect_windows = [
+        {
+            "start": "12:00",
+            "end": "12:10",
+            "effect": "Lightning",
+            "weekdays": ["monday"],
+            "enabled": True,
+        }
+    ]
+    _MemoryStore.data = {
+        "schedules": {
+            "entry_1": {
+                "points": None,
+                "mode": "native",
+                "effect_windows": effect_windows,
+            }
+        }
+    }
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
+
+    payload = await _async_schedule_payload(_FakeHass(_make_device(product_id=546)), "entry_1")
+
+    assert payload["effect_windows"][0]["effect"] == "Sun and lightning"
+    assert _MemoryStore.data["schedules"]["entry_1"]["effect_windows"] == effect_windows
+
+
+def test_schedule_payload_does_not_relabel_current_four_effect_names(monkeypatch):
+    asyncio.run(_async_test_schedule_payload_does_not_relabel_current_four_effect_names(monkeypatch))
+
+
+async def _async_test_schedule_payload_does_not_relabel_current_four_effect_names(monkeypatch):
+    import custom_components.fluvalble as integration
+
+    effect_windows = [
+        {
+            "start": "12:00",
+            "end": "12:10",
+            "effect": "Lightning",
+            "weekdays": ["monday"],
+            "enabled": True,
+        }
+    ]
+    _MemoryStore.data = {
+        "schedules": {
+            "entry_1": {
+                "points": None,
+                "mode": "native",
+                "effect_windows": effect_windows,
+                "effect_catalog": EFFECT_CATALOG,
+            }
+        }
+    }
+    monkeypatch.setattr(integration, "Store", _MemoryStore)
+
+    payload = await _async_schedule_payload(_FakeHass(_make_device(product_id=546)), "entry_1")
+
+    assert payload["effect_windows"][0]["effect"] == "Lightning"

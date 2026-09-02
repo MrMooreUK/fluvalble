@@ -33,9 +33,9 @@ from .effects import (
     effect_id,
     effect_list as classic_effect_list,
     effect_name,
-    plant_pro_effect_id,
-    plant_pro_effect_list,
-    plant_pro_effect_name,
+    four_effect_id,
+    four_effect_list,
+    four_effect_name,
 )
 from . import protocol
 from .products import product_from_id, product_id_from_manufacturer_data
@@ -381,11 +381,10 @@ class Device:
         """Store protocol-neutral fixture-owned timed-effect readback."""
         if windows is None:
             return False
-        effect_lookup = plant_pro_effect_name if protocol_name == "plant_pro" else effect_name
         normalized = [
             {
                 **window,
-                "effect": effect_lookup(window["effect_id"]),
+                "effect": self._native_effect_name(window["effect_id"]),
             }
             for window in windows
         ]
@@ -694,12 +693,12 @@ class Device:
         product = product_from_id(self.product_id)
         if product is not None:
             if product.native_effect_count == 4:
-                return plant_pro_effect_list()
+                return four_effect_list()
             if product.native_effect_count == 11:
                 return classic_effect_list()
             return []
         if self.supports_plant_pro_effects():
-            return plant_pro_effect_list()
+            return four_effect_list()
         return classic_effect_list() if self.supports_classic_effects() or self.supports_facebd_effects() else []
 
     def supports_facebd_effects(self) -> bool:
@@ -725,6 +724,18 @@ class Device:
             return True
         identity = f"{self.name} {self.model}".lower().replace(" ", "")
         return "plantpro" in identity or "plant4.0" in identity
+
+    def uses_four_effect_catalogue(self) -> bool:
+        """Return whether the APK assigns this product the four-effect catalogue."""
+        return self.supports_plant_pro_effects()
+
+    def _native_effect_id(self, effect: str) -> int | None:
+        """Resolve an effect name using this product's APK catalogue."""
+        return four_effect_id(effect) if self.uses_four_effect_catalogue() else effect_id(effect)
+
+    def _native_effect_name(self, effect_code: int) -> str | None:
+        """Resolve a wire effect ID using this product's APK catalogue."""
+        return four_effect_name(effect_code) if self.uses_four_effect_catalogue() else effect_name(effect_code)
 
     def _channel_snapshot(self) -> dict[str, int]:
         """Return the current supported static channel values."""
@@ -752,7 +763,7 @@ class Device:
 
         plant_pro = self._uses_plant_pro_protocol()
         facebd = self._uses_wifi_protocol()
-        effect_code = plant_pro_effect_id(effect) if plant_pro else effect_id(effect)
+        effect_code = self._native_effect_id(effect)
         if effect_code is None:
             return False
         if facebd and not self.supports_facebd_effects():
@@ -961,15 +972,12 @@ class Device:
         if self._uses_plant_pro_protocol():
             native_protocol = "plant_pro"
             packet_builder = protocol.spp_effect_schedule_packet
-            effect_lookup = plant_pro_effect_name
         elif self._uses_wifi_protocol() and self.supports_facebd_effects():
             native_protocol = "facebd"
             packet_builder = protocol.wifi_effect_schedule_packet
-            effect_lookup = effect_name
         elif self.supports_classic_effects():
             native_protocol = "classic"
             packet_builder = protocol.old_effect_schedule_packet
-            effect_lookup = effect_name
         else:
             self._set_diagnostic_error(
                 "unsupported_transport",
@@ -977,8 +985,21 @@ class Device:
             )
             return False
 
+        wire_windows = []
+        for window in windows:
+            effect_code = window.get("effect_id")
+            if isinstance(window.get("effect"), str):
+                effect_code = self._native_effect_id(window["effect"])
+            if not isinstance(effect_code, int) or self._native_effect_name(effect_code) is None:
+                self._set_diagnostic_error(
+                    "invalid_native_effect_schedule",
+                    f"Effect {window.get('effect', effect_code)!r} is not supported by this product",
+                )
+                return False
+            wire_windows.append({**window, "effect_id": effect_code})
+
         try:
-            packet = packet_builder(windows)
+            packet = packet_builder(wire_windows)
         except (KeyError, TypeError, ValueError) as err:
             self._set_diagnostic_error("invalid_native_effect_schedule", str(err))
             return False
@@ -991,9 +1012,9 @@ class Device:
                 "start": f"{window['start_hour']:02d}:{window['start_minute']:02d}",
                 "end": f"{window['end_hour']:02d}:{window['end_minute']:02d}",
                 "effect_id": window["effect_id"],
-                "effect": effect_lookup(window["effect_id"]),
+                "effect": self._native_effect_name(window["effect_id"]),
             }
-            for window in windows
+            for window in wire_windows
         ]
         self.values["native_effect_schedule"] = normalized
         self.diagnostics.update(
@@ -2131,7 +2152,7 @@ class Device:
             and isinstance(data[protocol.WIFI_MANUAL_KEY], int)
         ):
             effect_code = data[protocol.WIFI_MANUAL_KEY]
-            self.values["effect"] = effect_name(effect_code) if effect_code else None
+            self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
             updated = True
 
         present = 0
@@ -2207,7 +2228,7 @@ class Device:
 
         if protocol.SPP_EFFECT_KEY in data and isinstance(data[protocol.SPP_EFFECT_KEY], int):
             effect_code = data[protocol.SPP_EFFECT_KEY]
-            self.values["effect"] = plant_pro_effect_name(effect_code) if effect_code else None
+            self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
             updated = True
 
         auto_schedule = protocol.decode_spp_auto_schedule(data)

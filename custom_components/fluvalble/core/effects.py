@@ -22,15 +22,18 @@ WEATHER_EFFECTS: Mapping[str, int] = {
     "Crescent moon": 11,
 }
 
-# FluvalConnect exposes this four-effect subset on Plant Pro / mesh controllers
-# through CBOR key 14. The app orders the IDs as 4, 3, 1, 2 in its picker,
-# while the stable Home Assistant order below follows the effect IDs.
-PLANT_PRO_EFFECTS: Mapping[str, int] = {
-    "Thunderstorm": 1,
-    "Lightning": 2,
-    "Sun and lightning": 3,
-    "Colour cycle": 4,
+# FluvalConnect's four-effect picker uses weatherMeshIndex [4, 3, 1, 2].
+# Its matching assets are weather_3, weather_7, weather_9, and weather_11.
+# Preserve that APK picker order here; the values are the IDs sent on the wire.
+FOUR_EFFECTS: Mapping[str, int] = {
+    "Crescent moon": 4,
+    "Partly cloudy": 3,
+    "Lightning": 1,
+    "Sun and lightning": 2,
 }
+
+# Backward-compatible public name retained for callers of earlier releases.
+PLANT_PRO_EFFECTS = FOUR_EFFECTS
 
 
 def effect_list() -> list[str]:
@@ -48,16 +51,31 @@ def effect_name(effect_id: int) -> str | None:
     return next((name for name, value in WEATHER_EFFECTS.items() if value == effect_id), None)
 
 
+def four_effect_list() -> list[str]:
+    """Return the APK four-effect catalogue in picker order."""
+    return [EFFECT_NONE, *FOUR_EFFECTS]
+
+
+def four_effect_id(effect: str) -> int | None:
+    """Return the wire ID for an APK four-effect name."""
+    return FOUR_EFFECTS.get(effect)
+
+
+def four_effect_name(effect_id: int) -> str | None:
+    """Return the APK four-effect name for a wire ID."""
+    return next((name for name, value in FOUR_EFFECTS.items() if value == effect_id), None)
+
+
 def plant_pro_effect_list() -> list[str]:
-    """Return the Plant Pro effects in stable Home Assistant order."""
-    return [EFFECT_NONE, *PLANT_PRO_EFFECTS]
+    """Return the four-effect catalogue (compatibility wrapper)."""
+    return four_effect_list()
 
 
 def plant_pro_effect_id(effect: str) -> int | None:
-    """Return the Plant Pro CBOR effect ID for a Home Assistant name."""
-    return PLANT_PRO_EFFECTS.get(effect)
+    """Return a four-effect wire ID (compatibility wrapper)."""
+    return four_effect_id(effect)
 
 
 def plant_pro_effect_name(effect_id: int) -> str | None:
-    """Return the Home Assistant name for a Plant Pro CBOR effect ID."""
-    return next((name for name, value in PLANT_PRO_EFFECTS.items() if value == effect_id), None)
+    """Return a four-effect name (compatibility wrapper)."""
+    return four_effect_name(effect_id)

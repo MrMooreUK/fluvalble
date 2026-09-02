@@ -115,6 +115,13 @@ WEBSOCKET_REGISTERED = "websocket_registered"
 STATIC_URL = "/fluvalble"
 STORAGE_KEY = "fluvalble_schedules"
 STORAGE_VERSION = 1
+EFFECT_CATALOG = "apk-weather-mesh-v1"
+LEGACY_FOUR_EFFECT_NAMES = {
+    "Thunderstorm": "Lightning",
+    "Lightning": "Sun and lightning",
+    "Sun and lightning": "Partly cloudy",
+    "Colour cycle": "Crescent moon",
+}
 LEGACY_SCHEDULE_MIGRATION_RETRY_SECONDS = 5
 LEGACY_SCHEDULE_MIGRATION_RETRY_COUNT = 12
 MAX_SCHEDULE_POINTS = 12
@@ -295,7 +302,7 @@ def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
                 "start_minute": start_minute,
                 "end_hour": end_hour,
                 "end_minute": end_minute,
-                "effect_id": WEATHER_EFFECTS[effect],
+                "effect": effect,
                 "weekdays": [day in weekdays for day in NATIVE_EFFECT_WEEKDAYS],
                 "enabled": enabled,
             }
@@ -1007,11 +1014,22 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
     if refresh:
         refresh_ok = bool(device is not None and await device.async_refresh_state())
     saved = await _async_load_schedule_data(hass, entry_id)
+    effect_windows = saved.get("effect_windows")
+    if (
+        effect_windows is not None
+        and device is not None
+        and device.uses_four_effect_catalogue()
+        and saved.get("effect_catalog") != EFFECT_CATALOG
+    ):
+        effect_windows = [
+            {**window, "effect": LEGACY_FOUR_EFFECT_NAMES.get(window["effect"], window["effect"])}
+            for window in effect_windows
+        ]
     return {
         "entry_id": entry_id,
         "points": saved.get("points"),
         "mode": saved.get("mode", "manual"),
-        "effect_windows": saved.get("effect_windows"),
+        "effect_windows": effect_windows,
         "fixture": _native_schedule_readback(device),
         "refresh_ok": refresh_ok,
     }
@@ -1084,14 +1102,20 @@ async def _async_load_schedule_data(hass: HomeAssistant, entry_id: str) -> dict:
     schedules = data.get("schedules", {})
     saved = schedules.get(entry_id)
     if isinstance(saved, list):
-        return {"points": _normalize_saved_schedule_points(saved), "mode": "manual", "effect_windows": None}
+        return {
+            "points": _normalize_saved_schedule_points(saved),
+            "mode": "manual",
+            "effect_windows": None,
+            "effect_catalog": None,
+        }
     if isinstance(saved, dict):
         return {
             "points": _normalize_saved_schedule_points(saved.get("points")),
             "mode": saved.get("mode", "manual"),
             "effect_windows": _normalize_effect_schedule(saved.get("effect_windows")),
+            "effect_catalog": saved.get("effect_catalog"),
         }
-    return {"points": None, "mode": "manual", "effect_windows": None}
+    return {"points": None, "mode": "manual", "effect_windows": None, "effect_catalog": None}
 
 
 async def _async_save_schedule(
@@ -1109,11 +1133,13 @@ async def _async_save_schedule(
     existing = schedules.get(entry_id)
     existing_mode = existing.get("mode", "manual") if isinstance(existing, dict) else "manual"
     existing_effect_windows = existing.get("effect_windows") if isinstance(existing, dict) else None
+    existing_effect_catalog = existing.get("effect_catalog") if isinstance(existing, dict) else None
     schedule_mode = mode or existing_mode
     schedules[entry_id] = {
         "points": canonical_points,
         "mode": schedule_mode,
         "effect_windows": existing_effect_windows,
+        "effect_catalog": existing_effect_catalog,
     }
     await store.async_save(data)
 
@@ -1146,6 +1172,7 @@ async def _async_save_effect_schedule(
         **existing,
         "points": _normalize_saved_schedule_points(existing.get("points")),
         "effect_windows": normalized,
+        "effect_catalog": EFFECT_CATALOG,
     }
     await store.async_save(data)
 
