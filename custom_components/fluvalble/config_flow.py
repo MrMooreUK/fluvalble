@@ -117,19 +117,21 @@ def _is_likely_fluval(info: bluetooth.BluetoothServiceInfoBleak) -> bool:
     try:
         adv = info.advertisement if info else None
         name = (adv.local_name if adv else None) or getattr(info, "name", None) or ""
+        return is_likely_fluval(name, adv)
     except Exception:  # noqa: BLE001
         return False
-    return is_likely_fluval(name, adv)
 
 
 def _device_display_name(
-    service_info: bluetooth.BluetoothServiceInfoBleak,
+    service_info: bluetooth.BluetoothServiceInfoBleak | None,
     *,
     is_fluval: bool = False,
 ) -> str:
     """Build a clear display name so Fluval lights are easy to find in the list."""
+    if service_info is None:
+        return "Unknown device"
     try:
-        adv = service_info.advertisement if service_info else None
+        adv = service_info.advertisement
         name = ((adv.local_name if adv else None) or getattr(service_info, "name", None) or "").strip()
         address = getattr(service_info, "address", "") or ""
     except Exception:  # noqa: BLE001
