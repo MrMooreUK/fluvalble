@@ -13,6 +13,7 @@ from typing import Any, TypeAlias
 
 import voluptuous as vol
 
+from homeassistant import config_entries
 from homeassistant.components import bluetooth
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
@@ -587,7 +588,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
         entry.async_on_unload(_remove_pending_startup_listener)
 
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    _register_legacy_options_reload(entry)
 
     _LOGGER.debug("Setup complete for %s — waiting for BLE", mac)
     return True
@@ -672,8 +673,15 @@ def _cleanup_duplicate_devices(hass: HomeAssistant, entry: ConfigEntry, mac: str
         device_registry.async_remove_device(duplicate.id)
 
 
+def _register_legacy_options_reload(entry: ConfigEntry) -> None:
+    """Retain options reloads on HA versions before OptionsFlowWithReload."""
+    if hasattr(config_entries, "OptionsFlowWithReload"):
+        return
+    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+
+
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Reload the entry when options change so ping/active-time take effect."""
+    """Reload options on Home Assistant versions without the reload helper."""
     await hass.config_entries.async_reload(entry.entry_id)
 
 

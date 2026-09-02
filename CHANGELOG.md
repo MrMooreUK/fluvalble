@@ -76,6 +76,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   readback.
 
 ### Changed
+- Replaced the custom config-entry options listener with Home Assistant's
+  `OptionsFlowWithReload`, so an options save performs one framework-managed
+  reload without duplicate listener-driven reloads. Home Assistant versions
+  before 2025.8 retain the compatible listener path.
 - Corrected classic and Plant Pro clock synchronization to encode weekdays as
   Monday `1` through Sunday `7`, matching FluvalConnect's `TimeUtil.getWeeks`.
 - Corrected classic `6804` channel writes to encode each scaled 16-bit level

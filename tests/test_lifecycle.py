@@ -6,7 +6,60 @@ from types import SimpleNamespace
 import types
 from unittest.mock import AsyncMock, MagicMock
 
-from custom_components.fluvalble import DOMAIN, FluvalRuntimeData, _register_static_paths, async_unload_entry
+from homeassistant import config_entries
+
+from custom_components.fluvalble import (
+    DOMAIN,
+    FluvalRuntimeData,
+    _async_update_listener,
+    _register_legacy_options_reload,
+    _register_static_paths,
+    async_unload_entry,
+)
+
+
+def test_current_options_flow_does_not_register_second_reload_listener():
+    """Current HA owns the reload, so setup must not add another path."""
+    entry = SimpleNamespace(
+        add_update_listener=MagicMock(),
+        async_on_unload=MagicMock(),
+    )
+
+    _register_legacy_options_reload(entry)
+
+    assert hasattr(config_entries, "OptionsFlowWithReload")
+    entry.add_update_listener.assert_not_called()
+    entry.async_on_unload.assert_not_called()
+
+
+def test_legacy_options_flow_registers_one_reload_listener(monkeypatch):
+    """Supported older HA versions retain one listener-based reload path."""
+    remove_listener = MagicMock()
+    entry = SimpleNamespace(
+        add_update_listener=MagicMock(return_value=remove_listener),
+        async_on_unload=MagicMock(),
+    )
+    monkeypatch.delattr(config_entries, "OptionsFlowWithReload")
+
+    _register_legacy_options_reload(entry)
+
+    entry.add_update_listener.assert_called_once_with(_async_update_listener)
+    entry.async_on_unload.assert_called_once_with(remove_listener)
+
+
+def test_legacy_options_listener_reloads_once():
+    """The compatibility listener delegates one reload to Home Assistant."""
+    asyncio.run(_async_test_legacy_options_listener_reloads_once())
+
+
+async def _async_test_legacy_options_listener_reloads_once():
+    reload_entry = AsyncMock()
+    hass = SimpleNamespace(config_entries=SimpleNamespace(async_reload=reload_entry))
+    entry = SimpleNamespace(entry_id="entry_1")
+
+    await _async_update_listener(hass, entry)
+
+    reload_entry.assert_awaited_once_with("entry_1")
 
 
 def test_unload_stops_software_preview_task():
