@@ -27,8 +27,8 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant, Plant Pro, and Marine spectra are translated to RGB. |
-| **Weather effects** | Product IDs for the APK's 11-effect fixtures expose the native FluvalConnect weather catalogue, including lightning, colour cycle, cloud, and moon scenes. Selecting **None** restores the preceding static colour. |
-| **Four-effect fixtures** | Product IDs for the APK's newer four-effect fixtures expose Thunderstorm, Lightning, Sun and lightning, and Colour cycle through the standard light effect control. |
+| **Weather effects** | Product IDs for the APK's 11-effect fixtures expose the native FluvalConnect weather catalogue, including lightning, colour cycle, cloud, and moon scenes. Selecting **off** restores the preceding static colour. |
+| **Four-effect fixtures** | Product IDs for the APK's newer four-effect fixtures expose Crescent moon, Partly cloudy, Lightning, and Sun and lightning through the standard light effect control. |
 | **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
 | **Daylight-saving control** | FACEBD controllers expose their fixture-owned daylight-saving setting as a configuration switch, using the same state and command as FluvalConnect. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
@@ -114,8 +114,9 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 For fixtures whose advertisement contains an APK-known product ID, the device
 page uses FluvalConnect's exact model name and Auto profile channel count. The
-manual lamp-profile option remains available as an explicit override, including
-distinct Plant and Marine/Reef five-channel layouts.
+manual lamp-profile option remains available as an explicit fallback, including
+distinct Plant and Marine/Reef five-channel layouts. It cannot override an
+APK-decoded product identity.
 For AquaSky 3.0/FACEBD and FFF0/SPP controllers, the fixture's locally
 reported firmware version appears in Home Assistant's standard device information.
 

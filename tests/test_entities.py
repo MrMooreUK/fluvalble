@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_EFFECT,
@@ -12,6 +14,7 @@ from homeassistant.components.light import (
     ATTR_RGBW_COLOR,
     ColorMode,
 )
+from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor, switch
 from custom_components.fluvalble.core.device import Device
@@ -304,6 +307,23 @@ async def _async_test_light_entity_handles_power_only_actions():
     assert device.async_set_switch.await_args_list[1].args == ("led_on_off", False)
 
 
+def test_light_entity_surfaces_ble_command_failures():
+    asyncio.run(_async_test_light_entity_surfaces_ble_command_failures())
+
+
+async def _async_test_light_entity_surfaces_ble_command_failures():
+    device = _make_device()
+    device.client = SimpleNamespace(
+        last_error="connect failed: fixture unavailable",
+        command_write_uuid=None,
+    )
+    device.async_set_switch = AsyncMock(return_value=False)
+    entity = light.FluvalLight(device, "light")
+
+    with pytest.raises(HomeAssistantError, match="connect failed: fixture unavailable"):
+        await entity.async_turn_off()
+
+
 def test_light_exposes_and_routes_classic_native_effects():
     asyncio.run(_async_test_light_exposes_and_routes_classic_native_effects())
 
@@ -316,7 +336,7 @@ async def _async_test_light_exposes_and_routes_classic_native_effects():
     entity = light.FluvalLight(device, "light")
 
     assert entity._attr_effect_list == [
-        "None",
+        "off",
         "Thunderstorm",
         "Lightning",
         "Sun and lightning",
@@ -333,8 +353,16 @@ async def _async_test_light_exposes_and_routes_classic_native_effects():
     await entity.async_turn_on(**{ATTR_EFFECT: "Lightning"})
     device.async_set_effect.assert_awaited_once_with("Lightning")
 
-    await entity.async_turn_on(**{ATTR_EFFECT: "None"})
+    await entity.async_turn_on(**{ATTR_EFFECT: "off"})
     device.async_stop_effect.assert_awaited_once()
+
+    device.values["effect"] = "Lightning"
+    entity.internal_update()
+    assert entity._attr_effect == "Lightning"
+    assert entity._attr_color_mode is light.ColorMode.ONOFF
+    assert entity._attr_brightness is None
+    assert entity._attr_rgb_color is None
+    assert entity._attr_rgbw_color is None
 
 
 def test_light_exposes_facebd_native_effects():
@@ -344,7 +372,7 @@ def test_light_exposes_facebd_native_effects():
     entity = light.FluvalLight(device, "light")
 
     assert entity._attr_effect_list == [
-        "None",
+        "off",
         "Thunderstorm",
         "Lightning",
         "Sun and lightning",

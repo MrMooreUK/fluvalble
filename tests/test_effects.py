@@ -18,6 +18,7 @@ from custom_components.fluvalble.core.effects import (
 
 
 def test_classic_weather_effect_catalog_is_stable():
+    assert EFFECT_NONE == "off"
     assert effect_list() == [EFFECT_NONE, *WEATHER_EFFECTS]
     assert effect_id("Lightning") == 2
     assert effect_id("Colour cycle") == 4

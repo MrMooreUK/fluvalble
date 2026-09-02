@@ -416,7 +416,9 @@ class Device:
         return list(NUMBERS)
 
     def _resolved_channel_count(self) -> int:
-        """Return 4 or 5 channels from profile, packet hint, or name heuristics."""
+        """Return the APK channel count, with fallbacks for unidentified fixtures."""
+        if (product := product_from_id(self.product_id)) is not None:
+            return product.channel_count
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
         if profile == LAMP_PROFILE_AQUASKY:
             return 4
@@ -424,8 +426,6 @@ class Device:
             return 4
         if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_PLANT_PRO, LAMP_PROFILE_MARINE):
             return 5
-        if (product := product_from_id(self.product_id)) is not None:
-            return product.channel_count
         if self._channel_count_hint in (4, 5):
             return self._channel_count_hint
         if self.facebd:
@@ -446,6 +446,14 @@ class Device:
 
     def _channel_labels(self) -> dict[str, str]:
         """Return channel labels for the active lamp profile."""
+        if (product := product_from_id(self.product_id)) is not None:
+            if product.spectrum == "plant":
+                return CHANNEL_NAMES_PLANT
+            if product.spectrum == "rgbw":
+                return CHANNEL_NAMES_AQUASKY
+            if product.spectrum == "marine":
+                return CHANNEL_NAMES_MARINE
+
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
         if profile == LAMP_PROFILE_PLANT_PRO:
             return CHANNEL_NAMES_PLANT_PRO
@@ -455,13 +463,6 @@ class Device:
             return CHANNEL_NAMES_MARINE
         if profile in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
             return CHANNEL_NAMES_AQUASKY
-        if (product := product_from_id(self.product_id)) is not None:
-            if product.spectrum == "plant":
-                return CHANNEL_NAMES_PLANT
-            if product.spectrum == "rgbw":
-                return CHANNEL_NAMES_AQUASKY
-            if product.spectrum == "marine":
-                return CHANNEL_NAMES_MARINE
         model_l = (self.model or "").lower()
         name_l = (self.name or "").lower()
         if "marine" in model_l or "marine" in name_l or "reef" in model_l or "reef" in name_l:
@@ -686,8 +687,14 @@ class Device:
     def supports_classic_effects(self) -> bool:
         """Return whether available BLE evidence identifies a classic controller."""
         product = product_from_id(self.product_id)
-        if product is not None and product.native_effect_count != 11:
-            return False
+        if product is not None:
+            if product.native_effect_count != 11:
+                return False
+        else:
+            profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
+            identity = f"{self.name} {self.model}".lower().replace(" ", "")
+            if profile not in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3) and "aquasky" not in identity:
+                return False
         if self.client is not None and self.client.command_write_uuid:
             return self.client.command_write_uuid.lower().startswith("00001001")
 
@@ -726,8 +733,6 @@ class Device:
         product = product_from_id(self.product_id)
         if product is not None:
             return product.native_effect_count == 4
-        if self._uses_plant_pro_protocol():
-            return True
         if self.lamp_profile == LAMP_PROFILE_PLANT_PRO:
             return True
         identity = f"{self.name} {self.model}".lower().replace(" ", "")

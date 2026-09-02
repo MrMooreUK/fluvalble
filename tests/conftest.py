@@ -270,6 +270,7 @@ def _stub_homeassistant():
 
     # ---- homeassistant.components.light ----
     class ColorMode(str, enum.Enum):
+        ONOFF = "onoff"
         BRIGHTNESS = "brightness"
         RGB = "rgb"
         RGBW = "rgbw"

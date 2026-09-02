@@ -20,7 +20,7 @@ from homeassistant.const import CONF_MAC, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
-from homeassistant.helpers.device_registry import format_mac
+from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, format_mac
 from homeassistant.helpers.storage import Store
 from .core import (
     CONF_ACTIVE_TIME,
@@ -432,7 +432,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     if entry.unique_id != desired_unique_id:
         hass.config_entries.async_update_entry(entry, unique_id=desired_unique_id)
 
-    _remove_retired_entities(hass, entry)
+    _migrate_legacy_registry_entries(hass, entry, mac)
+    _cleanup_duplicate_devices(hass, entry, mac)
 
     runtime = FluvalRuntimeData()
     entry.runtime_data = runtime
@@ -468,9 +469,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             service_info.device,
             service_info.advertisement,
             hass=hass,
-            # Lamp profile is an option and determines whether the light entity
-            # exposes RGB or RGBW. Options intentionally override discovered
-            # config-entry data after a supported entry reload.
+            # Lamp profile is a fallback for fixtures whose APK product ID is
+            # unavailable. A decoded product ID remains authoritative.
             config_data={**dict(entry.data), **dict(entry.options)},
             ping_interval=ping_interval,
             active_time=active_time,
@@ -588,8 +588,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
 
 @callback
-def _remove_retired_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
-    """Remove entities superseded by native light and diagnostics support."""
+def _migrate_legacy_registry_entries(hass: HomeAssistant, entry: ConfigEntry, mac: str) -> None:
+    """Remove retired entities and clear a MAC formerly stored as a serial."""
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
 
     registry = er.async_get(hass)
@@ -604,6 +604,66 @@ def _remove_retired_entities(hass: HomeAssistant, entry: ConfigEntry) -> None:
             _LOGGER.info("Removing retired Fluval entity %s", entity.entity_id)
             registry.async_remove(entity.entity_id)
 
+    device_registry = dr.async_get(hass)
+    for device_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        if getattr(device_entry, "serial_number", None) == mac:
+            _LOGGER.info("Clearing MAC address from serial number for %s", device_entry.id)
+            device_registry.async_update_device(device_entry.id, serial_number=None)
+
+
+@callback
+def _cleanup_duplicate_devices(hass: HomeAssistant, entry: ConfigEntry, mac: str) -> None:
+    """Consolidate legacy registry rows into this entry's canonical BLE device."""
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    device_registry = dr.async_get(hass)
+    entity_registry = er.async_get(hass)
+    devices = list(dr.async_entries_for_config_entry(device_registry, entry.entry_id))
+    if len(devices) < 2:
+        return
+
+    normalized_mac = format_mac(mac).lower()
+
+    def _is_canonical(device_entry) -> bool:
+        identifiers = getattr(device_entry, "identifiers", set()) or set()
+        connections = getattr(device_entry, "connections", set()) or set()
+        return any(
+            str(domain) == DOMAIN and str(identifier).lower() == normalized_mac for domain, identifier in identifiers
+        ) or any(
+            str(connection_type) == CONNECTION_BLUETOOTH and str(address).lower() == normalized_mac
+            for connection_type, address in connections
+        )
+
+    canonical = next((device_entry for device_entry in devices if _is_canonical(device_entry)), None)
+    if canonical is None:
+        return
+
+    own_entities = list(er.async_entries_for_config_entry(entity_registry, entry.entry_id))
+    all_entities = list(getattr(entity_registry, "entities", {}).values())
+    for duplicate in devices:
+        if duplicate.id == canonical.id:
+            continue
+
+        foreign_config_entries = set(getattr(duplicate, "config_entries", set()) or set()) - {entry.entry_id}
+        foreign_entities = [
+            entity
+            for entity in all_entities
+            if getattr(entity, "device_id", None) == duplicate.id
+            and getattr(entity, "config_entry_id", None) != entry.entry_id
+        ]
+        if foreign_config_entries or foreign_entities:
+            _LOGGER.warning(
+                "Keeping duplicate Fluval device %s because another integration references it",
+                duplicate.id,
+            )
+            continue
+
+        for entity in own_entities:
+            if getattr(entity, "device_id", None) == duplicate.id:
+                entity_registry.async_update_entity(entity.entity_id, device_id=canonical.id)
+        _LOGGER.info("Removing duplicate Fluval device registry entry %s", duplicate.id)
+        device_registry.async_remove_device(duplicate.id)
+
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Reload the entry when options change so ping/active-time take effect."""
@@ -616,18 +676,19 @@ async def _register_static_paths(hass: HomeAssistant) -> None:
         return
 
     static_path = str(Path(__file__).parent / "www")
-    register_one = getattr(hass.http, "async_register_static_path", None)
     register_many = getattr(hass.http, "async_register_static_paths", None)
+    register_one = getattr(hass.http, "async_register_static_path", None)
 
     try:
-        if register_one is not None:
-            result = register_one(STATIC_URL, static_path, cache_headers=False)
-            if inspect.isawaitable(result):
-                await result
-        elif register_many is not None:
+        if register_many is not None:
             from homeassistant.components.http import StaticPathConfig  # noqa: PLC0415
 
             result = register_many([StaticPathConfig(STATIC_URL, static_path, cache_headers=False)])
+            if inspect.isawaitable(result):
+                await result
+        elif register_one is not None:
+            # Compatibility fallback for older supported HA releases.
+            result = register_one(STATIC_URL, static_path, cache_headers=False)
             if inspect.isawaitable(result):
                 await result
         else:
@@ -1339,7 +1400,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
         runtime.device.cancel_reachability_refresh()
-        if runtime.device.native_preview_active:
+        if runtime.device.preview_task is not None or runtime.device.native_preview_active:
             await runtime.device.async_stop_preview()
         tasks = list(runtime.background_tasks)
         for task in tasks:
