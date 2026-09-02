@@ -19,6 +19,7 @@ from . import (
     LAMP_PROFILE_AQUASKY,
     LAMP_PROFILE_AQUASKY3,
     LAMP_PROFILE_AUTO,
+    LAMP_PROFILE_MARINE,
     LAMP_PROFILE_PLANT,
     LAMP_PROFILE_PLANT_PRO,
 )
@@ -91,15 +92,22 @@ PREVIEW_STEP_SECONDS = 2
 TRANSITION_STEP_SECONDS = 30
 DAY_MINUTES = 24 * 60
 
-# Approximate sRGB appearance of the five Plant/Marine LED channels.  These
-# fixtures do not expose literal RGB LEDs, so Home Assistant colours need to be
-# translated to and from Pink / Blue / Cold White / White / Warm White.
+# Approximate sRGB appearance of the five-channel spectral LEDs. These values
+# affect only Home Assistant's colour representation; BLE writes still use the
+# APK-defined channel order without conversion at the protocol layer.
 PLANT_CHANNEL_RGB = {
     "channel_1": (1.00, 0.28, 0.38),
     "channel_2": (0.18, 0.38, 1.00),
     "channel_3": (0.72, 0.84, 1.00),
     "channel_4": (1.00, 1.00, 1.00),
     "channel_5": (1.00, 0.72, 0.42),
+}
+MARINE_CHANNEL_RGB = {
+    "channel_1": (1.00, 0.25, 0.45),  # Pink
+    "channel_2": (0.00, 1.00, 1.00),  # Cyan
+    "channel_3": (0.00, 0.10, 1.00),  # Blue
+    "channel_4": (0.55, 0.10, 1.00),  # Purple
+    "channel_5": (0.75, 0.86, 1.00),  # Cold White
 }
 
 
@@ -407,7 +415,7 @@ class Device:
             return 4
         if profile == LAMP_PROFILE_AQUASKY3:
             return 4
-        if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_PLANT_PRO):
+        if profile in (LAMP_PROFILE_PLANT, LAMP_PROFILE_PLANT_PRO, LAMP_PROFILE_MARINE):
             return 5
         if (product := product_from_id(self.product_id)) is not None:
             return product.channel_count
@@ -436,6 +444,8 @@ class Device:
             return CHANNEL_NAMES_PLANT_PRO
         if profile == LAMP_PROFILE_PLANT:
             return CHANNEL_NAMES_PLANT
+        if profile == LAMP_PROFILE_MARINE:
+            return CHANNEL_NAMES_MARINE
         if profile in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
             return CHANNEL_NAMES_AQUASKY
         if (product := product_from_id(self.product_id)) is not None:
@@ -447,7 +457,9 @@ class Device:
                 return CHANNEL_NAMES_MARINE
         model_l = (self.model or "").lower()
         name_l = (self.name or "").lower()
-        if "plant" in model_l or "plant" in name_l or "marine" in model_l or "reef" in model_l:
+        if "marine" in model_l or "marine" in name_l or "reef" in model_l or "reef" in name_l:
+            return CHANNEL_NAMES_MARINE
+        if "plant" in model_l or "plant" in name_l:
             return CHANNEL_NAMES_PLANT
         return CHANNEL_NAMES_AQUASKY
 
@@ -458,9 +470,13 @@ class Device:
             CHANNEL_NAMES_PLANT_PRO,
         )
 
+    def uses_marine_spectrum(self) -> bool:
+        """Return whether the fixture uses the five-channel Marine spectrum."""
+        return self._channel_labels() == CHANNEL_NAMES_MARINE
+
     def light_mode(self) -> str:
         """Return the native Home Assistant colour mode for this fixture."""
-        return "rgb" if self.uses_plant_spectrum() else "rgbw"
+        return "rgb" if self.uses_plant_spectrum() or self.uses_marine_spectrum() else "rgbw"
 
     def master_brightness(self) -> int:
         """Overall brightness as the brightest supported channel."""
@@ -474,12 +490,13 @@ class Device:
         return round(self.master_brightness() / 100 * 255)
 
     def light_rgb_255(self) -> tuple[int, int, int]:
-        """Return a Plant spectrum as an RGB colour for Home Assistant."""
+        """Return a five-channel spectrum as an RGB colour for Home Assistant."""
         if self._commanded_state_matches() and self._commanded_rgb is not None:
             return self._commanded_rgb
 
         mix_r = mix_g = mix_b = 0.0
-        for channel, (channel_r, channel_g, channel_b) in PLANT_CHANNEL_RGB.items():
+        channel_rgb = MARINE_CHANNEL_RGB if self.uses_marine_spectrum() else PLANT_CHANNEL_RGB
+        for channel, (channel_r, channel_g, channel_b) in channel_rgb.items():
             weight = max(0, min(100, int(self.values.get(channel, 0)))) / 100
             mix_r += channel_r * weight
             mix_g += channel_g * weight
@@ -527,7 +544,10 @@ class Device:
         rgb: tuple[int, int, int],
         brightness: int,
     ) -> dict[str, int]:
-        """Translate HA RGB into Plant Pink/Blue/CW/White/WW percentages."""
+        """Translate HA RGB into the active five-channel spectral layout."""
+        if self.uses_marine_spectrum():
+            return self._marine_channels_from_rgb(rgb, brightness)
+
         red = max(0, min(255, int(rgb[0]))) / 255
         green = max(0, min(255, int(rgb[1]))) / 255
         blue = max(0, min(255, int(rgb[2]))) / 255
@@ -550,6 +570,41 @@ class Device:
             "channel_3": percent(white * white_weight * (0.70 * (1.0 - warmth) + 0.15)),
             "channel_4": percent(remaining_green * 0.85 + white * 0.45 * white_weight),
             "channel_5": percent(white * white_weight * (0.70 * warmth + 0.15)),
+        }
+
+    def _marine_channels_from_rgb(
+        self,
+        rgb: tuple[int, int, int],
+        brightness: int,
+    ) -> dict[str, int]:
+        """Translate HA RGB into Pink/Cyan/Blue/Purple/Cold White levels."""
+        red = max(0, min(255, int(rgb[0]))) / 255
+        green = max(0, min(255, int(rgb[1]))) / 255
+        blue = max(0, min(255, int(rgb[2]))) / 255
+        scale = max(0, min(255, int(brightness))) / 255
+
+        cold_white = min(red, green, blue)
+        remaining_red = red - cold_white
+        remaining_green = green - cold_white
+        remaining_blue = blue - cold_white
+
+        # Marine fixtures have no green-only emitter. Cyan is the closest
+        # native channel, while shared red/blue energy maps to Purple.
+        cyan = remaining_green
+        remaining_blue = max(0.0, remaining_blue - cyan)
+        purple = min(remaining_red, remaining_blue)
+        pink = remaining_red - purple
+        blue_level = remaining_blue - purple
+
+        def percent(value: float) -> int:
+            return max(0, min(100, round(value * scale * 100)))
+
+        return {
+            "channel_1": percent(pink),
+            "channel_2": percent(cyan),
+            "channel_3": percent(blue_level),
+            "channel_4": percent(purple),
+            "channel_5": percent(cold_white),
         }
 
     def remember_commanded_light(
