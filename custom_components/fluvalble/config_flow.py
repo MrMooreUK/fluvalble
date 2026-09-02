@@ -76,7 +76,12 @@ OPTIONS_SCHEMA = vol.Schema(
             int,
             vol.Range(min=5, max=60),
         ),
-        vol.Optional(CONF_ACTIVE_TIME, default=DEFAULT_ACTIVE_TIME): validate_active_time,
+        # Keep the form schema serializable by Home Assistant. The 1-29 gap is
+        # enforced explicitly in the options step below.
+        vol.Optional(CONF_ACTIVE_TIME, default=DEFAULT_ACTIVE_TIME): vol.All(
+            int,
+            vol.Range(min=0, max=600),
+        ),
     }
 )
 
@@ -351,6 +356,17 @@ class OptionsFlowHandler(OptionsFlowBase):
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and handle the options form."""
         if user_input is not None:
+            try:
+                validate_active_time(user_input[CONF_ACTIVE_TIME])
+            except vol.Invalid:
+                return self.async_show_form(
+                    step_id="init",
+                    data_schema=self.add_suggested_values_to_schema(
+                        OPTIONS_SCHEMA,
+                        user_input,
+                    ),
+                    errors={CONF_ACTIVE_TIME: "invalid_active_time"},
+                )
             return self.async_create_entry(title="", data=user_input)
 
         return self.async_show_form(
