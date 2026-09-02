@@ -20,8 +20,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - Added separate diagnostic sensors for the active Bluetooth connection source
   and latest advertisement source. The GATT route is snapshotted only after a
-  connection succeeds, so later advertisements from another adapter or proxy
-  cannot overwrite it. Downloadable diagnostics now report both routes.
+  connection succeeds, using Home Assistant's confirmed connected scanner when
+  available, so later advertisements from another adapter or proxy cannot overwrite it.
+  Downloadable diagnostics now report both routes.
 - Added classic fixture-resident P1-P4 recall and save actions using the APK's
   `6804` channel write and `6806` zero-based save-slot command.
 - Added product-aware wavelength previews backed by FluvalConnect's six current

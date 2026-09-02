@@ -360,9 +360,13 @@ class Device:
             }
         )
 
-    def _record_active_connection_source(self, device: BLEDevice) -> None:
+    def _record_active_connection_source(
+        self,
+        device: BLEDevice,
+        connected_source: str | None = None,
+    ) -> None:
         """Snapshot the selected HA route after GATT setup succeeds."""
-        metadata = self._source_metadata(self._source_from_device(device))
+        metadata = self._source_metadata(connected_source or self._source_from_device(device))
         self.conn_info.update(
             {
                 "active_connection_source": metadata["source_name"],

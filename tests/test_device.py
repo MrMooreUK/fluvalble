@@ -193,7 +193,10 @@ def test_advertisement_route_cannot_overwrite_active_connection_route(monkeypatc
         name="AquaSky",
         details={"source": "C4:D8:D5:96:91:DA"},
     )
-    device._record_active_connection_source(connected_device)
+    device._record_active_connection_source(
+        connected_device,
+        "C4:D8:D5:96:91:DA",
+    )
     device.set_connected(True)
 
     advertisement_device = SimpleNamespace(

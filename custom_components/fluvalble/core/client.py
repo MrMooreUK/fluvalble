@@ -68,7 +68,7 @@ WAKE_READ_UUIDS = (
 WRITE_PROPERTIES = frozenset({"write", "write-without-response"})
 
 DeviceProvider = Callable[[], BLEDevice | None]
-ConnectionReadyCallback = Callable[[BLEDevice], None]
+ConnectionReadyCallback = Callable[[BLEDevice, str | None], None]
 StateReadyCallback = Callable[[dict[int, object]], Awaitable[None]]
 
 
@@ -308,10 +308,17 @@ class Client:
                 raise
 
             if self.connection_ready_callback:
-                # Snapshot the BLEDevice actually handed to the connector.
-                # Advertisement callbacks may replace ``self.device`` while
-                # this connection attempt is in flight.
-                self.connection_ready_callback(device)
+                # HA's client wrapper may select another scanner with an
+                # available slot after receiving the requested BLEDevice.
+                # Report that confirmed scanner when available and retain the
+                # requested device only as a compatibility fallback for other
+                # clients. This does not influence HA's route selection.
+                connected_scanner = getattr(client, "_connected_scanner", None)
+                connected_source = getattr(connected_scanner, "source", None)
+                self.connection_ready_callback(
+                    device,
+                    str(connected_source) if connected_source else None,
+                )
             if self.status_callback:
                 self.status_callback(True)
             self.last_error = None

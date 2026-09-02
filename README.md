@@ -338,7 +338,7 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 - Persistent mode (`0`) keeps the session open and immediately starts one serialized reconnect cycle if the link drops.
 - Finite mode cleanly closes the connection after the configured idle window; the default remains 2 minutes.
 - Reachable remains on for five minutes after an advertisement, successful connection, or successful command. Advertisement signal strength comes only from advertisements and identifies that advertisement's scanner; it is not connection-route RSSI.
-- Bluetooth connection source snapshots the Home Assistant-selected adapter or proxy after GATT setup succeeds. Bluetooth advertisement source continues following the scanner that supplied the latest advertisement, so the two sources may legitimately differ.
+- Bluetooth connection source snapshots the adapter or proxy confirmed by Home Assistant's connected GATT client after setup succeeds. Bluetooth advertisement source continues following the scanner that supplied the latest advertisement, so the two sources may legitimately differ.
 - Each reconnect uses a fresh BLE client and the current HA-selected route.
 
 ---
