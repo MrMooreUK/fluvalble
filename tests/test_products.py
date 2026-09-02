@@ -114,3 +114,28 @@ def test_catalog_matches_apk_channel_groups_and_excludes_firmware_0103():
     assert {product_id for product_id, product in PRODUCTS.items() if product.channel_count == 5} == five_channel
     assert set(PRODUCTS) == four_channel | five_channel
     assert 259 not in PRODUCTS
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_id_decodes_from_classic_advertisement(product_id):
+    encoded = f"{product_id:04X}".encode("ascii")
+    company_id = int.from_bytes(encoded[:2], "little")
+
+    assert product_id_from_manufacturer_data({company_id: encoded[2:] + b"0103"}) == product_id
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_id_decodes_from_binary_advertisement(product_id):
+    payload = b"\x00" * 8 + product_id.to_bytes(2, "big")
+
+    assert product_id_from_manufacturer_data({65535: payload}) == product_id
+
+
+def test_newer_product_names_match_apk_add_device_catalog():
+    assert product_from_id(532).model == "Fluval Aquasky 3.0 LED"
+    assert product_from_id(545).model == "Fluval Plant 4.0 LED"
+    assert product_from_id(546).model == "Fluval Reef 4.0 LED"
+    assert product_from_id(547).model == "Fluval Reef Nano 4.0 LED"
+    assert product_from_id(548).model == "Fluval Plant Nano 4.0 LED"
+    assert product_from_id(563).model == "Fluval Siena 2.0"
+    assert product_from_id(564).model == "Fluval Roma & Shaker 2.0"
