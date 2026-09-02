@@ -4,7 +4,7 @@ on:
   push:
     # CI runs on the stable branch, the dev integration branch, and all
     # feature / review branches so problems are caught before merging.
-    branches: [master, main, dev, "claude/**", "feature/**", "fix/**"]
+    branches: [master, main, dev, "claude/**", "feature/**", "fix/**", "chore/**", "audit/**", "dependabot/**"]
   pull_request:
     # All PRs must pass CI regardless of their target branch.
     branches: [master, main, dev]
@@ -20,20 +20,21 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: Install lint tools
-        run: pip install ruff
+      - name: Install locked development dependencies
+        run: pip install -r requirements.txt
 
       - name: Run Ruff (linter + formatter check)
         run: |
           ruff check custom_components/ tests/
+          ruff format --check custom_components/ tests/
 
   # -----------------------------------------------------------------------
   # Validate manifest.json
@@ -42,7 +43,7 @@ jobs:
     name: Validate manifest.json
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check manifest.json is valid JSON
         run: python -c "import json; json.load(open('custom_components/fluvalble/manifest.json'))"
@@ -68,7 +69,7 @@ jobs:
     name: Validate translations
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Check strings.json is valid JSON
         run: python -c "import json; json.load(open('custom_components/fluvalble/strings.json'))"
@@ -101,10 +102,10 @@ jobs:
         python-version: ["3.11", "3.12"]
 
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
@@ -113,7 +114,7 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run tests
-        run: python -m pytest tests/ -v --tb=short
+        run: python -m pytest tests/ -v --tb=short --strict-config --strict-markers -W error
 
   # -----------------------------------------------------------------------
   # Static type checking (soft, non-gating)
@@ -122,16 +123,16 @@ jobs:
     name: mypy (Python 3.12)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
 
-      - name: Install mypy
-        run: pip install mypy
+      - name: Install locked development dependencies
+        run: pip install -r requirements.txt
 
       - name: Run mypy
         # HA's runtime types are not installable in CI; we type-check against
@@ -156,16 +157,16 @@ jobs:
     name: Test coverage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest-cov
+        run: pip install -r requirements.txt
 
       - name: Run tests with coverage
         run: |
@@ -177,7 +178,7 @@ jobs:
       - name: Upload coverage to Codecov
         # Set the repository's CODECOV_TOKEN secret to enable uploads.
         # The job degrades gracefully if the token is missing.
-        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        uses: codecov/codecov-action@e53489f4d376d79066609109e7a95a29eb3740b1 # v7.0.0
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
@@ -194,7 +195,7 @@ jobs:
     # on stable branch pushes; PRs still validate manifest and hacs.json shape.
     if: github.event_name == 'push' && (github.ref_name == 'main' || github.ref_name == 'master')
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: HACS validation
         uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa # main
@@ -210,7 +211,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # Need origin remotes so we can detect whether a `dev` branch exists.
           fetch-depth: 1

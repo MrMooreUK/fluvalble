@@ -1,0 +1,11 @@
+# Direct development and CI dependencies.
+# Keep exact versions so Dependabot can propose updates; regenerate the hashed
+# requirements.txt with the command recorded at the top of that file.
+pytest==9.1.1
+pytest-asyncio==1.4.0
+pytest-cov==7.1.0
+voluptuous==0.16.0
+ruff==0.16.5
+mypy==2.3.1
+pre-commit==4.6.2
+uv==0.12.9

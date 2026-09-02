@@ -61,6 +61,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   readback.
 
 ### Changed
+- Locked direct development dependencies and their transitive packages with
+  hashes, enabled weekly Dependabot updates, and refreshed pinned GitHub
+  Actions and the Ruff pre-commit hook.
+- Strengthened CI to enforce Ruff formatting, strict pytest configuration,
+  warnings-as-errors, and a 65% coverage floor.
 - Corrected classic and Plant Pro clock synchronization to encode weekdays as
   Monday `1` through Sunday `7`, matching FluvalConnect's `TimeUtil.getWeeks`.
 - Corrected classic `6804` channel writes to encode each scaled 16-bit level
