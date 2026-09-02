@@ -922,6 +922,32 @@ async def _async_test_plant_pro_native_schedule_actions_write_fixture_packets():
     assert "native_pro_schedule" not in device.values
 
 
+def test_five_channel_facebd_auto_schedule_writes_all_fixture_levels():
+    asyncio.run(_async_test_five_channel_facebd_auto_schedule_writes_all_fixture_levels())
+
+
+async def _async_test_five_channel_facebd_auto_schedule_writes_all_fixture_levels():
+    device = _make_device(product_id=546)
+    device.client = _facebd_client()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    schedule = {
+        "sunrise": (8, 0, 60),
+        "sunset": (20, 30, 45),
+        "sleep": (23, 15),
+        "day_levels": [80, 70, 60, 50, 40],
+        "night_levels": [0, 5, 0, 0, 10],
+    }
+
+    assert await device.async_set_native_auto_schedule(schedule)
+
+    schedule_packet = device._async_send_packet.await_args_list[0].args[0]
+    decoded = protocol.decode_cbor_map(schedule_packet)
+    assert decoded[protocol.WIFI_AUTO_DAY_LEVELS_KEY] == bytes([80, 70, 60, 50, 40])
+    assert decoded[protocol.WIFI_AUTO_NIGHT_LEVELS_KEY] == bytes([0, 5, 0, 0, 10])
+    assert device._async_send_packet.await_args_list[1].args[0] == protocol.wifi_mode_packet(1)
+
+
 def test_classic_and_facebd_native_effect_schedules_use_apk_packets():
     asyncio.run(_async_test_classic_and_facebd_native_effect_schedules_use_apk_packets())
 

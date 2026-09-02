@@ -144,6 +144,7 @@ def wifi_auto_schedule_packet(
     sleep: tuple[int, int] | None,
     day_levels: Iterable[int],
     night_levels: Iterable[int],
+    channel_count: int = 4,
 ) -> bytes:
     """Build the FluvalConnect FACEBD native Auto schedule map.
 
@@ -153,6 +154,8 @@ def wifi_auto_schedule_packet(
     end+ramp, matching the mesh fixture API, so convert that representation to
     the FACEBD controller's absolute minute pairs here.
     """
+    if channel_count not in (4, 5):
+        raise ValueError("FACEBD Fluval schedules require four or five channels")
     sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
     sunrise_end = min(1439, sunrise_start + _clamp_ramp(sunrise[2]))
     sunset_end = _minute_of_day(sunset[0], sunset[1])
@@ -163,8 +166,8 @@ def wifi_auto_schedule_packet(
             WIFI_AUTO_SUNRISE_KEY: [sunrise_start, sunrise_end],
             WIFI_AUTO_SUNSET_KEY: [sunset_start, sunset_end],
             WIFI_AUTO_SLEEP_KEY: sleep_minute,
-            WIFI_AUTO_DAY_LEVELS_KEY: _level_bytes(day_levels, count=4),
-            WIFI_AUTO_NIGHT_LEVELS_KEY: _level_bytes(night_levels, count=4),
+            WIFI_AUTO_DAY_LEVELS_KEY: _level_bytes(day_levels, count=channel_count),
+            WIFI_AUTO_NIGHT_LEVELS_KEY: _level_bytes(night_levels, count=channel_count),
         }
     )
 
