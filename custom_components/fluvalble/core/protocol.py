@@ -20,8 +20,10 @@ FIND_KEY = 52
 WIFI_MODE_KEY = 103
 WIFI_SWITCH_KEY = 104
 WIFI_MANUAL_KEY = 109
-WIFI_CHANNEL_KEYS = (110, 111, 112, 113)
 WIFI_AUTO_SUNRISE_KEY = 114
+# FluvalConnect reuses key 114 by packet context: it is the fifth manual
+# channel as an integer, and the Auto-schedule sunrise window as a minute pair.
+WIFI_CHANNEL_KEYS = (110, 111, 112, 113, WIFI_AUTO_SUNRISE_KEY)
 WIFI_AUTO_SUNSET_KEY = 115
 WIFI_AUTO_SLEEP_KEY = 116
 WIFI_AUTO_DAY_LEVELS_KEY = 117

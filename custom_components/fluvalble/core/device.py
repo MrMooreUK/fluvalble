@@ -2139,11 +2139,12 @@ class Device:
                 self.values[channel] = max(0, min(100, int(data[key])))
                 present += 1
                 updated = True
-        if present:
-            self._channel_count_hint = 5 if present >= 5 else 4
+        if isinstance(data.get(protocol.WIFI_CHANNEL_KEYS[4]), int):
+            self._channel_count_hint = 5
+        elif present >= 4:
+            self._channel_count_hint = 4
 
-        facebd_schedule_keys = (
-            protocol.WIFI_AUTO_SUNRISE_KEY,
+        unambiguous_facebd_schedule_keys = (
             protocol.WIFI_AUTO_SUNSET_KEY,
             protocol.WIFI_AUTO_SLEEP_KEY,
             protocol.WIFI_AUTO_DAY_LEVELS_KEY,
@@ -2153,7 +2154,8 @@ class Device:
             protocol.WIFI_PRO_LEVELS_KEY,
             protocol.WIFI_SCHEDULED_EFFECT_KEY,
         )
-        if any(key in data for key in facebd_schedule_keys):
+        has_auto_sunrise = isinstance(data.get(protocol.WIFI_AUTO_SUNRISE_KEY), list)
+        if has_auto_sunrise or any(key in data for key in unambiguous_facebd_schedule_keys):
             auto_schedule = protocol.decode_wifi_auto_schedule(data)
             pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=self._resolved_channel_count())
             updated = (

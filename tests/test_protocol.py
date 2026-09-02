@@ -7,14 +7,32 @@ import pytest
 from custom_components.fluvalble.core import protocol
 
 
-def test_wifi_all_zone_packet_contains_manual_key_and_channel_values():
+def test_wifi_five_channel_all_zone_packet_matches_apk_keys():
     packet = protocol.wifi_all_zone_packet([10, 20, 30, 40, 50])
 
     decoded = protocol.decode_cbor_map(packet)
 
-    assert decoded[protocol.WIFI_MANUAL_KEY] == 0
-    assert decoded[protocol.WIFI_CHANNEL_KEYS[0]] == 10
-    assert decoded[protocol.WIFI_CHANNEL_KEYS[3]] == 40
+    assert decoded == {
+        protocol.WIFI_MANUAL_KEY: 0,
+        protocol.WIFI_CHANNEL_KEYS[0]: 10,
+        protocol.WIFI_CHANNEL_KEYS[1]: 20,
+        protocol.WIFI_CHANNEL_KEYS[2]: 30,
+        protocol.WIFI_CHANNEL_KEYS[3]: 40,
+        protocol.WIFI_CHANNEL_KEYS[4]: 50,
+    }
+    assert protocol.WIFI_CHANNEL_KEYS[4] == protocol.WIFI_AUTO_SUNRISE_KEY
+
+
+def test_wifi_four_channel_all_zone_packet_stops_before_key_114():
+    decoded = protocol.decode_cbor_map(protocol.wifi_all_zone_packet([10, 20, 30, 40]))
+
+    assert decoded == {
+        protocol.WIFI_MANUAL_KEY: 0,
+        protocol.WIFI_CHANNEL_KEYS[0]: 10,
+        protocol.WIFI_CHANNEL_KEYS[1]: 20,
+        protocol.WIFI_CHANNEL_KEYS[2]: 30,
+        protocol.WIFI_CHANNEL_KEYS[3]: 40,
+    }
     assert protocol.WIFI_AUTO_SUNRISE_KEY not in decoded
 
 
