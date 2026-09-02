@@ -120,10 +120,11 @@ LEGACY_SCHEDULE_MIGRATION_RETRY_COUNT = 12
 MAX_SCHEDULE_POINTS = 12
 MIN_NATIVE_PRO_SCHEDULE_POINTS = 4
 MAX_NATIVE_PRO_SCHEDULE_POINTS = 12
-SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
-SCHEDULE_POINT_FIELDS = {"time", *SCHEDULE_CHANNELS}
-PLANT_PRO_CHANNELS = ("red", "blue", "cool_white", "warm_white", "amber")
-PLANT_PRO_WEEKDAYS = (
+NATIVE_SCHEDULE_CHANNELS = tuple(f"channel_{index}" for index in range(1, 6))
+LEGACY_SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
+LEGACY_PLANT_PRO_CHANNELS = ("red", "blue", "cool_white", "warm_white", "amber")
+SCHEDULE_POINT_FIELDS = {"time", *NATIVE_SCHEDULE_CHANNELS, *LEGACY_SCHEDULE_CHANNELS}
+NATIVE_EFFECT_WEEKDAYS = (
     "monday",
     "tuesday",
     "wednesday",
@@ -156,14 +157,32 @@ def _validate_schedule_points(points: object) -> list[dict]:
             raise vol.Invalid("Schedule times must use HH:MM in the 24-hour range")
 
         validated_point: dict[str, str | int] = {"time": time_value}
-        for channel in SCHEDULE_CHANNELS:
-            value = point.get(channel, 0)
+        for channel, legacy_channel in zip(
+            NATIVE_SCHEDULE_CHANNELS,
+            LEGACY_SCHEDULE_CHANNELS,
+            strict=True,
+        ):
+            if channel != legacy_channel and channel in point and legacy_channel in point:
+                raise vol.Invalid(f"{channel} and its legacy alias {legacy_channel} cannot both be present")
+            value = point.get(channel, point.get(legacy_channel, 0))
             if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
                 raise vol.Invalid(f"{channel} must be an integer from 0 to 100")
             validated_point[channel] = value
         validated.append(validated_point)
 
     return validated
+
+
+def _normalize_saved_schedule_points(points: object) -> list[dict] | None:
+    """Migrate a valid saved RGB-style schedule to canonical channel keys."""
+    if not isinstance(points, list):
+        return None
+    try:
+        return _validate_schedule_points(points)
+    except vol.Invalid:
+        # Preserve historical malformed storage for inspection; every fixture
+        # write is still protected by the service validator.
+        return points
 
 
 def _validate_time(value: object, label: str) -> tuple[int, int]:
@@ -174,12 +193,18 @@ def _validate_time(value: object, label: str) -> tuple[int, int]:
     return int(hour), int(minute)
 
 
-def _validate_plant_pro_levels(value: object, label: str) -> list[int]:
-    """Validate and order one Plant Pro five-channel level object."""
-    if not isinstance(value, dict) or set(value) != set(PLANT_PRO_CHANNELS):
-        raise vol.Invalid(f"{label} must contain exactly {', '.join(PLANT_PRO_CHANNELS)}")
+def _validate_native_levels(value: object, label: str) -> list[int]:
+    """Validate canonical levels or the previous Plant-specific aliases."""
+    if not isinstance(value, dict):
+        raise vol.Invalid(f"{label} must contain all five fixture channels")
+    if set(value) == set(NATIVE_SCHEDULE_CHANNELS):
+        source_channels = NATIVE_SCHEDULE_CHANNELS
+    elif set(value) == set(LEGACY_PLANT_PRO_CHANNELS):
+        source_channels = LEGACY_PLANT_PRO_CHANNELS
+    else:
+        raise vol.Invalid(f"{label} must contain exactly {', '.join(NATIVE_SCHEDULE_CHANNELS)}")
     levels = []
-    for channel in PLANT_PRO_CHANNELS:
+    for channel in source_channels:
         level = value[channel]
         if isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100:
             raise vol.Invalid(f"{label}.{channel} must be an integer from 0 to 100")
@@ -188,7 +213,7 @@ def _validate_plant_pro_levels(value: object, label: str) -> list[int]:
 
 
 def _validate_native_auto_schedule(value: object) -> dict[str, Any]:
-    """Validate a fixture-owned Plant Pro Auto schedule."""
+    """Validate a fixture-owned Auto schedule."""
     required = {"sunrise", "sunrise_ramp", "sunset", "sunset_ramp", "day", "night"}
     optional = {"sleep"}
     if not isinstance(value, dict) or not required.issubset(value) or set(value) - required - optional:
@@ -206,13 +231,13 @@ def _validate_native_auto_schedule(value: object) -> dict[str, Any]:
         "sunrise": (*sunrise, ramps[0]),
         "sunset": (*sunset, ramps[1]),
         "sleep": sleep,
-        "day_levels": _validate_plant_pro_levels(value["day"], "day"),
-        "night_levels": _validate_plant_pro_levels(value["night"], "night"),
+        "day_levels": _validate_native_levels(value["day"], "day"),
+        "night_levels": _validate_native_levels(value["night"], "night"),
     }
 
 
 def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
-    """Validate Plant Pro fixture-owned Pro schedule points."""
+    """Validate fixture-owned Professional schedule points."""
     if (
         not isinstance(value, list)
         or not MIN_NATIVE_PRO_SCHEDULE_POINTS <= len(value) <= MAX_NATIVE_PRO_SCHEDULE_POINTS
@@ -223,13 +248,10 @@ def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
         )
     points = []
     for point in value:
-        if not isinstance(point, dict) or set(point) != {"time", *PLANT_PRO_CHANNELS}:
-            raise vol.Invalid("Each Plant Pro point must contain time and all five channels")
+        if not isinstance(point, dict) or "time" not in point:
+            raise vol.Invalid("Each Professional point must contain time and all five channels")
         hour, minute = _validate_time(point["time"], "point time")
-        levels = _validate_plant_pro_levels(
-            {channel: point[channel] for channel in PLANT_PRO_CHANNELS},
-            "point",
-        )
+        levels = _validate_native_levels({key: item for key, item in point.items() if key != "time"}, "point")
         points.append({"hour": hour, "minute": minute, "levels": levels})
     return points
 
@@ -253,8 +275,8 @@ def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
         effect = window["effect"]
         if effect not in WEATHER_EFFECTS:
             raise vol.Invalid(f"effect must be one of {', '.join(WEATHER_EFFECTS)}")
-        weekdays = window.get("weekdays", list(PLANT_PRO_WEEKDAYS))
-        if not isinstance(weekdays, list) or any(day not in PLANT_PRO_WEEKDAYS for day in weekdays):
+        weekdays = window.get("weekdays", list(NATIVE_EFFECT_WEEKDAYS))
+        if not isinstance(weekdays, list) or any(day not in NATIVE_EFFECT_WEEKDAYS for day in weekdays):
             raise vol.Invalid("weekdays must contain valid lowercase weekday names")
         if len(set(weekdays)) != len(weekdays):
             raise vol.Invalid("weekdays must not contain duplicates")
@@ -274,7 +296,7 @@ def _validate_native_effect_windows(value: object) -> list[dict[str, Any]]:
                 "end_hour": end_hour,
                 "end_minute": end_minute,
                 "effect_id": WEATHER_EFFECTS[effect],
-                "weekdays": [day in weekdays for day in PLANT_PRO_WEEKDAYS],
+                "weekdays": [day in weekdays for day in NATIVE_EFFECT_WEEKDAYS],
                 "enabled": enabled,
             }
         )
@@ -720,15 +742,13 @@ def _register_services(hass: HomeAssistant) -> None:
     async def async_set_native_auto_schedule(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_set_native_auto_schedule(call.data["schedule"]):
-            raise HomeAssistantError(
-                device.diagnostics.get("last_error") or "Unable to store the Plant Pro Auto schedule"
-            )
+            raise HomeAssistantError(device.diagnostics.get("last_error") or "Unable to store the native Auto schedule")
 
     async def async_set_native_pro_schedule(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_set_native_pro_schedule(call.data["points"]):
             raise HomeAssistantError(
-                device.diagnostics.get("last_error") or "Unable to store the Plant Pro Pro schedule"
+                device.diagnostics.get("last_error") or "Unable to store the native Professional schedule"
             )
 
     async def async_set_native_effect_schedule(call: ServiceCall) -> None:
@@ -885,11 +905,7 @@ def _normalize_fixture_pro_schedule(schedule: object) -> list[dict[str, Any]] | 
         points.append(
             {
                 "time": time_text,
-                "red": channel_values[0],
-                "green": channel_values[1],
-                "blue": channel_values[2],
-                "white": channel_values[3],
-                "channel_5": channel_values[4],
+                **{channel: channel_values[index] for index, channel in enumerate(NATIVE_SCHEDULE_CHANNELS)},
             }
         )
     return points
@@ -919,14 +935,14 @@ def _normalize_effect_schedule(schedule: object) -> list[dict[str, Any]] | None:
         if effect not in WEATHER_EFFECTS:
             return None
 
-        weekdays = window.get("weekdays", list(PLANT_PRO_WEEKDAYS))
+        weekdays = window.get("weekdays", list(NATIVE_EFFECT_WEEKDAYS))
         if (
             isinstance(weekdays, list)
-            and len(weekdays) == len(PLANT_PRO_WEEKDAYS)
+            and len(weekdays) == len(NATIVE_EFFECT_WEEKDAYS)
             and all(isinstance(value, bool) for value in weekdays)
         ):
-            weekday_names = [day for day, enabled in zip(PLANT_PRO_WEEKDAYS, weekdays, strict=True) if enabled]
-        elif isinstance(weekdays, list) and all(day in PLANT_PRO_WEEKDAYS for day in weekdays):
+            weekday_names = [day for day, enabled in zip(NATIVE_EFFECT_WEEKDAYS, weekdays, strict=True) if enabled]
+        elif isinstance(weekdays, list) and all(day in NATIVE_EFFECT_WEEKDAYS for day in weekdays):
             weekday_names = list(dict.fromkeys(weekdays))
         else:
             return None
@@ -1065,10 +1081,10 @@ async def _async_load_schedule_data(hass: HomeAssistant, entry_id: str) -> dict:
     schedules = data.get("schedules", {})
     saved = schedules.get(entry_id)
     if isinstance(saved, list):
-        return {"points": saved, "mode": "manual", "effect_windows": None}
+        return {"points": _normalize_saved_schedule_points(saved), "mode": "manual", "effect_windows": None}
     if isinstance(saved, dict):
         return {
-            "points": saved.get("points"),
+            "points": _normalize_saved_schedule_points(saved.get("points")),
             "mode": saved.get("mode", "manual"),
             "effect_windows": _normalize_effect_schedule(saved.get("effect_windows")),
         }
@@ -1083,6 +1099,7 @@ async def _async_save_schedule(
     mode: str | None = None,
 ) -> None:
     """Save one schedule to storage."""
+    canonical_points = _normalize_saved_schedule_points(points)
     store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
     data = await store.async_load() or {}
     schedules = data.setdefault("schedules", {})
@@ -1091,7 +1108,7 @@ async def _async_save_schedule(
     existing_effect_windows = existing.get("effect_windows") if isinstance(existing, dict) else None
     schedule_mode = mode or existing_mode
     schedules[entry_id] = {
-        "points": points,
+        "points": canonical_points,
         "mode": schedule_mode,
         "effect_windows": existing_effect_windows,
     }
@@ -1124,6 +1141,7 @@ async def _async_save_effect_schedule(
         existing = {"points": None, "mode": "manual"}
     schedules[entry_id] = {
         **existing,
+        "points": _normalize_saved_schedule_points(existing.get("points")),
         "effect_windows": normalized,
     }
     await store.async_save(data)

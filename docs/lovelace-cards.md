@@ -57,103 +57,103 @@ cards:
     step_seconds: 2
     points:
       - time: "00:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
       - time: "10:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
       - time: "11:00"
-        red: 10
-        green: 10
-        blue: 25
-        white: 5
+        channel_1: 10
+        channel_2: 10
+        channel_3: 25
+        channel_4: 5
       - time: "16:00"
-        red: 10
-        green: 10
-        blue: 25
-        white: 5
+        channel_1: 10
+        channel_2: 10
+        channel_3: 25
+        channel_4: 5
       - time: "19:00"
-        red: 3
-        green: 0
-        blue: 8
-        white: 0
+        channel_1: 3
+        channel_2: 0
+        channel_3: 8
+        channel_4: 0
       - time: "20:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
 
   - type: custom:fluvalble-spectrum-card
     title: AquaSky Spectrum Bars
     points:
       - time: "00:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
       - time: "10:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
       - time: "11:00"
-        red: 10
-        green: 10
-        blue: 25
-        white: 5
+        channel_1: 10
+        channel_2: 10
+        channel_3: 25
+        channel_4: 5
       - time: "16:00"
-        red: 10
-        green: 10
-        blue: 25
-        white: 5
+        channel_1: 10
+        channel_2: 10
+        channel_3: 25
+        channel_4: 5
       - time: "19:00"
-        red: 3
-        green: 0
-        blue: 8
-        white: 0
+        channel_1: 3
+        channel_2: 0
+        channel_3: 8
+        channel_4: 0
       - time: "20:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
 
   - type: custom:fluvalble-wavelength-card
     title: AquaSky Wavelength Preview
     points:
       - time: "00:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
       - time: "10:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
       - time: "11:00"
-        red: 10
-        green: 10
-        blue: 25
-        white: 5
+        channel_1: 10
+        channel_2: 10
+        channel_3: 25
+        channel_4: 5
       - time: "16:00"
-        red: 10
-        green: 10
-        blue: 25
-        white: 5
+        channel_1: 10
+        channel_2: 10
+        channel_3: 25
+        channel_4: 5
       - time: "19:00"
-        red: 3
-        green: 0
-        blue: 8
-        white: 0
+        channel_1: 3
+        channel_2: 0
+        channel_3: 8
+        channel_4: 0
       - time: "20:00"
-        red: 0
-        green: 0
-        blue: 0
-        white: 0
+        channel_1: 0
+        channel_2: 0
+        channel_3: 0
+        channel_4: 0
 ```
 
 The complete dashboard example is available in
@@ -191,6 +191,12 @@ controller's Auto readback without modifying the Professional editor. Channel
 labels follow the configured fixture profile, including four-channel AquaSky and
 five-channel Plant/Plant Pro layouts.
 
+Card schedule points use positional `channel_1` through `channel_5` keys. Their
+display labels come from the detected fixture's APK-backed product profile, so
+the same card schema maps correctly to AquaSky, Plant, Plant Pro, and Marine
+channel layouts. Existing RGB-style point keys remain accepted and are migrated
+when the schedule is loaded or saved.
+
 Use **Preview fixture time** or **Play fixture schedule** to invoke the APK's
 native preview path against the schedule already loaded from the controller.
 Preview never uploads the editor copy: load or save and then explicitly load the
@@ -222,4 +228,3 @@ FACEBD and Plant Pro controllers can report the complete timed-effect schedule.
 Classic state responses expose only one embedded timed-effect slot, so the card
 labels that readback as partial and retains the complete Home Assistant copy
 until the user explicitly chooses **Load from fixture**.
-

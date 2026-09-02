@@ -87,19 +87,21 @@ preview_schedule:
         text:
     points:
       name: Schedule points
-      description: List of points with time plus red, green, blue, white, and optional channel_5 values.
+      description: List of points with time plus channel_1 through channel_5 values in the fixture's APK-defined order. Previous RGB-style names remain accepted as aliases.
       required: true
       example:
         - time: "10:00"
-          red: 0
-          green: 0
-          blue: 0
-          white: 0
+          channel_1: 0
+          channel_2: 0
+          channel_3: 0
+          channel_4: 0
+          channel_5: 0
         - time: "11:00"
-          red: 10
-          green: 10
-          blue: 25
-          white: 5
+          channel_1: 10
+          channel_2: 10
+          channel_3: 25
+          channel_4: 5
+          channel_5: 0
       selector:
         object:
     duration:
@@ -185,19 +187,21 @@ save_schedule:
         text:
     points:
       name: Schedule points
-      description: List of schedule points with time plus red, green, blue, white, and optional channel_5 values.
+      description: List of schedule points with time plus channel_1 through channel_5 values in the fixture's APK-defined order. Previous RGB-style names remain accepted as aliases.
       required: true
       example:
         - time: "10:00"
-          red: 0
-          green: 0
-          blue: 0
-          white: 0
+          channel_1: 0
+          channel_2: 0
+          channel_3: 0
+          channel_4: 0
+          channel_5: 0
         - time: "11:00"
-          red: 10
-          green: 10
-          blue: 25
-          white: 5
+          channel_1: 10
+          channel_2: 10
+          channel_3: 25
+          channel_4: 5
+          channel_5: 0
       selector:
         object:
     mode:
@@ -225,7 +229,7 @@ set_native_auto_schedule:
         text:
     schedule:
       name: Auto schedule
-      description: Sunrise, sunset, optional sleep time, ramp minutes, and five-channel day/night levels.
+      description: Sunrise, sunset, optional sleep time, ramp minutes, and channel_1 through channel_5 day/night levels in the fixture's APK-defined order. Previous Plant-specific names remain accepted as aliases.
       required: true
       example:
         sunrise: "08:00"
@@ -234,23 +238,23 @@ set_native_auto_schedule:
         sunset_ramp: 60
         sleep: "23:00"
         day:
-          red: 80
-          blue: 70
-          cool_white: 60
-          warm_white: 50
-          amber: 40
+          channel_1: 80
+          channel_2: 70
+          channel_3: 60
+          channel_4: 50
+          channel_5: 40
         night:
-          red: 0
-          blue: 5
-          cool_white: 0
-          warm_white: 0
-          amber: 0
+          channel_1: 0
+          channel_2: 5
+          channel_3: 0
+          channel_4: 0
+          channel_5: 0
       selector:
         object:
 
 set_native_pro_schedule:
   name: Set native Professional schedule
-  description: Write native Professional schedule points using the classic, FACEBD, or FFF0/SPP protocol.
+  description: Write native Professional schedule points using the classic, FACEBD, or FFF0/SPP protocol. Previous Plant-specific channel names remain accepted as aliases.
   fields:
     entry_id:
       name: Config entry ID
@@ -268,29 +272,29 @@ set_native_pro_schedule:
       required: true
       example:
         - time: "08:00"
-          red: 0
-          blue: 0
-          cool_white: 0
-          warm_white: 0
-          amber: 0
+          channel_1: 0
+          channel_2: 0
+          channel_3: 0
+          channel_4: 0
+          channel_5: 0
         - time: "12:00"
-          red: 80
-          blue: 70
-          cool_white: 60
-          warm_white: 50
-          amber: 40
+          channel_1: 80
+          channel_2: 70
+          channel_3: 60
+          channel_4: 50
+          channel_5: 40
         - time: "20:00"
-          red: 20
-          blue: 20
-          cool_white: 10
-          warm_white: 10
-          amber: 5
+          channel_1: 20
+          channel_2: 20
+          channel_3: 10
+          channel_4: 10
+          channel_5: 5
         - time: "22:00"
-          red: 0
-          blue: 0
-          cool_white: 0
-          warm_white: 0
-          amber: 0
+          channel_1: 0
+          channel_2: 0
+          channel_3: 0
+          channel_4: 0
+          channel_5: 0
       selector:
         object:
 

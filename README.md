@@ -161,6 +161,12 @@ refreshes and imports the reported schedule for the active editor without
 silently replacing the other editor. Each editor labels its current data as
 local, uploaded, or confirmed fixture readback.
 
+Schedule actions and cards use positional `channel_1` through `channel_5`
+fields so the same schema works across product families. The interface labels
+those positions with the detected product's APK-defined channel names. Earlier
+RGB-style and Plant-specific field names remain accepted as compatibility
+aliases.
+
 **Preview fixture time** and **Play fixture schedule** use FluvalConnect's
 native preview commands against the schedule already stored by the controller.
 They never upload unsaved editor values. Classic controllers receive their
