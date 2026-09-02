@@ -50,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Aligned classic state readback with FluvalConnect's exact `6805` response
+  framing, mode-specific lengths, XOR validation, power flag, channel layout,
+  and manual weather-effect state.
 - Aligned BLE session initialization with FluvalConnect's fixture-clock, state-read,
   and FACEBD timezone sequence so native schedules do not briefly start from a
   stale controller clock after reconnecting.

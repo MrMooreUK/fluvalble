@@ -34,6 +34,14 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
     )
 
 
+def _old_manual_status(channels, *, flags=1, effect_id=0):
+    body = bytearray((0, flags, effect_id))
+    for value in channels:
+        body.extend((value & 0xFF, value >> 8))
+    body.extend(bytes(len(channels) * 4))
+    return protocol.old_packet(protocol.OLD_READ_PARAMS + body)
+
+
 def test_apk_product_identity_drives_auto_model_and_channel_count():
     aquasky = _make_device(
         name="Generic Light",
@@ -662,32 +670,70 @@ def test_clock_sync_flag_resets_on_disconnect():
 def test_old_status_packet_scales_to_percent():
     device = _make_device(name="Plant 3.0", model="Plant 3.0 Bluetooth LED")
     # Manual mode, on, five channels at 10/20/30/40/50% => wire 100/200/...
-    packet = bytearray(
-        [
-            0x68,
-            0x18,
-            0x00,
-            0x01,
-            0x00,
-            100 & 0xFF,
-            100 >> 8,
-            200 & 0xFF,
-            200 >> 8,
-            300 & 0xFF,
-            300 >> 8,
-            400 & 0xFF,
-            400 >> 8,
-            500 & 0xFF,
-            500 >> 8,
-        ]
-    )
+    packet = _old_manual_status([100, 200, 300, 400, 500])
 
-    device.decode_update_packet(packet)
+    assert device.decode_update_packet(packet)
 
     assert device.values["channel_1"] == 10
     assert device.values["channel_2"] == 20
     assert device.values["channel_5"] == 50
     assert device._channel_count_hint == 5
+
+
+def test_old_status_packet_decodes_four_channels_power_flag_and_effect():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.client = SimpleNamespace(command_write_uuid="00001001-0000-1000-8000-00805f9b34fb")
+
+    assert device.decode_update_packet(_old_manual_status([1000, 750, 500, 250], flags=0x03, effect_id=2))
+
+    assert device.values["led_on_off"] is True
+    assert device.values["effect"] == "Lightning"
+    assert [device.values[f"channel_{index}"] for index in range(1, 6)] == [100, 75, 50, 25, 0]
+    assert device._channel_count_hint == 4
+
+
+def test_old_status_power_uses_only_apk_flag_bit_zero():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+
+    assert device.decode_update_packet(_old_manual_status([0, 0, 0, 0], flags=0x02))
+
+    assert device.values["led_on_off"] is False
+
+
+def test_old_status_rejects_wrong_command_bad_checksum_and_bad_length_without_mutation():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.values.update({"mode": "professional", "led_on_off": True, "channel_1": 42})
+    handler = MagicMock()
+    device.updates_component.append(handler)
+    valid = _old_manual_status([100, 200, 300, 400])
+    wrong_command = protocol.old_packet(bytes((0x68, 0x18)) + valid[2:-1])
+    bad_checksum = valid[:-1] + bytes((valid[-1] ^ 0xFF,))
+    bad_length = protocol.old_packet(protocol.OLD_READ_PARAMS + valid[2:-2])
+
+    assert not device.decode_update_packet(wrong_command)
+    assert not device.decode_update_packet(bad_checksum)
+    assert not device.decode_update_packet(bad_length)
+    assert device.values["mode"] == "professional"
+    assert device.values["led_on_off"] is True
+    assert device.values["channel_1"] == 42
+    handler.assert_not_called()
+
+
+def test_old_schedule_status_does_not_invent_power_state():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.values["led_on_off"] = True
+    auto_body = bytes((1,)) + bytes(16)
+
+    assert device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + auto_body))
+    assert device.values["mode"] == "automatic"
+    assert device.values["led_on_off"] is True
+
+    device.values["led_on_off"] = False
+    pro_body = bytes((2, 4)) + bytes(24)
+
+    assert device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + pro_body))
+    assert device.values["mode"] == "professional"
+    assert device.values["led_on_off"] is False
 
 
 def test_plant_pro_status_packet_updates_power_mode_and_all_channels():
