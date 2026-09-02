@@ -148,6 +148,7 @@ RETIRED_DIAGNOSTIC_SUFFIXES = (
     "_diagnostics",
     "_refresh_diagnostics",
     "_test_led_channels",
+    "_advertisement_source",
 )
 RETIRED_ENTITY_DOMAINS = frozenset({Platform.NUMBER.value})
 RETIRED_SWITCH_SUFFIXES = ("_led_on_off",)

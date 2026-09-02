@@ -11,6 +11,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Made the connection-options schema serializable by current Home Assistant
   releases while retaining `0` for persistent BLE and `30`–`600` seconds for
   finite idle disconnects.
+- Simplified Bluetooth diagnostics to one friendly-name-only Source entity,
+  restored the existing Signal strength name, and retired the redundant
+  advertisement-source entity. Signal strength now follows the scanner that
+  established the active GATT route instead of being overwritten by a weaker
+  advertisement from another scanner; it is disabled by default for new
+  installations because persistent GATT sessions do not provide live RSSI.
 - Hardened Home Assistant setup and Bluetooth discovery against malformed
   advertisements, and removed the empty address suffix from the fallback name
   shown when discovery details are unavailable.
@@ -24,11 +30,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   config-entry setup.
 
 ### Added
-- Added separate diagnostic sensors for the active Bluetooth connection source
-  and latest advertisement source. The GATT route is snapshotted only after a
-  connection succeeds, using Home Assistant's confirmed connected scanner when
-  available, so later advertisements from another adapter or proxy cannot overwrite it.
-  Downloadable diagnostics now report both routes.
+- Added an active Bluetooth Source diagnostic. The GATT route is snapshotted
+  only after a connection succeeds, using Home Assistant's confirmed connected
+  scanner when available. Downloadable diagnostics retain both the active route
+  and the latest advertisement details.
 - Added classic fixture-resident P1-P4 recall and save actions using the APK's
   `6804` channel write and `6806` zero-based save-slot command.
 - Added product-aware wavelength previews backed by FluvalConnect's six current

@@ -141,6 +141,7 @@ def _stub_homeassistant():
     ha_bt.async_ble_device_from_address = MagicMock(return_value=None)
     ha_bt.async_last_service_info = MagicMock(return_value=None)
     ha_bt.async_scanner_by_source = MagicMock(return_value=None)
+    ha_bt.async_scanner_devices_by_address = MagicMock(return_value=[])
     ha_bt.async_register_callback = MagicMock(return_value=lambda: None)
 
     ha_comp = types.ModuleType("homeassistant.components")

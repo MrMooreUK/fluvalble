@@ -51,7 +51,7 @@ NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 # control for every supported light family. Schedule editors configure those
 # modes; they are not a second fixture mode selector.
 SELECTS = ["mode"]
-SENSORS = ["rssi", "last_seen", "active_connection_source", "advertisement_source"]
+SENSORS = ["rssi", "last_seen", "active_connection_source"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
 CHANNEL_NAMES_AQUASKY = {
     "channel_1": "Red",
@@ -292,8 +292,15 @@ class Device:
         """Update BLE metadata."""
         self.address = device.address
         self.conn_info["mac"] = device.address
-        self.touch_seen(rssi=advertisement.rssi, notify=False)
-        self._record_advertisement_source(source or self._source_from_device(device))
+        advertisement_source = source or self._source_from_device(device)
+        active_source = self.conn_info.get("active_connection_source_address")
+        # The RSSI entity describes the route controlling the fixture while a
+        # GATT session is active. An advertisement heard by another scanner is
+        # still retained in downloadable diagnostics, but must not replace the
+        # active route's signal sample.
+        route_rssi = advertisement.rssi if not self.connected or advertisement_source == active_source else None
+        self.touch_seen(rssi=route_rssi, notify=False)
+        self._record_advertisement_source(advertisement_source, advertisement.rssi)
         self.conn_info["service_uuids"] = list(advertisement.service_uuids)
         self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisement.service_data.items()}
         product_id = product_id_from_manufacturer_data(advertisement.manufacturer_data)
@@ -342,21 +349,27 @@ class Device:
                 source_type = getattr(scanner_type, "value", None) or (
                     str(scanner_type) if scanner_type is not None else None
                 )
+        # Scanner names commonly append the source address in parentheses.
+        # Addresses belong in downloadable diagnostics, not entity state.
+        address_suffix = f" ({source})" if source else ""
+        if source_name and address_suffix and source_name.endswith(address_suffix):
+            source_name = source_name[: -len(address_suffix)]
         return {
             "source": source,
             "source_name": source_name,
             "source_type": source_type,
         }
 
-    def _record_advertisement_source(self, source: str | None) -> None:
-        """Record which scanner supplied the advertisement-backed RSSI."""
+    def _record_advertisement_source(self, source: str | None, rssi: int | None) -> None:
+        """Record the latest advertisement separately from route diagnostics."""
         metadata = self._source_metadata(source)
         self.conn_info.update(
             {
                 "advertisement_source": metadata["source_name"],
                 "advertisement_source_address": metadata["source"],
                 "advertisement_source_type": metadata["source_type"],
-                "advertisement_updated_at": self.conn_info.get("rssi_updated_at"),
+                "advertisement_rssi": rssi,
+                "advertisement_updated_at": self.conn_info.get("last_seen"),
             }
         )
 
@@ -366,7 +379,8 @@ class Device:
         connected_source: str | None = None,
     ) -> None:
         """Snapshot the selected HA route after GATT setup succeeds."""
-        metadata = self._source_metadata(connected_source or self._source_from_device(device))
+        source = connected_source or self._source_from_device(device)
+        metadata = self._source_metadata(source)
         self.conn_info.update(
             {
                 "active_connection_source": metadata["source_name"],
@@ -375,6 +389,27 @@ class Device:
                 "active_connection_connected_at": datetime.now(UTC),
             }
         )
+        route_rssi = self._scanner_rssi(source)
+        if route_rssi is None:
+            # A stale value from another scanner is worse than no value.
+            self.conn_info.pop("rssi", None)
+            self.conn_info.pop("rssi_updated_at", None)
+        else:
+            self.touch_seen(rssi=route_rssi, notify=False)
+
+    def _scanner_rssi(self, source: str | None) -> int | None:
+        """Return the latest connectable advertisement RSSI for one scanner."""
+        if self.hass is None or not source:
+            return None
+        scanner_devices = bluetooth.async_scanner_devices_by_address(
+            self.hass,
+            self.address,
+            connectable=True,
+        )
+        for scanner_device in scanner_devices:
+            if str(scanner_device.scanner.source) == source:
+                return scanner_device.advertisement.rssi
+        return None
 
     def set_connected(self, connected: bool):
         """Set active GATT status while tracking fixture reachability."""
@@ -1164,10 +1199,6 @@ class Device:
                 value=self.conn_info.get("rssi"),
                 native_unit_of_measurement="dBm",
                 extra={
-                    "source_name": self.conn_info.get("advertisement_source"),
-                    "source_address": self.conn_info.get("advertisement_source_address"),
-                    "source_type": self.conn_info.get("advertisement_source_type"),
-                    "last_advertisement": self.conn_info.get("rssi_updated_at"),
                     "last_updated": self.conn_info.get("rssi_updated_at"),
                 },
             )
@@ -1175,21 +1206,9 @@ class Device:
             return Attribute(
                 value=self.conn_info.get("active_connection_source") if self.connected else None,
                 extra={
-                    "source_name": self.conn_info.get("active_connection_source"),
-                    "source_address": self.conn_info.get("active_connection_source_address"),
                     "source_type": self.conn_info.get("active_connection_source_type"),
                     "connected_at": self.conn_info.get("active_connection_connected_at"),
                     "gatt_connected": self.connected,
-                },
-            )
-        if attr == "advertisement_source":
-            return Attribute(
-                value=self.conn_info.get("advertisement_source"),
-                extra={
-                    "source_name": self.conn_info.get("advertisement_source"),
-                    "source_address": self.conn_info.get("advertisement_source_address"),
-                    "source_type": self.conn_info.get("advertisement_source_type"),
-                    "last_updated": self.conn_info.get("advertisement_updated_at"),
                 },
             )
         if attr == "last_seen":
@@ -1198,7 +1217,7 @@ class Device:
 
     def register_update(self, attr: str, handler: Callable):
         """Register handlers for updates."""
-        if attr in ("connection", "rssi", "last_seen", "active_connection_source", "advertisement_source"):
+        if attr in ("connection", "rssi", "last_seen", "active_connection_source"):
             self.updates_connect.append(handler)
         else:
             self.updates_component.append(handler)
@@ -1207,7 +1226,7 @@ class Device:
         """Remove a previously registered update handler."""
         target = (
             self.updates_connect
-            if attr in ("connection", "rssi", "last_seen", "active_connection_source", "advertisement_source")
+            if attr in ("connection", "rssi", "last_seen", "active_connection_source")
             else self.updates_component
         )
         with contextlib.suppress(ValueError):
@@ -2116,13 +2135,15 @@ class Device:
                 "source_type": self.conn_info.get("active_connection_source_type"),
                 "connected_at": self.conn_info.get("active_connection_connected_at"),
                 "gatt_connected": self.connected,
+                "rssi": self.conn_info.get("rssi"),
+                "rssi_updated_at": self.conn_info.get("rssi_updated_at"),
             },
             "latest_advertisement": {
                 "source": self.conn_info.get("advertisement_source_address"),
                 "source_name": self.conn_info.get("advertisement_source"),
                 "source_type": self.conn_info.get("advertisement_source_type"),
-                "rssi": self.conn_info.get("rssi"),
-                "received_at": self.conn_info.get("rssi_updated_at"),
+                "rssi": self.conn_info.get("advertisement_rssi"),
+                "received_at": self.conn_info.get("advertisement_updated_at"),
             },
         }
 

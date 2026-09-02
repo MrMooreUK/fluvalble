@@ -72,6 +72,11 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
         domain="button",
         unique_id="AABBCCDDEEFF_test_led_channels",
     )
+    advertisement_source = SimpleNamespace(
+        entity_id="sensor.fluval_bluetooth_advertisement_source",
+        domain="sensor",
+        unique_id="AABBCCDDEEFF_advertisement_source",
+    )
     registry = MagicMock()
     entity_registry = types.ModuleType("homeassistant.helpers.entity_registry")
     entity_registry.async_get = MagicMock(return_value=registry)
@@ -87,6 +92,7 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
             diagnostics,
             refresh,
             channel_test,
+            advertisement_source,
         ]
     )
     monkeypatch.setitem(
@@ -118,6 +124,7 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
         diagnostics.entity_id,
         refresh.entity_id,
         channel_test.entity_id,
+        advertisement_source.entity_id,
     ]
 
 
