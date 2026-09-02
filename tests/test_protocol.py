@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from custom_components.fluvalble.core import protocol
+from custom_components.fluvalble.core import encryption, protocol
 
 
 def _old_state_packet(body: bytes) -> bytes:
@@ -153,6 +153,85 @@ def test_native_find_packets_match_apk_commands():
     assert protocol.decode_cbor_map(protocol.wifi_find_packet()) == {52: "find"}
     assert protocol.spp_find_packet() == bytes.fromhex("d1 a1 18 34 64 66 69 6e 64")
     assert protocol.old_find_packet() == bytes.fromhex("68 0f 67")
+
+
+def test_classic_power_packet_is_encoded_once_like_apk(monkeypatch):
+    """The APK builder's checksum must not be checksummed a second time."""
+    plaintext = protocol.old_switch_packet(False)
+
+    assert plaintext == bytes.fromhex("68 03 00 6b")
+    monkeypatch.setattr("custom_components.fluvalble.core.encryption.random.randint", lambda *_: 0)
+    assert protocol.encrypted_old_packet(plaintext) == bytes.fromhex("54 51 54 68 03 00 6b")
+
+
+def test_classic_transport_uses_a_fresh_apk_key_for_each_chunk(monkeypatch):
+    keys = iter((0x11, 0x22))
+    monkeypatch.setattr(
+        "custom_components.fluvalble.core.encryption.random.randint",
+        lambda *_: next(keys),
+    )
+    packet = protocol.old_auto_schedule_packet(
+        sunrise=(8, 0, 30),
+        sunset=(20, 0, 30),
+        sleep=None,
+        day_levels=[10, 20, 30, 40],
+        night_levels=[1, 2, 3, 4],
+        channel_count=4,
+    )
+
+    frames = protocol.encrypted_old_frames(packet)
+
+    assert [frame[2] for frame in frames] == [0x54 ^ 0x11, 0x54 ^ 0x22]
+    assert b"".join(encryption.decode_message(frame) for frame in frames) == packet
+
+
+def test_classic_transport_rejects_unchecksummed_and_double_checksummed_frames():
+    with pytest.raises(ValueError):
+        protocol.encrypted_old_frames(bytes.fromhex("68 03 00"))
+    with pytest.raises(ValueError):
+        protocol.encrypted_old_frames(bytes.fromhex("68 03 00 6b 00"))
+
+
+def test_every_classic_builder_produces_one_valid_apk_command_frame(monkeypatch):
+    frames = (
+        protocol.old_read_params_packet(),
+        protocol.old_switch_packet(False),
+        protocol.old_switch_packet(True),
+        protocol.old_mode_packet(0),
+        protocol.old_all_zone_packet([10, 20, 30, 40]),
+        protocol.old_save_manual_preset_packet(0),
+        protocol.old_weather_effect_packet(1),
+        protocol.old_find_packet(),
+        protocol.old_clock_packet(),
+        protocol.old_auto_preview_packet([10, 20, 30, 40]),
+        protocol.old_auto_preview_packet(None),
+        protocol.old_auto_schedule_packet(
+            sunrise=(8, 0, 30),
+            sunset=(20, 0, 30),
+            sleep=None,
+            day_levels=[10, 20, 30, 40],
+            night_levels=[1, 2, 3, 4],
+            channel_count=4,
+        ),
+        protocol.old_pro_schedule_packet(
+            [
+                {
+                    "minute": minute,
+                    "channel_1": 10,
+                    "channel_2": 20,
+                    "channel_3": 30,
+                    "channel_4": 40,
+                }
+                for minute in (0, 360, 720, 1080)
+            ],
+            channel_count=4,
+        ),
+        protocol.old_effect_schedule_packet([]),
+    )
+
+    assert all(protocol.is_valid_old_command_packet(frame) for frame in frames)
+    monkeypatch.setattr("custom_components.fluvalble.core.encryption.random.randint", lambda *_: 0)
+    assert all(bytes(protocol.encrypted_old_frames(frame)[0])[0] == 0x54 for frame in frames)
 
 
 @pytest.mark.parametrize("effect_id", [-1, 12])

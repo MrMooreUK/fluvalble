@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Removed a duplicate XOR checksum from short classic BLE writes. The classic
+  command builders already produce complete APK frames, so power, mode, clock,
+  read, identify, and effect commands are once again encoded exactly once
+  before being written to `00001001`.
+- Restored the APK's 15-byte classic framing, per-chunk random-key encoder,
+  parse-driven notification reassembly, 200 ms clock/read pacing, and
+  power-before-colour command order.
 - Made the connection-options schema serializable by current Home Assistant
   releases while retaining `0` for persistent BLE and `30`–`600` seconds for
   finite idle disconnects.
