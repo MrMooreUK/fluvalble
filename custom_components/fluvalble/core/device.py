@@ -202,6 +202,7 @@ class Device:
         self.native_preview_schedule_type: str | None = None
         self.native_preview_restore_mode: str | None = None
         self._clock_synced = False
+        self._clock_sync_started = False
         self._clock_sync_lock = asyncio.Lock()
         # Preserve the exact colour HA requested while the decoded physical
         # channels still match it.  Plant RGB conversion is intentionally
@@ -320,6 +321,7 @@ class Device:
         else:
             # Allow clock sync again on the next successful connect (#8).
             self._clock_synced = False
+            self._clock_sync_started = False
             self._schedule_reachability_refresh()
 
         for handler in self.updates_connect:
@@ -1667,13 +1669,24 @@ class Device:
         return ok
 
     async def _async_on_client_ready(self) -> None:
-        """Run post-connect housekeeping after the BLE link is established."""
-        ok = await self.async_sync_clock(force=False)
-        if not ok:
-            _LOGGER.warning("Fluval clock sync failed after connect for %s", self.address)
+        """Send the APK's clock command before the initial parameter read."""
+        async with self._clock_sync_lock:
+            if self._clock_synced or self._clock_sync_started:
+                return
+            self._clock_sync_started = await self._async_send_clock_command()
+            if not self._clock_sync_started:
+                _LOGGER.warning("Fluval clock sync failed after connect for %s", self.address)
+
+    async def _async_on_client_state_ready(self, state: dict[int, object]) -> None:
+        """Finish APK initialization after the initial parameter read."""
+        async with self._clock_sync_lock:
+            if self._clock_synced or not self._clock_sync_started:
+                return
+            if not await self._async_finish_clock_sync(state):
+                _LOGGER.warning("Fluval timezone sync failed after connect for %s", self.address)
 
     async def async_sync_clock(self, *, force: bool = False) -> bool:
-        """Sync the lamp RTC from the Home Assistant host clock (#8)."""
+        """Run the APK's clock, state-read, and timezone initialization sequence."""
         if self._clock_synced and not force:
             return True
 
@@ -1691,31 +1704,49 @@ class Device:
                 )
                 return False
 
-            if self._uses_wifi_protocol():
-                packets = [protocol.wifi_timezone_packet(), protocol.wifi_clock_packet()]
-            elif self._uses_plant_pro_protocol():
-                # FluvalConnect treats Plant Pro as a mesh light and writes the
-                # raw 0xCD + local date/time frame to its FFF2 SPP endpoint.
-                packets = [protocol.mesh_clock_packet()]
-            else:
-                packets = [protocol.old_clock_packet()]
+            self._clock_sync_started = await self._async_send_clock_command()
+            if not self._clock_sync_started:
+                self._set_diagnostic_error("clock_sync_failed", "Unable to sync lamp clock")
+                return False
 
-            for packet in packets:
-                if not await self._async_send_packet(packet):
-                    self._set_diagnostic_error("clock_sync_failed", "Unable to sync lamp clock")
-                    return False
+            try:
+                await self.client.request_state()
+            except (TimeoutError, BleakError) as err:
+                _LOGGER.debug("Unable to read Fluval state during clock sync", exc_info=err)
 
-            self._clock_synced = True
-            self.diagnostics.update(
-                {
-                    "status": "clock_synced",
-                    "clock_synced_at": datetime.now(UTC).isoformat(),
-                    "last_error": None,
-                }
-            )
-            for handler in self.updates_connect:
-                handler()
-            return True
+            return await self._async_finish_clock_sync(self.client.observed_state)
+
+    async def _async_send_clock_command(self) -> bool:
+        """Send only the fixture clock command used before the APK state read."""
+        if self._uses_wifi_protocol():
+            packet = protocol.wifi_clock_packet()
+        elif self._uses_plant_pro_protocol():
+            # FluvalConnect treats Plant Pro as a mesh light and writes the
+            # raw 0xCD + local date/time frame to its FFF2 SPP endpoint.
+            packet = protocol.mesh_clock_packet()
+        else:
+            packet = protocol.old_clock_packet()
+        return await self._async_send_packet(packet, verify=False)
+
+    async def _async_finish_clock_sync(self, state: dict[int, object]) -> bool:
+        """Apply the APK's FACEBD timezone follow-up and record completion."""
+        if self._uses_wifi_protocol() and protocol.WIFI_TZ_OFFSET_KEY in state:
+            if not await self._async_send_packet(protocol.wifi_timezone_packet(), verify=False):
+                self._set_diagnostic_error("clock_sync_failed", "Unable to sync lamp timezone")
+                return False
+
+        self._clock_synced = True
+        self._clock_sync_started = False
+        self.diagnostics.update(
+            {
+                "status": "clock_synced",
+                "clock_synced_at": datetime.now(UTC).isoformat(),
+                "last_error": None,
+            }
+        )
+        for handler in self.updates_connect:
+            handler()
+        return True
 
     def _uses_plant_pro_protocol(self) -> bool:
         """Return true for the live Plant Pro 4.0 SPP-over-BLE profile."""
@@ -1763,7 +1794,7 @@ class Device:
             )
         return ok
 
-    async def _async_send_packet(self, packet: bytes) -> bool:
+    async def _async_send_packet(self, packet: bytes, *, verify: bool = True) -> bool:
         """Send one already-built command packet to the controller."""
         if not await self._async_ensure_client() or self.client is None:
             _LOGGER.warning("Cannot send Fluval state before BLE device is available")
@@ -1778,7 +1809,7 @@ class Device:
             packet.hex(),
         )
         expected_state = self._expected_state_for_packet(packet)
-        if not await client.send_now(packet, expected_state=expected_state):
+        if not await client.send_now(packet, expected_state=expected_state, verify=verify):
             self._set_diagnostic_error(
                 "write_failed",
                 client.last_error or "BLE write failed",
@@ -1920,6 +1951,7 @@ class Device:
             active_time=self._active_time,
             device_provider=self._connectable_ble_device,
             ready_callback=self._async_on_client_ready,
+            state_ready_callback=self._async_on_client_state_ready,
         )
 
     async def _async_ensure_client(self) -> bool:

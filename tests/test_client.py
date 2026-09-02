@@ -397,6 +397,78 @@ async def _async_test_classic_request_state_writes_existing_read_params_command(
     client._write_packet.assert_awaited_once_with(client.init_write_uuid, protocol.old_read_params_packet())
 
 
+def test_raw_connect_initialization_follows_apk_order():
+    asyncio.run(_async_test_raw_connect_initialization_follows_apk_order())
+
+
+async def _async_test_raw_connect_initialization_follows_apk_order():
+    client = _make_client()
+    client.connect_task = None
+    client.raw_facebd = True
+    client.wake_read_uuid = None
+    client.init_write_uuid = None
+    connected = SimpleNamespace(is_connected=True)
+    client._ensure_client = AsyncMock(return_value=connected)
+    client.ping = MagicMock()
+    events = []
+
+    async def send_clock():
+        events.append("clock")
+
+    async def read_state(_expected_state=None):
+        events.append("state")
+        client._observed_state = {protocol.WIFI_TZ_OFFSET_KEY: 0}
+        return True
+
+    async def send_timezone(state):
+        assert state == {protocol.WIFI_TZ_OFFSET_KEY: 0}
+        events.append("timezone")
+
+    client.ready_callback = send_clock
+    client.request_state = AsyncMock(side_effect=read_state)
+    client.state_ready_callback = send_timezone
+
+    await client._connect()
+
+    assert events == ["clock", "state", "timezone"]
+    client.ping.assert_called_once()
+
+
+def test_classic_connect_initialization_follows_apk_order():
+    asyncio.run(_async_test_classic_connect_initialization_follows_apk_order())
+
+
+async def _async_test_classic_connect_initialization_follows_apk_order():
+    client = _make_client()
+    client.connect_task = None
+    client.raw_facebd = False
+    client.wake_read_uuid = None
+    client.init_write_uuid = "classic-init"
+    connected = SimpleNamespace(is_connected=True)
+    client._ensure_client = AsyncMock(return_value=connected)
+    client.ping = MagicMock()
+    events = []
+
+    async def send_clock():
+        events.append("clock")
+
+    async def write_state(_uuid, _packet):
+        events.append("state")
+
+    async def finish_state(state):
+        assert state == {}
+        events.append("finish")
+
+    client.ready_callback = send_clock
+    client._write_packet = AsyncMock(side_effect=write_state)
+    client.state_ready_callback = finish_state
+
+    await client._connect()
+
+    assert events == ["clock", "state", "finish"]
+    client._write_packet.assert_awaited_once_with("classic-init", protocol.old_read_params_packet())
+
+
 def test_device_provider_refreshes_adapter_route():
     old = SimpleNamespace(address="AA", name="old", details={"source": "local"})
     proxy = SimpleNamespace(address="AA", name="proxy", details={"source": "esphome"})

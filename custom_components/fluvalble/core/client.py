@@ -68,6 +68,7 @@ WAKE_READ_UUIDS = (
 WRITE_PROPERTIES = frozenset({"write", "write-without-response"})
 
 DeviceProvider = Callable[[], BLEDevice | None]
+StateReadyCallback = Callable[[dict[int, object]], Awaitable[None]]
 
 
 class Client:
@@ -82,6 +83,7 @@ class Client:
         active_time: int = ACTIVE_TIME,
         device_provider: DeviceProvider | None = None,
         ready_callback: Callable[[], Awaitable[None]] | None = None,
+        state_ready_callback: StateReadyCallback | None = None,
     ) -> None:
         """Initialize the client."""
         self.device = device
@@ -89,6 +91,7 @@ class Client:
         self.update_callback = update_callback
         self.device_provider = device_provider
         self.ready_callback = ready_callback
+        self.state_ready_callback = state_ready_callback
         self._ping_interval = ping_interval
         self._active_time = active_time
 
@@ -395,16 +398,25 @@ class Client:
                 with contextlib.suppress(BleakError):
                     await client.read_gatt_char(self.wake_read_uuid)
 
+            # FluvalConnect initializes every BLE light in this order after
+            # notifications are enabled: set the fixture clock, read its
+            # current parameters, then apply any state-dependent follow-up.
+            if self.ready_callback:
+                try:
+                    await self.ready_callback()
+                except Exception as err:  # pylint: disable=broad-except
+                    _LOGGER.warning("Fluval pre-read initialization failed", exc_info=err)
+
             if self.raw_facebd:
                 await self.request_state()
             elif self.init_write_uuid:
                 await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
 
-            if self.ready_callback:
+            if self.state_ready_callback:
                 try:
-                    await self.ready_callback()
+                    await self.state_ready_callback(dict(self._observed_state))
                 except Exception as err:  # pylint: disable=broad-except
-                    _LOGGER.warning("Fluval post-connect callback failed", exc_info=err)
+                    _LOGGER.warning("Fluval post-read initialization failed", exc_info=err)
             connected = True
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval initial connection failed", exc_info=err)
@@ -568,6 +580,11 @@ class Client:
             async with asyncio.timeout(STATE_NOTIFY_TIMEOUT):
                 await self._state_update_event.wait()
         return self._state_update_event.is_set() and self._state_matches(expected_state)
+
+    @property
+    def observed_state(self) -> dict[int, object]:
+        """Return the state collected by the most recent explicit read."""
+        return dict(self._observed_state)
 
     def _state_matches(self, expected_state: dict[int, object] | None) -> bool:
         """Compare requested FACEBD values with state returned by the lamp."""
