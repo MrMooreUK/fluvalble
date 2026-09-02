@@ -19,6 +19,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_MAC, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.storage import Store
 from .core import (
@@ -61,6 +62,19 @@ def _runtime_device(entry_data: Any) -> Device | None:
     if isinstance(entry_data, dict):
         return entry_data.get("device")
     return None
+
+
+@callback
+def _sync_firmware_version_to_device_registry(hass: HomeAssistant, device: Device) -> None:
+    """Publish fixture-reported firmware through standard HA device info."""
+    if device.firmware_version is None:
+        return
+
+    registry = dr.async_get(hass)
+    registry_device = registry.async_get_device(identifiers={(DOMAIN, device.mac.upper())})
+    if registry_device is None or registry_device.sw_version == device.firmware_version:
+        return
+    registry.async_update_device(registry_device.id, sw_version=device.firmware_version)
 
 
 DISCOVERY_LOG_INTERVAL = 5
@@ -394,6 +408,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         )
         device.entry_id = entry.entry_id
         runtime.device = device
+        device.register_update(
+            "firmware_version",
+            lambda: _sync_firmware_version_to_device_registry(hass, device),
+        )
 
         # Retroactively add entities for platforms that set up before the
         # device was available (they stashed their add_entities callback).

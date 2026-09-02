@@ -358,8 +358,26 @@ def test_connection_changes_refresh_control_entities():
 def test_unique_id_and_identifiers_are_uppercase_for_mixed_case_mac():
     device = _make_device()
     device.address = "aa:bb:cc:dd:ee:ff"
+    device.firmware_version = "14"
     entity = light.FluvalLight(device, "light")
 
     assert entity._attr_unique_id == "AABBCCDDEEFF_light"
     assert entity._attr_device_info["identifiers"] == {("fluvalble", "AA:BB:CC:DD:EE:FF")}
     assert ("bluetooth", "AA:BB:CC:DD:EE:FF") in entity._attr_device_info["connections"]
+    assert entity._attr_device_info["sw_version"] == "14"
+
+
+def test_reported_firmware_updates_standard_device_registry_info():
+    import custom_components.fluvalble as integration
+
+    device = _make_device()
+    device.firmware_version = "14"
+    registry_device = SimpleNamespace(id="device_1", sw_version=None)
+    registry = MagicMock()
+    registry.async_get_device.return_value = registry_device
+
+    with patch.object(integration.dr, "async_get", return_value=registry, create=True):
+        integration._sync_firmware_version_to_device_registry(MagicMock(), device)
+
+    registry.async_get_device.assert_called_once_with(identifiers={("fluvalble", "AA:BB:CC:DD:EE:FF")})
+    registry.async_update_device.assert_called_once_with("device_1", sw_version="14")

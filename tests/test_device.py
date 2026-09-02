@@ -502,15 +502,34 @@ def test_plant_pro_status_packet_updates_power_mode_and_all_channels():
         name="PlantPro_AABBCC",
         model="Plant Pro 4.0 Bluetooth LED",
     )
-    status = bytes.fromhex("d2 a7 01 00 02 f5 03 18 64 04 14 05 18 1e 06 18 28 07 18 32")
+    status = bytes.fromhex("d2 a8 00 0e 01 00 02 f5 03 18 64 04 14 05 18 1e 06 18 28 07 18 32")
 
     assert device.decode_update_packet(status)
+    assert device.firmware_version == "14"
+    assert device.diagnostics["firmware_version"] == "14"
     assert device.values["mode"] == "manual"
     assert device.values["led_on_off"] is True
     assert device.values["channel_1"] == 100
     assert device.values["channel_2"] == 20
     assert device.values["channel_5"] == 50
     assert device._channel_count_hint == 5
+
+
+def test_facebd_status_records_locally_reported_firmware_version():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+
+    assert device._decode_wifi_update({protocol.WIFI_FIRMWARE_VERSION_KEY: 27})
+    assert device.firmware_version == "27"
+    assert device.diagnostics["firmware_version"] == "27"
+
+
+def test_firmware_version_rejects_non_integer_values():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED")
+
+    assert not device._decode_wifi_update({protocol.WIFI_FIRMWARE_VERSION_KEY: True})
+    assert not device._decode_plant_pro_update({protocol.SPP_FIRMWARE_VERSION_KEY: "14"})
+    assert device.firmware_version is None
+    assert "firmware_version" not in device.diagnostics
 
 
 def test_plant_pro_status_decodes_effect_and_fixture_schedules():

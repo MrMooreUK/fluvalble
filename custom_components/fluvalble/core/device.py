@@ -159,6 +159,7 @@ class Device:
         self.values["mode"] = "manual"
         self.values["led_on_off"] = False
         self.values["effect"] = None
+        self.firmware_version: str | None = None
         self.diagnostics: dict[str, Any] = {
             "status": "not_run",
             "configured_mac": self.address,
@@ -1981,6 +1982,9 @@ class Device:
     def _decode_wifi_update(self, data: dict[int, Any]) -> bool:
         """Decode a FACEBD WiFi-over-BLE CBOR state update."""
         updated = False
+        if protocol.WIFI_FIRMWARE_VERSION_KEY in data:
+            updated = self._store_firmware_version(data[protocol.WIFI_FIRMWARE_VERSION_KEY]) or updated
+
         if protocol.WIFI_MODE_KEY in data:
             mode = data[protocol.WIFI_MODE_KEY]
             if isinstance(mode, int) and 0 <= mode < len(MODES):
@@ -2052,6 +2056,9 @@ class Device:
     def _decode_plant_pro_update(self, data: dict[int, Any]) -> bool:
         """Decode a Plant Pro 4.0 D2 status map."""
         updated = False
+        if protocol.SPP_FIRMWARE_VERSION_KEY in data:
+            updated = self._store_firmware_version(data[protocol.SPP_FIRMWARE_VERSION_KEY]) or updated
+
         if protocol.SPP_MODE_KEY in data:
             mode = data[protocol.SPP_MODE_KEY]
             if isinstance(mode, int) and 0 <= mode < len(MODES):
@@ -2100,3 +2107,14 @@ class Device:
             for handler in self.updates_component:
                 handler()
         return updated
+
+    def _store_firmware_version(self, value: Any) -> bool:
+        """Store a locally reported fixture firmware version."""
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            return False
+
+        firmware_version = str(value)
+        changed = firmware_version != self.firmware_version
+        self.firmware_version = firmware_version
+        self.diagnostics["firmware_version"] = firmware_version
+        return changed
