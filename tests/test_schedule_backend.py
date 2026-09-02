@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -490,6 +491,18 @@ def test_integration_has_no_recurring_ha_schedule_executor():
     assert "_async_run_auto_schedule" not in source
 
 
+def test_schedule_card_exposes_fixture_native_auto_editor():
+    source = (
+        Path(__file__).parents[1] / "custom_components" / "fluvalble" / "www" / "fluvalble-schedule-card.js"
+    ).read_text(encoding="utf-8")
+
+    assert 'callService("set_native_auto_schedule"' in source
+    assert "Save Auto to fixture" in source
+    assert "Load Auto from fixture" in source
+    assert "sunrise_ramp" in source
+    assert "day_levels" in source
+
+
 def test_fixture_schedule_readback_normalizes_protocol_shapes():
     device = _make_device()
     device.values.update(
@@ -552,6 +565,7 @@ def test_fixture_schedule_readback_normalizes_protocol_shapes():
             "enabled": True,
         }
     ]
+    assert readback["channels"] == ["Red", "Green", "Blue", "White"]
     assert readback["effect_options"] == [
         "Thunderstorm",
         "Lightning",

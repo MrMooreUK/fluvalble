@@ -47,6 +47,10 @@ class FluvalbleScheduleCard extends HTMLElement {
   render() {
     const root = this.shadowRoot;
     if (!root) return;
+    if (this.store.editorMode === "auto") {
+      this.renderAutoEditor();
+      return;
+    }
 
     const points = this.store.points;
     const time = formatMinute(this.previewMinute);
@@ -79,6 +83,13 @@ class FluvalbleScheduleCard extends HTMLElement {
           </div>
 
           <div class="actions">
+            <label class="mode-control">
+              Schedule type
+              <select id="editor-mode">
+                <option value="professional" selected>Professional</option>
+                <option value="auto">Auto</option>
+              </select>
+            </label>
             <label class="mode-control">
               Schedule mode
               <select id="schedule-mode">
@@ -116,6 +127,12 @@ class FluvalbleScheduleCard extends HTMLElement {
         button#stop { background: var(--error-color); }
       </style>
     `;
+
+    root.getElementById("editor-mode").addEventListener("change", (event) => {
+      this.store.editorMode = event.target.value === "auto" ? "auto" : "professional";
+      notifyScheduleStore(this.config, this);
+      this.render();
+    });
 
     root.getElementById("time").addEventListener("input", (event) => {
       this.previewMinute = Number(event.target.value);
@@ -168,6 +185,164 @@ class FluvalbleScheduleCard extends HTMLElement {
     root.getElementById("stop").addEventListener("click", () => {
       this.stopPreviewPlayback();
     });
+  }
+
+  renderAutoEditor() {
+    const root = this.shadowRoot;
+    if (!root) return;
+    const schedule = this.store.autoSchedule;
+    const channels = autoChannelLabels(this.store);
+    const sleepEnabled = Boolean(schedule.sleep);
+
+    root.innerHTML = `
+      <ha-card>
+        <div class="card">
+          <div class="header">
+            <div>
+              <div class="title">${escapeHtml(this.config.title)}</div>
+              <div class="subtitle">Fixture-native Auto schedule · ${autoScheduleSourceLabel(this.store)}</div>
+            </div>
+          </div>
+
+          <div class="toolbar">
+            <label class="control">
+              Schedule type
+              <select id="editor-mode">
+                <option value="professional">Professional</option>
+                <option value="auto" selected>Auto</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="time-grid">
+            <label class="control">Sunrise
+              <input type="time" data-auto-field="sunrise" value="${escapeHtml(schedule.sunrise)}">
+            </label>
+            <label class="control">Sunrise ramp
+              <span class="number"><input type="number" min="0" max="240" step="1" data-auto-field="sunrise_ramp" value="${schedule.sunrise_ramp}"> min</span>
+            </label>
+            <label class="control">Sunset
+              <input type="time" data-auto-field="sunset" value="${escapeHtml(schedule.sunset)}">
+            </label>
+            <label class="control">Sunset ramp
+              <span class="number"><input type="number" min="0" max="240" step="1" data-auto-field="sunset_ramp" value="${schedule.sunset_ramp}"> min</span>
+            </label>
+          </div>
+
+          <div class="sleep-row">
+            <label class="check"><input id="sleep-enabled" type="checkbox" ${sleepEnabled ? "checked" : ""}> Enable sleep time</label>
+            <input id="sleep-time" type="time" value="${escapeHtml(schedule.sleep || "23:00")}" ${sleepEnabled ? "" : "disabled"}>
+          </div>
+
+          <div class="levels-grid">
+            <section>
+              <h3>Day levels</h3>
+              ${buildAutoLevelRows("day", schedule.day_levels, channels)}
+            </section>
+            <section>
+              <h3>Night levels</h3>
+              ${buildAutoLevelRows("night", schedule.night_levels, channels)}
+            </section>
+          </div>
+
+          <div class="note">The controller stores this schedule and runs it from its own clock. Saving switches the fixture to Automatic mode.</div>
+          <div class="actions">
+            <button id="save-auto">Save Auto to fixture</button>
+            <button id="load-fixture">Load Auto from fixture</button>
+          </div>
+        </div>
+      </ha-card>
+      <style>
+        .card { padding: 16px; }
+        .header { align-items: center; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+        .title { font-size: 18px; font-weight: 600; }
+        .subtitle, .note { color: var(--secondary-text-color); font-size: 13px; margin-top: 3px; }
+        .toolbar { display: flex; margin-bottom: 16px; }
+        .time-grid, .levels-grid { display: grid; gap: 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        .control { color: var(--secondary-text-color); display: grid; font-size: 13px; gap: 6px; }
+        input, select { background: var(--card-background-color); border: 1px solid var(--divider-color); border-radius: 6px; box-sizing: border-box; color: var(--primary-text-color); padding: 8px 10px; width: 100%; }
+        input[type="checkbox"] { width: auto; }
+        .number { align-items: center; display: grid; gap: 6px; grid-template-columns: minmax(0, 1fr) auto; }
+        .sleep-row { align-items: center; display: flex; gap: 12px; margin: 16px 0; }
+        .check { align-items: center; display: flex; gap: 7px; white-space: nowrap; }
+        .sleep-row input[type="time"] { max-width: 150px; }
+        section { border: 1px solid var(--divider-color); border-radius: 8px; padding: 12px; }
+        h3 { font-size: 14px; margin: 0 0 12px; }
+        .level-row { align-items: center; display: grid; gap: 10px; grid-template-columns: 92px minmax(0, 1fr) 42px; margin-top: 9px; }
+        .level-row label { font-size: 13px; }
+        .level-row input { padding: 0; }
+        .level-value { color: var(--secondary-text-color); font-size: 12px; text-align: right; }
+        .note { margin-top: 14px; }
+        .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+        button { background: var(--primary-color); border: 0; border-radius: 6px; color: var(--text-primary-color); cursor: pointer; padding: 8px 12px; }
+        button#load-fixture { background: var(--secondary-background-color); color: var(--primary-text-color); }
+        @media (max-width: 620px) { .time-grid, .levels-grid { grid-template-columns: 1fr; } }
+      </style>
+    `;
+
+    root.getElementById("editor-mode").addEventListener("change", (event) => {
+      this.store.editorMode = event.target.value === "auto" ? "auto" : "professional";
+      notifyScheduleStore(this.config, this);
+      this.render();
+    });
+    root.querySelectorAll("[data-auto-field]").forEach((input) => {
+      input.addEventListener("change", (event) => {
+        const field = event.target.dataset.autoField;
+        schedule[field] = field.endsWith("_ramp")
+          ? clampRamp(event.target.value)
+          : event.target.value;
+        this.store.autoSource = "local";
+        notifyScheduleStore(this.config, this);
+      });
+    });
+    root.getElementById("sleep-enabled").addEventListener("change", (event) => {
+      schedule.sleep = event.target.checked ? root.getElementById("sleep-time").value : null;
+      this.store.autoSource = "local";
+      notifyScheduleStore(this.config, this);
+      this.render();
+    });
+    root.getElementById("sleep-time").addEventListener("change", (event) => {
+      schedule.sleep = event.target.value;
+      this.store.autoSource = "local";
+      notifyScheduleStore(this.config, this);
+    });
+    root.querySelectorAll("[data-auto-level]").forEach((slider) => {
+      slider.addEventListener("input", (event) => {
+        const period = event.target.dataset.autoLevel;
+        const index = Number(event.target.dataset.channelIndex);
+        schedule[`${period}_levels`][index] = clampPercent(event.target.value);
+        event.target.closest(".level-row").querySelector(".level-value").textContent = `${clampPercent(event.target.value)}%`;
+        this.store.autoSource = "local";
+        notifyScheduleStore(this.config, this);
+      });
+    });
+    root.getElementById("save-auto").addEventListener("click", () => {
+      this.saveAutoSchedule();
+    });
+    root.getElementById("load-fixture").addEventListener("click", () => {
+      this.loadFixtureSchedule();
+    });
+  }
+
+  async saveAutoSchedule() {
+    const error = validateAutoSchedule(this.store.autoSchedule);
+    if (error) {
+      this.toast(error);
+      return;
+    }
+    try {
+      await this.callService("set_native_auto_schedule", {
+        ...targetData(this.config),
+        schedule: autoSchedulePayload(this.store.autoSchedule),
+      });
+      this.store.autoSource = "uploaded";
+      notifyScheduleStore(this.config, this);
+      this.render();
+      this.toast("Auto schedule uploaded to the fixture");
+    } catch (error) {
+      console.warn("Unable to save the Fluval Auto schedule", error);
+      this.toast("Unable to save the Auto schedule to the fixture");
+    }
   }
 
   applyChannels(channels) {
@@ -302,6 +477,23 @@ class FluvalbleScheduleCard extends HTMLElement {
         refresh: true,
       });
       this.store.fixture = result?.fixture || null;
+      if (this.store.editorMode === "auto") {
+        const auto = this.store.fixture?.auto;
+        if (!auto) {
+          this.toast("No Auto schedule readback is available from the fixture");
+          return;
+        }
+        this.store.autoSchedule = normalizeAutoSchedule(auto);
+        this.store.autoSource = "fixture";
+        notifyScheduleStore(this.config, this);
+        this.render();
+        this.toast(
+          result.refresh_ok === false
+            ? "Loaded the last Auto readback; the live refresh did not complete"
+            : "Loaded the Auto schedule confirmed by the fixture",
+        );
+        return;
+      }
       const points = this.store.fixture?.professional;
       if (!Array.isArray(points) || !points.length) {
         if (this.store.fixture?.auto) {
@@ -840,6 +1032,18 @@ const DEFAULT_POINTS = [
   { time: "20:00", red: 0, green: 0, blue: 0, white: 0, channel_5: 0 },
 ];
 
+const DEFAULT_AUTO_SCHEDULE = {
+  sunrise: "08:00",
+  sunrise_ramp: 60,
+  sunset: "20:00",
+  sunset_ramp: 60,
+  sleep: null,
+  day_levels: [80, 70, 60, 50, 0],
+  night_levels: [0, 5, 0, 0, 0],
+};
+
+const AUTO_SERVICE_CHANNELS = ["red", "blue", "cool_white", "warm_white", "amber"];
+
 const CHANNELS = [
   ["red", "#ff4a3d", "Red"],
   ["green", "#45c767", "Green"],
@@ -870,8 +1074,11 @@ function getScheduleStore(config) {
       key,
       points: normalizePoints(config.points || DEFAULT_POINTS),
       selectedMinute: 660,
+      editorMode: config.schedule_type === "auto" ? "auto" : "professional",
       mode: "manual",
       scheduleSource: "local",
+      autoSchedule: normalizeAutoSchedule(config.auto_schedule || DEFAULT_AUTO_SCHEDULE),
+      autoSource: "local",
       effectWindows: normalizeEffectWindows(config.effect_windows || []),
       effectOptions: [],
       effectProtocol: null,
@@ -1032,6 +1239,73 @@ function scheduleSourceLabel(store) {
   if (store.scheduleSource === "fixture") return "confirmed fixture readback";
   if (store.scheduleSource === "uploaded") return "uploaded; awaiting fixture readback";
   return "Home Assistant copy";
+}
+
+function autoScheduleSourceLabel(store) {
+  if (store.autoSource === "fixture") return "confirmed fixture readback";
+  if (store.autoSource === "uploaded") return "uploaded; awaiting fixture readback";
+  return "unsaved editor copy";
+}
+
+function normalizeAutoSchedule(schedule) {
+  const levels = (value, fallback) => {
+    const normalized = Array.isArray(value) ? value.slice(0, 5).map(clampPercent) : [...fallback];
+    while (normalized.length < 5) normalized.push(0);
+    return normalized;
+  };
+  return {
+    sunrise: validTime(schedule?.sunrise) ? schedule.sunrise : DEFAULT_AUTO_SCHEDULE.sunrise,
+    sunrise_ramp: clampRamp(schedule?.sunrise_ramp ?? DEFAULT_AUTO_SCHEDULE.sunrise_ramp),
+    sunset: validTime(schedule?.sunset) ? schedule.sunset : DEFAULT_AUTO_SCHEDULE.sunset,
+    sunset_ramp: clampRamp(schedule?.sunset_ramp ?? DEFAULT_AUTO_SCHEDULE.sunset_ramp),
+    sleep: validTime(schedule?.sleep) ? schedule.sleep : null,
+    day_levels: levels(schedule?.day_levels, DEFAULT_AUTO_SCHEDULE.day_levels),
+    night_levels: levels(schedule?.night_levels, DEFAULT_AUTO_SCHEDULE.night_levels),
+  };
+}
+
+function autoChannelLabels(store) {
+  const labels = Array.isArray(store.fixture?.channels) && store.fixture.channels.length
+    ? store.fixture.channels
+    : ["Channel 1", "Channel 2", "Channel 3", "Channel 4", "Channel 5"];
+  return labels.slice(0, 5);
+}
+
+function buildAutoLevelRows(period, levels, labels) {
+  return labels.map((label, index) => `
+    <div class="level-row">
+      <label>${escapeHtml(label)}</label>
+      <input type="range" min="0" max="100" step="1" data-auto-level="${period}" data-channel-index="${index}" value="${clampPercent(levels[index])}">
+      <span class="level-value">${clampPercent(levels[index])}%</span>
+    </div>
+  `).join("");
+}
+
+function autoSchedulePayload(schedule) {
+  const levelMap = (levels) => Object.fromEntries(
+    AUTO_SERVICE_CHANNELS.map((channel, index) => [channel, clampPercent(levels[index])]),
+  );
+  return {
+    sunrise: schedule.sunrise,
+    sunrise_ramp: clampRamp(schedule.sunrise_ramp),
+    sunset: schedule.sunset,
+    sunset_ramp: clampRamp(schedule.sunset_ramp),
+    sleep: schedule.sleep || null,
+    day: levelMap(schedule.day_levels),
+    night: levelMap(schedule.night_levels),
+  };
+}
+
+function validateAutoSchedule(schedule) {
+  if (!validTime(schedule.sunrise) || !validTime(schedule.sunset)) return "Choose valid sunrise and sunset times";
+  if (schedule.sleep && !validTime(schedule.sleep)) return "Choose a valid sleep time or disable it";
+  if (![schedule.sunrise_ramp, schedule.sunset_ramp].every((value) => Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 240)) {
+    return "Sunrise and sunset ramps must be between 0 and 240 minutes";
+  }
+  if (![schedule.day_levels, schedule.night_levels].every((levels) => Array.isArray(levels) && levels.length === 5)) {
+    return "Day and night schedules require all fixture channel levels";
+  }
+  return null;
 }
 
 function effectScheduleSourceLabel(store) {
@@ -1353,6 +1627,10 @@ function clampPercent(value) {
   return Math.max(0, Math.min(100, Number(value) || 0));
 }
 
+function clampRamp(value) {
+  return Math.max(0, Math.min(240, Math.round(Number(value) || 0)));
+}
+
 function parseTime(value) {
   const [hour, minute] = String(value).split(":").map(Number);
   return ((hour % 24) * 60) + minute;
@@ -1397,7 +1675,7 @@ window.customCards = window.customCards || [];
 registerCustomCard({
   type: "fluvalble-schedule-card",
   name: "Fluval BLE Schedule",
-  description: "24-hour channel graph and physical preview controls for Fluval BLE lights.",
+  description: "Edit fixture-native Auto and Professional schedules for Fluval BLE lights.",
 });
 registerCustomCard({
   type: "fluvalble-effect-schedule-card",

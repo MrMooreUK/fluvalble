@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added a fixture-native Auto schedule editor to the dashboard card, including
+  sunrise, sunset, optional sleep, ramp durations, and fixture-specific day and
+  night channel levels. Loading Auto data remains an explicit action and does
+  not overwrite the separate Professional editor.
 - Added an optional timed-effects dashboard card that edits, validates, uploads,
   clears, and explicitly loads fixture-native effect windows while preserving a
   complete Home Assistant copy when classic readback is partial.
