@@ -295,9 +295,17 @@ def test_old_clock_packet_shape():
     assert packet[2] == local.year % 100
     assert packet[3] == local.month
     assert packet[4] == local.day
+    assert packet[5] == local.isoweekday()
     assert packet[6] == local.hour
     assert packet[7] == local.minute
     assert packet[8] == local.second
+
+
+@pytest.mark.parametrize(("day", "weekday"), [(7, 1), (8, 2), (9, 3), (10, 4), (11, 5), (12, 6), (13, 7)])
+def test_old_clock_packet_matches_apk_weekday_values(day, weekday):
+    moment = datetime(2026, 9, day, 12, tzinfo=timezone.utc)
+
+    assert protocol.old_clock_packet(moment)[5] == weekday
 
 
 def test_old_weather_effect_packet_uses_apk_command_and_checksum():
@@ -395,7 +403,7 @@ def test_mesh_clock_packet_shape():
         local.year % 100,
         local.month,
         local.day,
-        (local.weekday() + 1) % 7,
+        local.isoweekday(),
         local.hour,
         local.minute,
         local.second,
