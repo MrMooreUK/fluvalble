@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- Added classic fixture-resident P1-P4 recall and save actions using the APK's
+  `6804` channel write and `6806` zero-based save-slot command.
 - Added product-aware wavelength previews backed by FluvalConnect's six current
   and legacy AquaSky, Plant, and Reef spectrum datasets. Five-channel previews
   now use the APK's real fifth curve instead of a synthetic approximation.
@@ -103,6 +105,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   Manual mode for editing.
 - BLE reconnects now replace stale clients, use one bounded connector retry
   cycle, and cannot race an in-flight command or integration unload.
+
+### Fixed
+- Restored device command-error reporting so failed preview and schedule actions
+  raise the underlying BLE error instead of an `AttributeError`.
 
 ### Added
 - Plant Pro / Plant 4.0 core BLE support using its native unencrypted SPP

@@ -4,7 +4,8 @@ import asyncio
 import inspect
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 import voluptuous as vol
@@ -13,6 +14,9 @@ from custom_components.fluvalble import (
     DOMAIN,
     EFFECT_CATALOG,
     FluvalRuntimeData,
+    SERVICE_RECALL_MANUAL_PRESET,
+    SERVICE_SAVE_MANUAL_PRESET,
+    _register_services,
     _async_schedule_payload,
     _async_save_effect_schedule,
     _async_load_schedule,
@@ -22,6 +26,7 @@ from custom_components.fluvalble import (
     _validate_native_auto_schedule,
     _validate_native_effect_windows,
     _validate_native_pro_points,
+    _validate_manual_preset_slot,
     _async_upload_native_schedule,
     _native_schedule_readback,
     _normalize_effect_schedule,
@@ -48,6 +53,15 @@ class _FakeHass:
     def __init__(self, device=None):
         runtime = FluvalRuntimeData(device=device)
         self.data = {DOMAIN: {"entry_1": runtime}}
+        self.services = _FakeServices()
+
+
+class _FakeServices:
+    def __init__(self):
+        self.handlers = {}
+
+    def async_register(self, domain, service, handler, schema=None):
+        self.handlers[(domain, service)] = handler
 
 
 def _make_device(*, product_id=None):
@@ -91,6 +105,48 @@ def _canonical_schedule_points():
 def test_schedule_validator_rejects_malformed_points():
     with pytest.raises(vol.Invalid):
         _validate_schedule_points([{"time": "not-a-time"}, {"time": "20:00"}])
+
+
+@pytest.mark.parametrize("slot", [1, 2, 3, 4])
+def test_manual_preset_slot_validator_accepts_p1_through_p4(slot):
+    assert _validate_manual_preset_slot(slot) == slot
+
+
+@pytest.mark.parametrize("slot", [0, 5, True, "1"])
+def test_manual_preset_slot_validator_rejects_other_values(slot):
+    with pytest.raises(vol.Invalid, match="integer from 1 to 4"):
+        _validate_manual_preset_slot(slot)
+
+
+def test_manual_preset_services_dispatch_to_selected_device():
+    asyncio.run(_async_test_manual_preset_services_dispatch_to_selected_device())
+
+
+async def _async_test_manual_preset_services_dispatch_to_selected_device():
+    from homeassistant.exceptions import HomeAssistantError
+
+    device = _make_device()
+    device.async_recall_manual_preset = AsyncMock(return_value=True)
+    device.async_save_manual_preset = AsyncMock(return_value=True)
+    hass = _FakeHass(device)
+    _register_services(hass)
+
+    await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](
+        SimpleNamespace(data={"entry_id": "entry_1", "slot": 2})
+    )
+    await hass.services.handlers[(DOMAIN, SERVICE_SAVE_MANUAL_PRESET)](
+        SimpleNamespace(data={"entry_id": "entry_1", "slot": 3})
+    )
+
+    device.async_recall_manual_preset.assert_awaited_once_with(2)
+    device.async_save_manual_preset.assert_awaited_once_with(3)
+
+    device.async_recall_manual_preset.return_value = False
+    device.diagnostics["last_error"] = "preset readback unavailable"
+    with pytest.raises(HomeAssistantError, match="preset readback unavailable"):
+        await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](
+            SimpleNamespace(data={"entry_id": "entry_1", "slot": 1})
+        )
 
 
 def test_schedule_validator_limits_schedule_size():
@@ -394,7 +450,7 @@ async def _async_test_failed_native_mode_upload_does_not_replace_working_mode(mo
 
     device = _make_device()
     device.async_set_native_pro_schedule = AsyncMock(return_value=False)
-    device.command_error_message = MagicMock(return_value="write failed")
+    device.diagnostics["last_error"] = "write failed"
     hass = _FakeHass(device)
     points = _schedule_points()
     _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "manual"}}}

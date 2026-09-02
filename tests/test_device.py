@@ -98,6 +98,18 @@ def test_connection_attribute_uses_recent_activity_or_live_gatt():
     assert device.attribute("connection")["extra"]["gatt_connected"] is True
 
 
+def test_command_error_message_prefers_client_then_diagnostics_then_default():
+    device = _make_device()
+
+    assert device.command_error_message() == "Fluval BLE command failed"
+
+    device.diagnostics["last_error"] = "diagnostic write failure"
+    assert device.command_error_message() == "diagnostic write failure"
+
+    device.client = SimpleNamespace(last_error="live client failure")
+    assert device.command_error_message() == "live client failure"
+
+
 def test_reachability_expiry_notifies_connection_entities():
     device = _make_device()
     handler = MagicMock()
@@ -972,6 +984,81 @@ async def _async_test_classic_single_channel_change_keeps_apk_all_zone_packet():
 
     assert await device.async_set_channels({"channel_1": 75})
     device._async_send_packet.assert_awaited_once_with(protocol.old_all_zone_packet([75, 0, 0, 0]))
+
+
+def test_classic_manual_preset_actions_use_apk_packets():
+    asyncio.run(_async_test_classic_manual_preset_actions_use_apk_packets())
+
+
+async def _async_test_classic_manual_preset_actions_use_apk_packets():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update(
+        {
+            "mode": "manual",
+            "led_on_off": True,
+            "channel_1": 12,
+            "channel_2": 22,
+            "channel_3": 32,
+            "channel_4": 42,
+            "native_manual_presets": [
+                [10, 20, 30, 40],
+                [11, 21, 31, 41],
+                [12, 22, 32, 42],
+                [13, 23, 33, 43],
+            ],
+        }
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device.async_set_channels = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_recall_manual_preset(2)
+    device.async_set_channels.assert_awaited_once_with(
+        {"channel_1": 11, "channel_2": 21, "channel_3": 31, "channel_4": 41},
+        force=True,
+    )
+
+    assert await device.async_save_manual_preset(4)
+    device._async_send_packet.assert_awaited_once_with(protocol.old_save_manual_preset_packet(3))
+    assert device.values["native_manual_presets"][3] == [12, 22, 32, 42]
+    assert device.diagnostics["manual_preset_slot"] == 4
+
+
+def test_classic_manual_preset_actions_reject_unavailable_or_unsupported_state():
+    asyncio.run(_async_test_classic_manual_preset_actions_reject_unavailable_or_unsupported_state())
+
+
+async def _async_test_classic_manual_preset_actions_reject_unavailable_or_unsupported_state():
+    classic = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    classic.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    classic._async_prepare_command = AsyncMock(return_value=True)
+    classic.async_refresh_state = AsyncMock(return_value=True)
+    classic.async_set_channels = AsyncMock(return_value=True)
+
+    assert not await classic.async_recall_manual_preset(1)
+    assert classic.diagnostics["status"] == "manual_preset_unavailable"
+    classic.async_set_channels.assert_not_awaited()
+
+    classic.values["native_manual_presets"] = [[10, 20, 30, 40]] * 4
+    classic.values["led_on_off"] = False
+    assert not await classic.async_recall_manual_preset(1)
+    assert classic.diagnostics["status"] == "manual_preset_requires_light_on"
+
+    classic.values["mode"] = "automatic"
+    classic._async_send_packet = AsyncMock(return_value=True)
+    assert not await classic.async_save_manual_preset(1)
+    assert classic.diagnostics["status"] == "manual_preset_requires_manual_mode"
+    classic._async_send_packet.assert_not_awaited()
+
+    facebd = _make_device(name="AquaSky3.0_Test")
+    facebd.client = _facebd_client()
+    facebd._async_prepare_command = AsyncMock(return_value=True)
+    facebd._async_send_packet = AsyncMock(return_value=True)
+
+    assert not await facebd.async_save_manual_preset(1)
+    assert facebd.diagnostics["status"] == "unsupported_manual_preset"
+    facebd._async_send_packet.assert_not_awaited()
 
 
 def test_effect_restore_keeps_complete_channel_packet():

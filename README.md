@@ -193,6 +193,11 @@ Supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers can keep
 schedules in the fixture itself. The integration provides actions under
 **Developer tools → Actions**:
 
+- `fluvalble.recall_manual_preset` applies one classic controller's
+  fixture-resident P1-P4 preset using the channel levels reported by the light.
+- `fluvalble.save_manual_preset` saves the current classic manual channel levels
+  to fixture slot P1-P4. These two actions are exposed only through the action
+  interface because the controller does not report a persistent selected slot.
 - `fluvalble.set_native_auto_schedule` stores sunrise, sunset, optional sleep,
   ramp duration, and day/night channel levels.
 - `fluvalble.set_native_pro_schedule` stores 4–10 classic/OLD or 4–12

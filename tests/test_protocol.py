@@ -308,6 +308,25 @@ def test_old_all_zone_packet_clamps_and_encodes_five_channels():
     assert packet == bytes.fromhex("68 04 00 00 00 C8 01 2C 01 90 03 E8 F3")
 
 
+@pytest.mark.parametrize(
+    ("slot_index", "expected"),
+    [
+        (0, "68 06 00 6E"),
+        (1, "68 06 01 6F"),
+        (2, "68 06 02 6C"),
+        (3, "68 06 03 6D"),
+    ],
+)
+def test_old_save_manual_preset_packet_matches_apk_slots(slot_index, expected):
+    assert protocol.old_save_manual_preset_packet(slot_index) == bytes.fromhex(expected)
+
+
+@pytest.mark.parametrize("slot_index", [-1, 4, True, 1.5])
+def test_old_save_manual_preset_packet_rejects_invalid_slots(slot_index):
+    with pytest.raises(ValueError, match="between 0 and 3"):
+        protocol.old_save_manual_preset_packet(slot_index)
+
+
 def test_old_clock_packet_shape():
     moment = datetime(2026, 7, 19, 12, 30, 45, tzinfo=timezone.utc)
     local = moment.astimezone()

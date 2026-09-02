@@ -62,6 +62,7 @@ OLD_READ_PARAMS = bytes((0x68, 0x05))
 OLD_MODE = 0x02
 OLD_SWITCH = 0x03
 OLD_ALL_ZONE = 0x04
+OLD_SAVE_PRESET = 0x06
 OLD_AUTO_SCHEDULE = 0x07
 OLD_WEATHER_EFFECT = 0x0A
 OLD_AUTO_PREVIEW = 0x0B
@@ -594,6 +595,13 @@ def old_all_zone_packet(values: Iterable[int]) -> bytes:
         # hexadecimal word; hexStringToBytes() then emits the high byte first.
         packet.extend((scaled >> 8, scaled & 0xFF))
     return old_packet(packet)
+
+
+def old_save_manual_preset_packet(slot_index: int) -> bytes:
+    """Save the current classic channel state to APK preset index 0 through 3."""
+    if isinstance(slot_index, bool) or not isinstance(slot_index, int) or not 0 <= slot_index <= 3:
+        raise ValueError("Classic manual preset index must be between 0 and 3")
+    return old_packet(bytes((0x68, OLD_SAVE_PRESET, slot_index)))
 
 
 def old_weather_effect_packet(effect_id: int) -> bytes:
