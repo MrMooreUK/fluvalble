@@ -68,6 +68,28 @@ def test_options_flow_submission_is_owned_by_reload_helper():
     flow.async_create_entry.assert_called_once_with(title="", data=submitted)
 
 
+def test_options_flow_rejects_connection_windows_between_one_and_twenty_nine():
+    """The serializable numeric schema retains the documented validation gap."""
+    flow = OptionsFlowHandler()
+    suggested_schema = object()
+    flow.add_suggested_values_to_schema = MagicMock(return_value=suggested_schema)
+    flow.async_show_form = MagicMock(return_value={"type": "form"})
+    submitted = {
+        "lamp_profile": "auto",
+        "ping_interval": 10,
+        "active_time": 1,
+    }
+
+    result = asyncio.run(flow.async_step_init(submitted))
+
+    assert result == {"type": "form"}
+    flow.async_show_form.assert_called_once_with(
+        step_id="init",
+        data_schema=suggested_schema,
+        errors={"active_time": "invalid_active_time"},
+    )
+
+
 class TestActiveTimeSchema:
     @pytest.mark.parametrize("value", [0, 30, 120, 600])
     def test_accepts_persistent_or_bounded_idle_window(self, value):

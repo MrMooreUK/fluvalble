@@ -31,6 +31,9 @@
     }
   },
   "options": {
+    "error": {
+      "invalid_active_time": "Enter 0 for a persistent connection, or a value from 30 to 600 seconds."
+    },
     "step": {
       "init": {
         "title": "Connection options",

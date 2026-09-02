@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Made the connection-options schema serializable by current Home Assistant
+  releases while retaining `0` for persistent BLE and `30`–`600` seconds for
+  finite idle disconnects.
 - Hardened Home Assistant setup and Bluetooth discovery against malformed
   advertisements, and removed the empty address suffix from the fallback name
   shown when discovery details are unavailable.
