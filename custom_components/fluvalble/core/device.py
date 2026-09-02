@@ -57,10 +57,10 @@ CHANNEL_NAMES_AQUASKY = {
     "channel_5": "Violet",
 }
 CHANNEL_NAMES_PLANT = {
-    "channel_1": "Rose",
+    "channel_1": "Pink",
     "channel_2": "Blue",
     "channel_3": "Cold White",
-    "channel_4": "Pure White",
+    "channel_4": "White",
     "channel_5": "Warm White",
 }
 CHANNEL_NAMES_MARINE = {
@@ -71,11 +71,13 @@ CHANNEL_NAMES_MARINE = {
     "channel_5": "Cold White",
 }
 CHANNEL_NAMES_PLANT_PRO = {
-    "channel_1": "Red",
+    # Kept as a compatibility profile name. FluvalConnect assigns Plant PRO
+    # and Plant 4.0 the same APK light type and five-channel order.
+    "channel_1": "Pink",
     "channel_2": "Blue",
-    "channel_3": "Cool White",
-    "channel_4": "Warm White",
-    "channel_5": "Amber",
+    "channel_3": "Cold White",
+    "channel_4": "White",
+    "channel_5": "Warm White",
 }
 # Back-compat alias used by tests / schedule helpers
 CHANNEL_NAMES = CHANNEL_NAMES_AQUASKY
@@ -91,7 +93,7 @@ DAY_MINUTES = 24 * 60
 
 # Approximate sRGB appearance of the five Plant/Marine LED channels.  These
 # fixtures do not expose literal RGB LEDs, so Home Assistant colours need to be
-# translated to and from Rose / Blue / Cold White / Pure White / Warm White.
+# translated to and from Pink / Blue / Cold White / White / Warm White.
 PLANT_CHANNEL_RGB = {
     "channel_1": (1.00, 0.28, 0.38),
     "channel_2": (0.18, 0.38, 1.00),
@@ -445,10 +447,6 @@ class Device:
                 return CHANNEL_NAMES_MARINE
         model_l = (self.model or "").lower()
         name_l = (self.name or "").lower()
-        if "plant pro" in model_l or "plantpro" in name_l or "plant pro" in name_l:
-            return CHANNEL_NAMES_PLANT_PRO
-        if "plant 4.0" in model_l or "plant 4.0" in name_l:
-            return CHANNEL_NAMES_PLANT_PRO
         if "plant" in model_l or "plant" in name_l or "marine" in model_l or "reef" in model_l:
             return CHANNEL_NAMES_PLANT
         return CHANNEL_NAMES_AQUASKY
@@ -529,7 +527,7 @@ class Device:
         rgb: tuple[int, int, int],
         brightness: int,
     ) -> dict[str, int]:
-        """Translate HA RGB into Plant Rose/Blue/CW/PW/WW percentages."""
+        """Translate HA RGB into Plant Pink/Blue/CW/White/WW percentages."""
         red = max(0, min(255, int(rgb[0]))) / 255
         green = max(0, min(255, int(rgb[1]))) / 255
         blue = max(0, min(255, int(rgb[2]))) / 255

@@ -337,8 +337,8 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 ): vol.In(
                     {
                         LAMP_PROFILE_AUTO: "Auto-detect from BLE name / protocol",
-                        LAMP_PROFILE_PLANT: "Plant / Marine 5-channel (Rose–Warm White)",
-                        LAMP_PROFILE_PLANT_PRO: "Plant Pro / Plant 4.0 (Red–Amber)",
+                        LAMP_PROFILE_PLANT: "Plant 5-channel (Pink–Warm White)",
+                        LAMP_PROFILE_PLANT_PRO: "Current Plant 5-channel (Pink–Warm White)",
                         LAMP_PROFILE_AQUASKY: "AquaSky 2.0 (4-channel RGBW)",
                         LAMP_PROFILE_AQUASKY3: "AquaSky 3.0 / FACEBD (4-channel RGBW)",
                     }

@@ -149,11 +149,11 @@ def detect_model(name: str | None, advertisement: AdvertisementData | None) -> s
 
     if "plant" in lowered and name_looks_fluval(display_name):
         if "pro" in lowered:
-            return "Plant Pro 4.0 Bluetooth LED"
+            return "Fluval Plant PRO LED"
         if "nano" in lowered:
             return "Plant Nano Bluetooth LED"
         if "4.0" in lowered or "4_" in lowered:
-            return "Plant 4.0 Bluetooth LED"
+            return "Fluval Plant 4.0 LED"
         if "3.0" in lowered or "3_" in lowered:
             return "Plant 3.0 Bluetooth LED"
         return "Plant Bluetooth LED"

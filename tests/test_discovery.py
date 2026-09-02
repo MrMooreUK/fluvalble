@@ -115,9 +115,9 @@ def test_detect_model_plant_nano():
 
 
 def test_detect_model_plant_pro_and_plant_4():
-    assert detect_model("PlantPro_AABBCC", None) == "Plant Pro 4.0 Bluetooth LED"
-    assert detect_model("Plant Pro 4.0_AABBCC", None) == "Plant Pro 4.0 Bluetooth LED"
-    assert detect_model("Plant 4.0_AABBCC", None) == "Plant 4.0 Bluetooth LED"
+    assert detect_model("PlantPro_AABBCC", None) == "Fluval Plant PRO LED"
+    assert detect_model("Plant Pro 4.0_AABBCC", None) == "Fluval Plant PRO LED"
+    assert detect_model("Plant 4.0_AABBCC", None) == "Fluval Plant 4.0 LED"
 
 
 def test_detect_model_from_aquasky_name():

@@ -211,7 +211,7 @@ save_schedule:
 
 set_native_auto_schedule:
   name: Set native Auto schedule
-  description: Write the controller's native Auto sunrise/sunset schedule using the classic, FACEBD, or Plant Pro protocol.
+  description: Write the controller's native Auto sunrise/sunset schedule using the classic, FACEBD, or FFF0/SPP protocol.
   fields:
     entry_id:
       name: Config entry ID
@@ -250,7 +250,7 @@ set_native_auto_schedule:
 
 set_native_pro_schedule:
   name: Set native Professional schedule
-  description: Write native Professional schedule points using the classic, FACEBD, or Plant Pro protocol.
+  description: Write native Professional schedule points using the classic, FACEBD, or FFF0/SPP protocol.
   fields:
     entry_id:
       name: Config entry ID
@@ -264,7 +264,7 @@ set_native_pro_schedule:
         text:
     points:
       name: Schedule points
-      description: Four to 10 points for classic/OLD or four to 12 for FACEBD/MESH, with time plus channel_1 through channel_5. AquaSky ignores channel_5; Plant Pro order is Red, Blue, Cool White, Warm White, Amber.
+      description: Four to 10 points for classic/OLD or four to 12 for FACEBD/SPP, in the fixture's APK-defined channel order.
       required: true
       example:
         - time: "08:00"
@@ -296,7 +296,7 @@ set_native_pro_schedule:
 
 set_native_effect_schedule:
   name: Set native effect schedule
-  description: Store up to seven timed native-effect windows directly in a supported classic, AquaSky 3.0/FACEBD, or Plant Pro fixture. Classic and FACEBD support the 11 weather effects; Plant Pro supports its four-effect subset. An empty list clears all windows.
+  description: Store up to seven timed native-effect windows directly in a supported classic, FACEBD, or FFF0/SPP fixture. The exact APK product ID selects the 11-effect catalogue or four-effect subset. An empty list clears all windows.
   fields:
     entry_id:
       name: Config entry ID

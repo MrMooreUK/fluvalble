@@ -34,8 +34,8 @@ def _products(
     }
 
 
-# DeviceUtil's exact device-name table, extended only with product families
-# explicitly classified by LightDeviceUtils in the same FluvalConnect APK.
+# DeviceUtil's exact device-name table, extended with the current add-device
+# catalogue where that newer UI supersedes an older reused product name.
 PRODUCTS: dict[int, FluvalProduct] = {
     **_products(
         {
@@ -91,7 +91,10 @@ PRODUCTS: dict[int, FluvalProduct] = {
     ),
     **_products(
         {
-            386: "Plant Aqua 529mm",
+            # The current FluvalConnect add-device flow maps type 0182 to
+            # product 0386 and labels it "Fluval Plant PRO LED". DeviceUtil's
+            # older Plant Aqua size name for this reused ID is stale.
+            386: "Fluval Plant PRO LED",
             545: "Fluval Plant 4.0 LED",
             548: "Fluval Plant Nano 4.0 LED",
             563: "Fluval Siena 2.0",
