@@ -463,6 +463,22 @@ class Device:
             return CHANNEL_NAMES_PLANT
         return CHANNEL_NAMES_AQUASKY
 
+    def spectrum_profile(self) -> str | None:
+        """Return the APK spectrum asset family for this exact fixture."""
+        if (product := product_from_id(self.product_id)) is not None:
+            return product.spectrum_profile
+
+        # Explicit profile choices are the only safe fallback when no APK
+        # product ID was decoded. Auto detection must not invent a generation.
+        profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
+        return {
+            LAMP_PROFILE_AQUASKY: "aquasky_legacy",
+            LAMP_PROFILE_AQUASKY3: "aquasky_current",
+            LAMP_PROFILE_PLANT: "plant_legacy",
+            LAMP_PROFILE_PLANT_PRO: "plant_current",
+            LAMP_PROFILE_MARINE: "reef_legacy",
+        }.get(profile)
+
     def uses_plant_spectrum(self) -> bool:
         """Return whether the fixture uses the five-channel Plant spectrum."""
         return self._channel_labels() in (

@@ -1,3 +1,5 @@
+import { SPECTRUM_PROFILES } from "./fluvalble-spectrum-data.js";
+
 const SCHEDULE_STORE_EVENT = "fluvalble-schedule-store";
 
 class FluvalbleScheduleCard extends HTMLElement {
@@ -1111,6 +1113,7 @@ class FluvalbleWavelengthCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+    this.loadFixtureProfile();
     if (this.shadowRoot) {
       this.render();
     }
@@ -1137,7 +1140,10 @@ class FluvalbleWavelengthCard extends HTMLElement {
             </div>
           </div>
 
-          <div class="spectrum">${buildWavelengthSpectrum(channels)}</div>
+          <div class="spectrum">${buildWavelengthSpectrum(
+            channels,
+            this.store.fixture?.spectrum_profile || this.config.spectrum_profile,
+          )}</div>
         </div>
       </ha-card>
       <style>
@@ -1152,8 +1158,35 @@ class FluvalbleWavelengthCard extends HTMLElement {
         .spectrum-curve { fill: none; stroke: var(--primary-text-color); stroke-linecap: round; stroke-linejoin: round; stroke-width: 3.5; }
         .spectrum-fill { fill: var(--primary-text-color); opacity: .18; }
         .spectrum-label { fill: var(--secondary-text-color); font-size: 11px; }
+        .spectrum-unavailable { color: var(--secondary-text-color); padding: 24px 8px; text-align: center; }
       </style>
     `;
+  }
+
+  async loadFixtureProfile() {
+    if (
+      !this._hass
+      || this.store.fixture?.spectrum_profile
+      || this.config.spectrum_profile
+      || this.store.loaded
+      || this.store.spectrumProfileLoaded
+      || this.store.loadingSpectrumProfile
+    ) return;
+    this.store.loadingSpectrumProfile = true;
+    try {
+      const result = await this._hass.callWS({
+        type: "fluvalble/get_schedule",
+        ...targetData(this.config),
+      });
+      this.store.fixture = result?.fixture || null;
+      this.store.spectrumProfileLoaded = true;
+      notifyScheduleStore(this.config, this);
+      this.render();
+    } catch (error) {
+      console.warn("Unable to load Fluval spectrum profile", error);
+    } finally {
+      this.store.loadingSpectrumProfile = false;
+    }
   }
 
   _subscribeStore() {
@@ -1553,104 +1586,6 @@ function denormalizePoints(points) {
   }));
 }
 
-const SPECTRUM_ROWS = [
-  [360, 0.0001, 0.001, 0.0007, 0],
-  [365, 0.0005, 0.001, 0.0005, 0],
-  [370, 0.0002, 0.0007, 0.0004, 0],
-  [375, 0.0003, 0.0005, 0.0003, 0],
-  [380, 0, 0.0004, 0.0001, 0],
-  [385, 0.0002, 0.0003, 0.0001, 0],
-  [390, 0.0002, 0.0001, 0.0001, 0],
-  [395, 0.0001, 0.0001, 0.0001, 0.0016],
-  [400, 0.0001, 0.0002, 0.0001, 0.0048],
-  [405, 0, 0.0002, 0.0001, 0.0152],
-  [410, 0, 0.0001, 0.0003, 0.044],
-  [415, 0.0001, 0.0001, 0.0005, 0.1176],
-  [420, 0, 0.0001, 0.0016, 0.2744],
-  [425, 0.0001, 0.0001, 0.0041, 0.5848],
-  [430, 0, 0.0001, 0.0106, 1.1664],
-  [435, 0.0001, 0.0002, 0.025, 2.124],
-  [440, 0.0001, 0.0002, 0.0596, 3.7952],
-  [445, 0, 0.0003, 0.13, 6.332],
-  [450, 0.0001, 0.0005, 0.2675, 8],
-  [455, 0, 0.0008, 0.5191, 6.5072],
-  [460, 0.0001, 0.002, 0.8444, 4.3784],
-  [465, 0.0001, 0.0041, 0.9979, 3.1176],
-  [470, 0.0001, 0.0086, 0.7846, 2.2096],
-  [475, 0.0001, 0.0178, 0.5014, 1.556],
-  [480, 0, 0.0352, 0.329, 1.2976],
-  [485, 0, 0.0655, 0.2154, 1.272],
-  [490, 0.0001, 0.1265, 0.1257, 1.38],
-  [495, 0.0001, 0.2302, 0.0765, 1.6064],
-  [500, 0.0001, 0.4056, 0.0511, 1.8936],
-  [505, 0.0001, 0.6715, 0.0305, 2.2016],
-  [510, 0.0003, 0.9189, 0.0186, 2.4536],
-  [515, 0.0002, 0.9962, 0.0119, 2.644],
-  [520, 0.0001, 0.8851, 0.0077, 2.8016],
-  [525, 0, 0.6791, 0.0052, 2.9008],
-  [530, 0.0001, 0.5055, 0.0036, 2.9656],
-  [535, 0, 0.3871, 0.0028, 3.0168],
-  [540, 0.0002, 0.2825, 0.0021, 3.0512],
-  [545, 0, 0.1953, 0.0016, 3.0848],
-  [550, 0.0003, 0.1384, 0.0014, 3.1112],
-  [555, 0.0001, 0.097, 0.0013, 3.1416],
-  [560, 0.0002, 0.0685, 0.001, 3.2],
-  [565, 0.0002, 0.0477, 0.0008, 3.2472],
-  [570, 0.0003, 0.0344, 0.0009, 3.2912],
-  [575, 0.0003, 0.0239, 0.0008, 3.3464],
-  [580, 0.0006, 0.0169, 0.0008, 3.3592],
-  [585, 0.0007, 0.0119, 0.0009, 3.3608],
-  [590, 0.0024, 0.009, 0.0006, 3.344],
-  [595, 0.0092, 0.0078, 0.0009, 3.3024],
-  [600, 0.0351, 0.0058, 0.0007, 3.2152],
-  [605, 0.0952, 0.0043, 0.0006, 3.1072],
-  [610, 0.1849, 0.0025, 0.0008, 2.9632],
-  [615, 0.3393, 0.0032, 0.0006, 2.7864],
-  [620, 0.5668, 0.0021, 0.0005, 2.6176],
-  [625, 0.8469, 0.0019, 0.0008, 2.4224],
-  [630, 0.9761, 0.0014, 0.0006, 2.2248],
-  [635, 0.6209, 0.0018, 0.0008, 2.0208],
-  [640, 0.2509, 0.0019, 0.0007, 1.8056],
-  [645, 0.097, 0.0016, 0.0002, 1.6192],
-  [650, 0.0408, 0.0021, 0.0006, 1.4448],
-  [655, 0.0181, 0.0014, 0.0008, 1.2704],
-  [660, 0.009, 0.0014, 0.0004, 1.1088],
-  [665, 0.0046, 0.0025, 0.0009, 0.9672],
-  [670, 0.0026, 0.0016, 0.0007, 0.8392],
-  [675, 0.0023, 0.0011, 0.0007, 0.7328],
-  [680, 0.0015, 0.0024, 0.0005, 0.6424],
-  [685, 0.0016, 0.0006, 0.0006, 0.5368],
-  [690, 0.0011, 0.0014, 0.0006, 0.4656],
-  [695, 0.0006, 0.0014, 0.0009, 0.3936],
-  [700, 0.0012, 0.0015, 0.001, 0.3472],
-  [705, 0.0007, 0.0032, 0.001, 0.3],
-  [710, 0.0014, 0.0008, 0.0015, 0.2544],
-  [715, 0.0014, 0.0018, 0.0012, 0.2136],
-  [720, 0.0008, 0.0028, 0.0012, 0.1856],
-  [725, 0, 0.0031, 0.0013, 0.164],
-  [730, 0.0034, 0.0042, 0.0005, 0.1312],
-  [735, 0.0009, 0.0034, 0.0015, 0.1144],
-  [740, 0.0029, 0.0025, 0.0016, 0.0984],
-  [745, 0.002, 0.0024, 0.0016, 0.0824],
-  [750, 0.0021, 0.0014, 0.0027, 0.0696],
-  [755, 0.0022, 0.0014, 0.0012, 0.0608],
-  [760, 0.0012, 0.0029, 0.0013, 0.0496],
-  [765, 0.0025, 0.0017, 0.0019, 0.0416],
-  [770, 0.0003, 0.0019, 0.0013, 0.036],
-  [775, 0.0013, 0.0046, 0.0034, 0.0336],
-  [780, 0.0012, 0.0061, 0.0021, 0.028],
-  [785, 0.0026, 0.0048, 0.0008, 0.0216],
-  [790, 0.0001, 0.0016, 0.0013, 0.0192],
-  [795, 0.0015, 0.0028, 0.0009, 0.0168],
-  [800, 0.0007, 0.0036, 0.0007, 0.0136],
-];
-
-const SPECTRUM_CHANNEL_MAX = {
-  red: Math.max(...SPECTRUM_ROWS.map((row) => row[1])),
-  green: Math.max(...SPECTRUM_ROWS.map((row) => row[2])),
-  blue: Math.max(...SPECTRUM_ROWS.map((row) => row[3])),
-  white: Math.max(...SPECTRUM_ROWS.map((row) => row[4])),
-};
 
 function normalizePoints(points) {
   return [...points].map((point) => ({
@@ -1710,8 +1645,13 @@ function buildChannelBars(channels, editable = false, definitions = CHANNELS) {
   `).join("");
 }
 
-function buildWavelengthSpectrum(channels) {
-  const rows = buildSpectrumRows(channels);
+function buildWavelengthSpectrum(channels, profileName) {
+  const rows = buildSpectrumRows(channels, profileName);
+  if (!rows.length) {
+    return `<div class="spectrum-unavailable">
+      Wavelength data is unavailable until this card is linked to a fixture with an APK-known product ID.
+    </div>`;
+  }
   const path = rows.map((row) => `${row.x.toFixed(1)},${row.y.toFixed(1)}`).join(" ");
   const fill = `30,184 ${path} 690,184`;
 
@@ -1740,7 +1680,9 @@ function buildWavelengthSpectrum(channels) {
   `;
 }
 
-function buildSpectrumRows(channels) {
+function buildSpectrumRows(channels, profileName) {
+  const profile = SPECTRUM_PROFILES[profileName];
+  if (!profile) return [];
   const gains = {
     red: clampPercent(channels.red) / 100,
     green: clampPercent(channels.green) / 100,
@@ -1748,14 +1690,14 @@ function buildSpectrumRows(channels) {
     white: clampPercent(channels.white) / 100,
     channel_5: clampPercent(channels.channel_5) / 100,
   };
-  const values = SPECTRUM_ROWS.map(([wavelength, red, green, blue, white]) => {
-    const value = (
-      ((red / SPECTRUM_CHANNEL_MAX.red) * gains.red)
-      + ((green / SPECTRUM_CHANNEL_MAX.green) * gains.green)
-      + ((blue / SPECTRUM_CHANNEL_MAX.blue) * gains.blue)
-      + ((white / SPECTRUM_CHANNEL_MAX.white) * gains.white)
-      + (gaussian(wavelength, 420, 16) * gains.channel_5)
-    );
+  const maxima = profile.channel_keys.map((_, column) => (
+    Math.max(...profile.rows.map((row) => row[column + 1])) || 1
+  ));
+  const values = profile.rows.map((row) => {
+    const [wavelength] = row;
+    const value = profile.channel_keys.reduce((total, channel, column) => (
+      total + ((row[column + 1] / maxima[column]) * gains[channel])
+    ), 0);
     return { wavelength, value };
   });
   return values.map((row) => {
@@ -1782,10 +1724,6 @@ function wavelengthColor(wavelength) {
   if (wavelength < 645) return "#ffcc33";
   if (wavelength < 700) return "#ff4a2f";
   return "#6d1010";
-}
-
-function gaussian(value, peak, width) {
-  return Math.exp(-0.5 * ((value - peak) / width) ** 2);
 }
 
 function clampPercent(value) {

@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -572,8 +573,33 @@ def test_schedule_card_exposes_fixture_native_auto_editor():
     assert "point.channel_1 ?? point.red" in source
 
 
+def test_wavelength_card_uses_apk_spectrum_profiles_without_synthetic_channel():
+    root = Path(__file__).parents[1] / "custom_components" / "fluvalble" / "www"
+    card_source = (root / "fluvalble-schedule-card.js").read_text(encoding="utf-8")
+    data_source = (root / "fluvalble-spectrum-data.js").read_text(encoding="utf-8")
+    prefix = "export const SPECTRUM_PROFILES = "
+    payload = data_source[data_source.index(prefix) + len(prefix) :].strip().removesuffix(";")
+    profiles = json.loads(payload)
+
+    assert set(profiles) == {
+        "aquasky_current",
+        "aquasky_legacy",
+        "plant_current",
+        "plant_legacy",
+        "reef_current",
+        "reef_legacy",
+    }
+    assert all(len(profile["rows"]) == 89 for profile in profiles.values())
+    assert len(profiles["aquasky_current"]["channel_keys"]) == 4
+    assert len(profiles["plant_current"]["channel_keys"]) == 5
+    assert len(profiles["reef_current"]["channel_keys"]) == 5
+    assert "gaussian(" not in card_source
+    assert "profile.channel_keys.reduce" in card_source
+
+
 def test_fixture_schedule_readback_normalizes_protocol_shapes():
     device = _make_device()
+    device.product_id = 532
     device.values.update(
         {
             "mode": "professional",
@@ -612,6 +638,7 @@ def test_fixture_schedule_readback_normalizes_protocol_shapes():
 
     assert readback["available"] is True
     assert readback["protocol"] == "facebd"
+    assert readback["spectrum_profile"] == "aquasky_current"
     assert readback["auto"] == {
         "sunrise": "08:00",
         "sunrise_ramp": 60,

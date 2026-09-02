@@ -62,6 +62,67 @@ def test_apk_product_catalog_defines_native_effect_counts():
     assert product_from_id(564).native_effect_count == 11
 
 
+def test_catalog_routes_each_apk_spectrum_generation():
+    assert product_from_id(281).spectrum_profile == "reef_current"
+    assert product_from_id(328).spectrum_profile == "aquasky_legacy"
+    assert product_from_id(532).spectrum_profile == "aquasky_current"
+    assert product_from_id(305).spectrum_profile == "plant_legacy"
+    assert product_from_id(545).spectrum_profile == "plant_current"
+    assert product_from_id(289).spectrum_profile == "reef_legacy"
+    assert product_from_id(546).spectrum_profile == "reef_current"
+
+    expected = {
+        "reef_current": {281, 385, 546, 547},
+        "reef_legacy": {289, 290, 291, 292, 293, 294, 337, 536, 640},
+        "plant_current": {386, 545, 548, 563},
+        "plant_legacy": {
+            305,
+            306,
+            307,
+            308,
+            309,
+            310,
+            311,
+            338,
+            373,
+            374,
+            375,
+            376,
+            377,
+            387,
+            388,
+            537,
+            641,
+            29058,
+        },
+        "aquasky_current": {532, 564},
+        "aquasky_legacy": {
+            321,
+            322,
+            323,
+            324,
+            325,
+            326,
+            327,
+            328,
+            329,
+            336,
+            369,
+            370,
+            371,
+            372,
+            384,
+            609,
+            29057,
+        },
+    }
+
+    assert {
+        profile: {product_id for product_id, product in PRODUCTS.items() if product.spectrum_profile == profile}
+        for profile in expected
+    } == expected
+
+
 def test_catalog_matches_apk_native_effect_groups():
     four_effect = {385, 386, 545, 546, 547, 548, 563}
     eleven_effect = {
