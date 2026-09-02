@@ -1242,6 +1242,20 @@ class Device:
                 handler()
         return ok
 
+    async def async_identify(self) -> bool:
+        """Ask the fixture to identify itself using FluvalConnect's Find command."""
+        if not await self._async_prepare_command():
+            _LOGGER.warning("Cannot identify Fluval light before BLE device is available")
+            return False
+
+        if self._uses_wifi_protocol():
+            packet = protocol.wifi_find_packet()
+        elif self._uses_plant_pro_protocol():
+            packet = protocol.spp_find_packet()
+        else:
+            packet = protocol.old_find_packet()
+        return await self._async_send_packet(packet)
+
     async def async_select_option(self, attr: str, option: str) -> bool:
         """Set select values and send the updated state to the light."""
         if attr != "mode" or option not in MODES:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from homeassistant.components.button import ButtonEntity
+from homeassistant.components.button import ButtonDeviceClass, ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
@@ -20,7 +20,10 @@ PARALLEL_UPDATES = 0
 
 def create_entities(device: Device) -> list:
     """Build the entity list for this platform."""
-    return [FluvalSyncClockButton(device, "sync_clock")]
+    return [
+        FluvalIdentifyButton(device, "identify"),
+        FluvalSyncClockButton(device, "sync_clock"),
+    ]
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
@@ -45,3 +48,15 @@ class FluvalSyncClockButton(FluvalEntity, ButtonEntity):
             _LOGGER.warning("Fluval clock sync failed for %s", self.device.mac)
         else:
             _LOGGER.info("Fluval clock synced for %s", self.device.mac)
+
+
+class FluvalIdentifyButton(FluvalEntity, ButtonEntity):
+    """Button that asks the physical fixture to identify itself."""
+
+    _attr_device_class = ButtonDeviceClass.IDENTIFY
+    _attr_entity_category = EntityCategory.CONFIG
+
+    async def async_press(self) -> None:
+        """Send FluvalConnect's native Find command."""
+        if not await self.device.async_identify():
+            _LOGGER.warning("Fluval identify command failed for %s", self.device.mac)

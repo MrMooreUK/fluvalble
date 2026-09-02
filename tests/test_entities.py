@@ -43,9 +43,22 @@ def test_create_entities_for_platforms():
 
     assert len(select.create_entities(device)) == 2
     assert len(sensor.create_entities(device)) == 2
-    assert len(button.create_entities(device)) == 1
+    assert len(button.create_entities(device)) == 2
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
+
+
+def test_identify_button_routes_to_device_command():
+    async def run_test():
+        device = _make_device()
+        device.async_identify = AsyncMock(return_value=True)
+        entity = button.FluvalIdentifyButton(device, "identify")
+
+        await entity.async_press()
+
+        device.async_identify.assert_awaited_once_with()
+
+    asyncio.run(run_test())
 
 
 def test_select_internal_update_and_select_option():

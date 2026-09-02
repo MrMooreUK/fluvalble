@@ -14,6 +14,7 @@ MAX_CBOR_NESTING_DEPTH = 8
 
 WIFI_TZ_OFFSET_KEY = 101
 WIFI_CLOCK_MS_KEY = 102
+FIND_KEY = 52
 WIFI_MODE_KEY = 103
 WIFI_SWITCH_KEY = 104
 WIFI_MANUAL_KEY = 109
@@ -60,6 +61,7 @@ OLD_WEATHER_EFFECT = 0x0A
 OLD_AUTO_PREVIEW = 0x0B
 OLD_AUTO_PREVIEW_STOP = 0x0C
 OLD_CLOCK = 0x0E
+OLD_FIND = 0x0F
 OLD_PRO_SCHEDULE = 0x10
 OLD_SCHEDULED_EFFECT = 0x11
 OLD_MIN_PRO_POINTS = 4
@@ -90,6 +92,11 @@ def wifi_effect_packet(effect_id: int) -> bytes:
     if not 0 <= effect_id <= 11:
         raise ValueError("FACEBD Fluval effect ID must be between 0 and 11")
     return cbor_map({WIFI_MANUAL_KEY: effect_id})
+
+
+def wifi_find_packet() -> bytes:
+    """Build the APK-native FACEBD identify command."""
+    return cbor_map({FIND_KEY: "find"})
 
 
 def wifi_all_zone_packet(values: Iterable[int]) -> bytes:
@@ -266,6 +273,11 @@ def spp_effect_packet(effect_id: int) -> bytes:
     return spp_command({SPP_EFFECT_KEY: effect_id})
 
 
+def spp_find_packet() -> bytes:
+    """Build the APK-native Plant Pro/mesh identify command."""
+    return spp_command({FIND_KEY: "find"})
+
+
 def spp_auto_schedule_packet(
     *,
     sunrise: tuple[int, int, int],
@@ -320,7 +332,7 @@ def spp_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
     return spp_command({SPP_EFFECT_SCHEDULE_KEY: blob})
 
 
-def spp_command(values: dict[int, bool | bytes | int]) -> bytes:
+def spp_command(values: Mapping[int, Any]) -> bytes:
     """Build an unencrypted Plant Pro 4.0 SPP command frame."""
     return bytes((SPP_COMMAND_HEADER,)) + cbor_map(values)
 
@@ -505,6 +517,11 @@ def old_weather_effect_packet(effect_id: int) -> bytes:
     if not 1 <= effect_id <= 11:
         raise ValueError("Classic Fluval effect ID must be between 1 and 11")
     return old_packet(bytes((0x68, OLD_WEATHER_EFFECT, effect_id)))
+
+
+def old_find_packet() -> bytes:
+    """Build the APK-native classic identify command (``680F``)."""
+    return old_packet(bytes((0x68, OLD_FIND)))
 
 
 def old_clock_packet(now: datetime | None = None) -> bytes:
@@ -825,6 +842,9 @@ def _cbor_value(value: Any) -> bytes:
         return bytes((0xF5 if value else 0xF4,))
     if isinstance(value, bytes):
         return _cbor_bytes(value)
+    if isinstance(value, str):
+        encoded = value.encode("utf-8")
+        return _cbor_major(3, len(encoded)) + encoded
     if isinstance(value, (list, tuple)):
         return _cbor_major(4, len(value)) + b"".join(_cbor_value(item) for item in value)
     if isinstance(value, int):

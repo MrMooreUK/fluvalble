@@ -42,6 +42,12 @@ def test_wifi_weather_effect_packet_uses_apk_manual_key():
     }
 
 
+def test_native_find_packets_match_apk_commands():
+    assert protocol.decode_cbor_map(protocol.wifi_find_packet()) == {52: "find"}
+    assert protocol.spp_find_packet() == bytes.fromhex("d1 a1 18 34 64 66 69 6e 64")
+    assert protocol.old_find_packet() == bytes.fromhex("68 0f 67")
+
+
 @pytest.mark.parametrize("effect_id", [-1, 12])
 def test_wifi_weather_effect_packet_rejects_unknown_ids(effect_id):
     with pytest.raises(ValueError):

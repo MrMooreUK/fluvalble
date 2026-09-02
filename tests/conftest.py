@@ -215,10 +215,14 @@ def _stub_homeassistant():
     ha_number.NumberMode = NumberMode
 
     # ---- homeassistant.components.button ----
+    class ButtonDeviceClass(str, enum.Enum):
+        IDENTIFY = "identify"
+
     class _FakeButtonEntity(_FakeEntity):
         pass
 
     ha_button = types.ModuleType("homeassistant.components.button")
+    ha_button.ButtonDeviceClass = ButtonDeviceClass
     ha_button.ButtonEntity = _FakeButtonEntity
 
     # ---- homeassistant.components.sensor ----
