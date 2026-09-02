@@ -51,7 +51,7 @@ NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 # control for every supported light family. Schedule editors configure those
 # modes; they are not a second fixture mode selector.
 SELECTS = ["mode"]
-SENSORS = ["rssi", "last_seen"]
+SENSORS = ["rssi", "last_seen", "active_connection_source", "advertisement_source"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
 CHANNEL_NAMES_AQUASKY = {
     "channel_1": "Red",
@@ -138,6 +138,7 @@ class Device:
         name: str,
         device: BLEDevice | None = None,
         advertisement: AdvertisementData | None = None,
+        advertisement_source: str | None = None,
         hass: HomeAssistant | None = None,
         config_data: dict[str, Any] | None = None,
         ping_interval: int = 10,
@@ -218,7 +219,7 @@ class Device:
         self._reachability_unsub: Callable[[], None] | None = None
 
         if device and advertisement:
-            self.update_ble(device, advertisement)
+            self.update_ble(device, advertisement, advertisement_source)
 
     @property
     def mac(self) -> str:
@@ -282,11 +283,17 @@ class Device:
             expiry,
         )
 
-    def update_ble(self, device: BLEDevice, advertisement: AdvertisementData):
+    def update_ble(
+        self,
+        device: BLEDevice,
+        advertisement: AdvertisementData,
+        source: str | None = None,
+    ) -> None:
         """Update BLE metadata."""
         self.address = device.address
         self.conn_info["mac"] = device.address
         self.touch_seen(rssi=advertisement.rssi, notify=False)
+        self._record_advertisement_source(source or self._source_from_device(device))
         self.conn_info["service_uuids"] = list(advertisement.service_uuids)
         self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisement.service_data.items()}
         product_id = product_id_from_manufacturer_data(advertisement.manufacturer_data)
@@ -313,6 +320,57 @@ class Device:
         self._notify_diagnostics_throttled()
         for handler in self.updates_component:
             handler()
+
+    @staticmethod
+    def _source_from_device(device: BLEDevice) -> str | None:
+        """Return the HA scanner source embedded in a connectable BLEDevice."""
+        details = device.details if isinstance(device.details, dict) else {}
+        source = details.get("source")
+        return str(source) if source else None
+
+    def _source_metadata(self, source: str | None) -> dict[str, str | None]:
+        """Resolve an HA scanner source to a stable name and scanner type."""
+        source_name = source
+        source_type = None
+        if self.hass is not None and source:
+            get_scanner = getattr(bluetooth, "async_scanner_by_source", None)
+            scanner = get_scanner(self.hass, source) if get_scanner else None
+            if scanner is not None:
+                source_name = getattr(scanner, "name", None) or source
+                details = getattr(scanner, "details", None)
+                scanner_type = getattr(details, "scanner_type", None)
+                source_type = getattr(scanner_type, "value", None) or (
+                    str(scanner_type) if scanner_type is not None else None
+                )
+        return {
+            "source": source,
+            "source_name": source_name,
+            "source_type": source_type,
+        }
+
+    def _record_advertisement_source(self, source: str | None) -> None:
+        """Record which scanner supplied the advertisement-backed RSSI."""
+        metadata = self._source_metadata(source)
+        self.conn_info.update(
+            {
+                "advertisement_source": metadata["source_name"],
+                "advertisement_source_address": metadata["source"],
+                "advertisement_source_type": metadata["source_type"],
+                "advertisement_updated_at": self.conn_info.get("rssi_updated_at"),
+            }
+        )
+
+    def _record_active_connection_source(self, device: BLEDevice) -> None:
+        """Snapshot the selected HA route after GATT setup succeeds."""
+        metadata = self._source_metadata(self._source_from_device(device))
+        self.conn_info.update(
+            {
+                "active_connection_source": metadata["source_name"],
+                "active_connection_source_address": metadata["source"],
+                "active_connection_source_type": metadata["source_type"],
+                "active_connection_connected_at": datetime.now(UTC),
+            }
+        )
 
     def set_connected(self, connected: bool):
         """Set active GATT status while tracking fixture reachability."""
@@ -1101,7 +1159,34 @@ class Device:
             return Attribute(
                 value=self.conn_info.get("rssi"),
                 native_unit_of_measurement="dBm",
-                extra={"last_advertisement": self.conn_info.get("rssi_updated_at")},
+                extra={
+                    "source_name": self.conn_info.get("advertisement_source"),
+                    "source_address": self.conn_info.get("advertisement_source_address"),
+                    "source_type": self.conn_info.get("advertisement_source_type"),
+                    "last_advertisement": self.conn_info.get("rssi_updated_at"),
+                    "last_updated": self.conn_info.get("rssi_updated_at"),
+                },
+            )
+        if attr == "active_connection_source":
+            return Attribute(
+                value=self.conn_info.get("active_connection_source") if self.connected else None,
+                extra={
+                    "source_name": self.conn_info.get("active_connection_source"),
+                    "source_address": self.conn_info.get("active_connection_source_address"),
+                    "source_type": self.conn_info.get("active_connection_source_type"),
+                    "connected_at": self.conn_info.get("active_connection_connected_at"),
+                    "gatt_connected": self.connected,
+                },
+            )
+        if attr == "advertisement_source":
+            return Attribute(
+                value=self.conn_info.get("advertisement_source"),
+                extra={
+                    "source_name": self.conn_info.get("advertisement_source"),
+                    "source_address": self.conn_info.get("advertisement_source_address"),
+                    "source_type": self.conn_info.get("advertisement_source_type"),
+                    "last_updated": self.conn_info.get("advertisement_updated_at"),
+                },
             )
         if attr == "last_seen":
             return Attribute(value=self.conn_info.get("last_seen"))
@@ -1109,14 +1194,18 @@ class Device:
 
     def register_update(self, attr: str, handler: Callable):
         """Register handlers for updates."""
-        if attr in ("connection", "rssi", "last_seen"):
+        if attr in ("connection", "rssi", "last_seen", "active_connection_source", "advertisement_source"):
             self.updates_connect.append(handler)
         else:
             self.updates_component.append(handler)
 
     def deregister_update(self, attr: str, handler: Callable):
         """Remove a previously registered update handler."""
-        target = self.updates_connect if attr in ("connection", "rssi", "last_seen") else self.updates_component
+        target = (
+            self.updates_connect
+            if attr in ("connection", "rssi", "last_seen", "active_connection_source", "advertisement_source")
+            else self.updates_component
+        )
         with contextlib.suppress(ValueError):
             target.remove(handler)
 
@@ -2017,6 +2106,20 @@ class Device:
             "values": dict(self.values),
             "connection_info": dict(self.conn_info),
             "last_diagnostics": dict(self.diagnostics),
+            "active_connection": {
+                "source": self.conn_info.get("active_connection_source_address"),
+                "source_name": self.conn_info.get("active_connection_source"),
+                "source_type": self.conn_info.get("active_connection_source_type"),
+                "connected_at": self.conn_info.get("active_connection_connected_at"),
+                "gatt_connected": self.connected,
+            },
+            "latest_advertisement": {
+                "source": self.conn_info.get("advertisement_source_address"),
+                "source_name": self.conn_info.get("advertisement_source"),
+                "source_type": self.conn_info.get("advertisement_source_type"),
+                "rssi": self.conn_info.get("rssi"),
+                "received_at": self.conn_info.get("rssi_updated_at"),
+            },
         }
 
         if self.client is not None:
@@ -2059,6 +2162,7 @@ class Device:
             ping_interval=self._ping_interval,
             active_time=self._active_time,
             device_provider=self._connectable_ble_device,
+            connection_ready_callback=self._record_active_connection_source,
             ready_callback=self._async_on_client_ready,
             state_ready_callback=self._async_on_client_state_ready,
         )

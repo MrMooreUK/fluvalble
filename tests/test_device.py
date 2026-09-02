@@ -167,6 +167,63 @@ def test_activity_updates_last_seen_and_schedules_expiry(monkeypatch):
     assert device._reachability_unsub is cancel
 
 
+def test_advertisement_route_cannot_overwrite_active_connection_route(monkeypatch):
+    import custom_components.fluvalble.core.device as device_module
+
+    device = _make_device()
+    device.hass = MagicMock()
+    scanners = {
+        "C4:D8:D5:96:91:DA": SimpleNamespace(
+            name="krisroom",
+            details=SimpleNamespace(scanner_type=SimpleNamespace(value="remote")),
+        ),
+        "00:1A:7D:DA:71:13": SimpleNamespace(
+            name="CSR8510 USB adapter",
+            details=SimpleNamespace(scanner_type=SimpleNamespace(value="usb")),
+        ),
+    }
+    monkeypatch.setattr(
+        device_module.bluetooth,
+        "async_scanner_by_source",
+        lambda _hass, source: scanners.get(source),
+    )
+
+    connected_device = SimpleNamespace(
+        address=device.address,
+        name="AquaSky",
+        details={"source": "C4:D8:D5:96:91:DA"},
+    )
+    device._record_active_connection_source(connected_device)
+    device.set_connected(True)
+
+    advertisement_device = SimpleNamespace(
+        address=device.address,
+        name="AquaSky",
+        details={"source": "00:1A:7D:DA:71:13"},
+    )
+    advertisement = SimpleNamespace(
+        rssi=-88,
+        service_uuids=[],
+        service_data={},
+        manufacturer_data={},
+    )
+    device.client = SimpleNamespace(device=connected_device)
+    device.update_ble(
+        advertisement_device,
+        advertisement,
+        "00:1A:7D:DA:71:13",
+    )
+
+    assert device.attribute("active_connection_source")["value"] == "krisroom"
+    assert device.conn_info["active_connection_source_address"] == "C4:D8:D5:96:91:DA"
+    assert device.attribute("advertisement_source")["value"] == "CSR8510 USB adapter"
+    assert device.conn_info["advertisement_source_address"] == "00:1A:7D:DA:71:13"
+    assert device.attribute("rssi")["value"] == -88
+
+    device.set_connected(False)
+    assert device.attribute("active_connection_source")["value"] is None
+
+
 def test_expected_disconnect_remains_reachable_after_successful_connect():
     device = _make_device()
 

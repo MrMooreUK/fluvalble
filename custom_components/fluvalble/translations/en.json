@@ -83,10 +83,16 @@
     },
     "sensor": {
       "rssi": {
-        "name": "Signal strength"
+        "name": "Advertisement signal strength"
       },
       "last_seen": {
         "name": "Last seen"
+      },
+      "active_connection_source": {
+        "name": "Bluetooth connection source"
+      },
+      "advertisement_source": {
+        "name": "Bluetooth advertisement source"
       }
     }
   }

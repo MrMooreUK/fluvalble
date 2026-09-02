@@ -469,6 +469,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             entry.title,
             service_info.device,
             service_info.advertisement,
+            service_info.source,
             hass=hass,
             # Lamp profile is a fallback for fixtures whose APK product ID is
             # unavailable. A decoded product ID remains authoritative.
@@ -542,7 +543,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     ) -> None:
         log_discovery_update("Fluval BLE update: %s %s", service_info, change)
         if device := runtime.device:
-            device.update_ble(service_info.device, service_info.advertisement)
+            device.update_ble(
+                service_info.device,
+                service_info.advertisement,
+                service_info.source,
+            )
             _sync_product_identity(hass, entry, device)
             return
 

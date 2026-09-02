@@ -68,6 +68,7 @@ WAKE_READ_UUIDS = (
 WRITE_PROPERTIES = frozenset({"write", "write-without-response"})
 
 DeviceProvider = Callable[[], BLEDevice | None]
+ConnectionReadyCallback = Callable[[BLEDevice], None]
 StateReadyCallback = Callable[[dict[int, object]], Awaitable[None]]
 
 
@@ -82,6 +83,7 @@ class Client:
         ping_interval: int = 10,
         active_time: int = ACTIVE_TIME,
         device_provider: DeviceProvider | None = None,
+        connection_ready_callback: ConnectionReadyCallback | None = None,
         ready_callback: Callable[[], Awaitable[None]] | None = None,
         state_ready_callback: StateReadyCallback | None = None,
     ) -> None:
@@ -90,6 +92,7 @@ class Client:
         self.status_callback = status_callback
         self.update_callback = update_callback
         self.device_provider = device_provider
+        self.connection_ready_callback = connection_ready_callback
         self.ready_callback = ready_callback
         self.state_ready_callback = state_ready_callback
         self._ping_interval = ping_interval
@@ -304,6 +307,11 @@ class Client:
                     await asyncio.wait_for(client.disconnect(), timeout=5)
                 raise
 
+            if self.connection_ready_callback:
+                # Snapshot the BLEDevice actually handed to the connector.
+                # Advertisement callbacks may replace ``self.device`` while
+                # this connection attempt is in flight.
+                self.connection_ready_callback(device)
             if self.status_callback:
                 self.status_callback(True)
             self.last_error = None
