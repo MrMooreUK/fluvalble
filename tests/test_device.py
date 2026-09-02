@@ -1235,6 +1235,18 @@ def test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
     asyncio.run(_async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet())
 
 
+def test_facebd_clock_action_follows_apk_clock_read_timezone_order():
+    asyncio.run(_async_test_facebd_clock_action_follows_apk_clock_read_timezone_order())
+
+
+def test_facebd_clock_action_requires_timezone_readback_key():
+    asyncio.run(_async_test_facebd_clock_action_requires_timezone_readback_key())
+
+
+def test_facebd_clock_action_reports_timezone_write_failure():
+    asyncio.run(_async_test_facebd_clock_action_reports_timezone_write_failure())
+
+
 def test_stopping_preview_reactivates_the_native_fixture_mode():
     asyncio.run(_async_test_stopping_preview_reactivates_the_native_fixture_mode())
 
@@ -1368,15 +1380,103 @@ async def _async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
         plant_pro_spp=True,
         command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
         ensure_connected=AsyncMock(return_value=True),
+        request_state=AsyncMock(return_value=True),
+        observed_state={},
     )
     device._async_send_packet = AsyncMock(return_value=True)
 
     assert await device.async_sync_clock(force=True)
     device._async_send_packet.assert_awaited_once()
     packet = device._async_send_packet.await_args.args[0]
+    assert device._async_send_packet.await_args.kwargs == {"verify": False}
     assert packet[0] == protocol.MESH_OPCODE_CLOCK
     assert len(packet) == 8
+    device.client.request_state.assert_awaited_once_with()
     assert device.diagnostics["status"] == "clock_synced"
+
+
+async def _async_test_facebd_clock_action_follows_apk_clock_read_timezone_order():
+    device = _make_device(
+        name="AquaSky3_AABBCC",
+        model="AquaSky 3.0 Bluetooth LED",
+        service_uuids=["facebd00-7261-6262-6974-696f74626c65"],
+    )
+    events = []
+
+    async def read_state():
+        events.append("state")
+        return True
+
+    async def send_packet(packet, *, verify=True):
+        decoded = protocol.decode_cbor_map(packet)
+        if protocol.WIFI_CLOCK_MS_KEY in decoded:
+            events.append("clock")
+        elif protocol.WIFI_TZ_OFFSET_KEY in decoded:
+            events.append("timezone")
+        else:
+            raise AssertionError(f"Unexpected clock-sync packet: {packet.hex()}")
+        assert verify is False
+        return True
+
+    device.client = SimpleNamespace(
+        plant_pro_spp=False,
+        wifi_facebd=True,
+        command_write_uuid="facebd01-7261-6262-6974-696f74626c65",
+        ensure_connected=AsyncMock(return_value=True),
+        request_state=AsyncMock(side_effect=read_state),
+        observed_state={protocol.WIFI_TZ_OFFSET_KEY: 0},
+    )
+    device._async_send_packet = AsyncMock(side_effect=send_packet)
+
+    assert await device.async_sync_clock(force=True)
+
+    assert events == ["clock", "state", "timezone"]
+    assert device.diagnostics["status"] == "clock_synced"
+
+
+async def _async_test_facebd_clock_action_requires_timezone_readback_key():
+    device = _make_device(
+        name="AquaSky3_AABBCC",
+        model="AquaSky 3.0 Bluetooth LED",
+        service_uuids=["facebd00-7261-6262-6974-696f74626c65"],
+    )
+    device.client = SimpleNamespace(
+        plant_pro_spp=False,
+        wifi_facebd=True,
+        command_write_uuid="facebd01-7261-6262-6974-696f74626c65",
+        ensure_connected=AsyncMock(return_value=True),
+        request_state=AsyncMock(return_value=True),
+        observed_state={protocol.WIFI_FIRMWARE_VERSION_KEY: 1},
+    )
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_sync_clock(force=True)
+
+    device._async_send_packet.assert_awaited_once()
+    packet = device._async_send_packet.await_args.args[0]
+    assert protocol.WIFI_CLOCK_MS_KEY in protocol.decode_cbor_map(packet)
+
+
+async def _async_test_facebd_clock_action_reports_timezone_write_failure():
+    device = _make_device(
+        name="AquaSky3_AABBCC",
+        model="AquaSky 3.0 Bluetooth LED",
+        service_uuids=["facebd00-7261-6262-6974-696f74626c65"],
+    )
+    device.client = SimpleNamespace(
+        plant_pro_spp=False,
+        wifi_facebd=True,
+        command_write_uuid="facebd01-7261-6262-6974-696f74626c65",
+        ensure_connected=AsyncMock(return_value=True),
+        request_state=AsyncMock(return_value=True),
+        observed_state={protocol.WIFI_TZ_OFFSET_KEY: 0},
+    )
+    device._async_send_packet = AsyncMock(side_effect=[True, False])
+
+    assert not await device.async_sync_clock(force=True)
+
+    assert device.diagnostics["status"] == "clock_sync_failed"
+    assert device.diagnostics["last_error"] == "Unable to sync lamp timezone"
 
 
 def test_schedule_points_are_normalized_from_color_names():

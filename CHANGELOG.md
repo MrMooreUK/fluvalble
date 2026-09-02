@@ -50,6 +50,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   with immediate serialized recovery after unexpected disconnects.
 
 ### Changed
+- Aligned BLE session initialization with FluvalConnect's fixture-clock, state-read,
+  and FACEBD timezone sequence so native schedules do not briefly start from a
+  stale controller clock after reconnecting.
 - Aligned one-channel FACEBD and Plant Pro/SPP manual adjustments with the
   FluvalConnect APK's single-zone commands. Multi-channel and classic writes
   retain their existing all-zone packets.
