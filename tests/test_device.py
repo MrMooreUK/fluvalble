@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, call
 
 from custom_components.fluvalble.core import (
     LAMP_PROFILE_AQUASKY,
@@ -1119,6 +1119,24 @@ async def _async_test_classic_single_channel_change_keeps_apk_all_zone_packet():
 
     assert await device.async_set_channels({"channel_1": 75})
     device._async_send_packet.assert_awaited_once_with(protocol.old_all_zone_packet([75, 0, 0, 0]))
+
+
+def test_classic_power_on_precedes_apk_all_zone_packet():
+    asyncio.run(_async_test_classic_power_on_precedes_apk_all_zone_packet())
+
+
+async def _async_test_classic_power_on_precedes_apk_all_zone_packet():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "manual", "led_on_off": False})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 75})
+    assert device._async_send_packet.await_args_list == [
+        call(protocol.old_switch_packet(True)),
+        call(protocol.old_all_zone_packet([75, 0, 0, 0])),
+    ]
 
 
 def test_classic_manual_preset_actions_use_apk_packets():

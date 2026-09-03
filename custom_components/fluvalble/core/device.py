@@ -1362,6 +1362,14 @@ class Device:
                 if ok:
                     self.values["led_on_off"] = False
         else:
+            any_channel_on = any(self._channel_values())
+            # Establish power before applying the 6804 channel frame, matching
+            # the app's switch-then-manual-colour ordering for an off fixture.
+            if any_channel_on and (force_power or not self.values["led_on_off"]):
+                if not await self._async_send_packet(protocol.old_switch_packet(True)):
+                    self.values = old_values
+                    return False
+                self.values["led_on_off"] = True
             ok = await self._async_send_packet(protocol.old_all_zone_packet(self._channel_values()))
 
         if not ok:
@@ -2098,6 +2106,9 @@ class Device:
         if not await self._async_ensure_client() or self.client is None:
             return False
         client = self.client
+
+        if not await client.ensure_connected():
+            return False
 
         try:
             await client.request_state()

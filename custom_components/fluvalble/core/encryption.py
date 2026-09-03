@@ -1,36 +1,64 @@
-"""Encrypts/decrypts BLE packets for the Fluval LED controller.
+"""Fluval classic BLE framing, matching FluvalConnect ``EncodeUtil``."""
 
-Uses the Planted Tank / Fluval Plant 3.0 scheme: [IV][Length][Key][payload]
-with rand=0 so payload is sent as-is. See reverse-engineering thread and MRZOTTEL_FEEDBACK.md.
-"""
+from __future__ import annotations
+
+import random
+from typing import Final
+
+IV: Final = 0x54
+PLAINTEXT_CHUNK: Final = 15
 
 
-def encrypt(source: bytearray) -> bytearray:
-    """Encrypt a BLE packet using Planted Tank format (IV=0x54, rand=0, payload unchanged)."""
-    raw_len = len(source)
-    # [IV] [Length] [Key] [byte1, byte2, ...] — with rand=0: key=0x54, bytes XOR 0
-    encoded = bytearray([0x54, (raw_len + 1) ^ 0x54, 0x54])
-    for b in source:
-        encoded.append(b ^ 0)  # rand=0, so payload unchanged
+def encode_message(source: bytearray | bytes, *, key: int | None = None) -> bytearray:
+    """Encode one plaintext chunk using the APK's native envelope."""
+    payload = bytes(source)
+    use_key = random.randint(0, 255) if key is None else key & 0xFF
+    encoded = bytearray((IV, (len(payload) + 1) ^ IV, IV ^ use_key))
+    encoded.extend(value ^ use_key for value in payload)
     return encoded
 
 
-def decrypt(source: bytes | bytearray) -> bytes:
-    """Decrypt a BLE packet from the Fluval LED controller."""
+def decode_message(source: bytes | bytearray) -> bytes:
+    """Decode one APK envelope using the key embedded in its header."""
     if len(source) < 3:
         return b""
     key = source[0] ^ source[2]
-    length = len(source)
-    decrypted = bytearray()
-    for i in range(3, length):
-        decrypted.append(source[i] ^ key)
-    return decrypted
+    return bytes(value ^ key for value in source[3:])
+
+
+def encode_message_chunks(source: bytearray | bytes, *, key: int | None = None) -> list[bytearray]:
+    """Chunk plaintext at 15 bytes and encode each chunk independently."""
+    payload = bytes(source)
+    return [
+        encode_message(payload[offset : offset + PLAINTEXT_CHUNK], key=key)
+        for offset in range(0, len(payload), PLAINTEXT_CHUNK)
+    ]
+
+
+def encrypt(source: bytearray | bytes) -> bytearray:
+    """Backward-compatible wrapper using the APK's random-key encoder."""
+    return encode_message(source)
+
+
+def decrypt(source: bytes | bytearray) -> bytes:
+    """Backward-compatible wrapper around the APK decoder."""
+    return decode_message(source)
 
 
 def add_crc(source: bytearray) -> bytearray:
-    """Calculate CRC for the packet."""
-    crc = 0x0
-    for b in source:
-        crc = b ^ crc
-    source.append(crc)
+    """Append the classic command XOR checksum in place."""
+    checksum = 0
+    for value in source:
+        checksum ^= value
+    source.append(checksum)
     return source
+
+
+def is_valid_fluval_frame(data: bytes | bytearray) -> bool:
+    """Return whether data is one complete checksummed classic frame."""
+    if len(data) < 3 or data[0] != 0x68:
+        return False
+    checksum = 0
+    for value in data:
+        checksum ^= value
+    return checksum == 0

@@ -500,6 +500,15 @@ def decode_old_state_packet(packet: bytes | bytearray, *, channel_count: int) ->
     return None
 
 
+def old_receive_frame_ready(payload: bytes | bytearray) -> bool:
+    """Return whether the APK-style classic receive cache holds a full frame."""
+    if not encryption.is_valid_fluval_frame(payload):
+        return False
+    if len(payload) < 3 or payload[1] != OLD_READ_PARAMS[1]:
+        return True
+    return any(decode_old_state_packet(payload, channel_count=count) is not None for count in (4, 5))
+
+
 def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, Any] | None:
     """Decode the body of a classic mode-1 ``6805`` response."""
     base_length = channel_count * 2 + 9
@@ -638,8 +647,42 @@ def _xor_checksum(packet: Iterable[int]) -> int:
 
 
 def encrypted_old_packet(packet: bytes) -> bytearray:
-    """Wrap an old protocol packet in the original integration encryption."""
-    return encryption.encrypt(encryption.add_crc(bytearray(packet)))
+    """Encode one complete APK classic packet without changing its checksum."""
+    return encrypted_old_frames(packet)[0]
+
+
+def encrypted_old_frames(packet: bytes) -> list[bytearray]:
+    """Validate, chunk, and encode one already-checksummed classic frame."""
+    if not is_valid_old_command_packet(packet):
+        raise ValueError("Classic Fluval writes require one complete APK command frame")
+    return encryption.encode_message_chunks(packet, key=None)
+
+
+def is_valid_old_command_packet(packet: bytes | bytearray) -> bool:
+    """Validate the framing and shape of every classic command exposed by the APK."""
+    if not encryption.is_valid_fluval_frame(packet) or len(packet) < 3:
+        return False
+    command = packet[1]
+    length = len(packet)
+    if command in (OLD_READ_PARAMS[1], OLD_AUTO_PREVIEW_STOP, OLD_FIND):
+        return length == 3
+    if command in (OLD_MODE, OLD_SWITCH, OLD_SAVE_PRESET, OLD_WEATHER_EFFECT):
+        return length == 4
+    if command in (OLD_ALL_ZONE, OLD_AUTO_PREVIEW):
+        return length in (11, 13)
+    if command == OLD_CLOCK:
+        return length == 10
+    if command == OLD_AUTO_SCHEDULE:
+        return length in (19, 21, 22, 24)
+    if command == OLD_PRO_SCHEDULE and length >= 4:
+        point_count = packet[2]
+        return OLD_MIN_PRO_POINTS <= point_count <= OLD_MAX_PRO_POINTS and length in (
+            4 + point_count * 6,
+            4 + point_count * 7,
+        )
+    if command == OLD_SCHEDULED_EFFECT:
+        return (length - 3) % 6 == 0 and 0 <= (length - 3) // 6 <= OLD_MAX_EFFECT_WINDOWS
+    return False
 
 
 def cbor_map(values: Mapping[int, Any]) -> bytes:

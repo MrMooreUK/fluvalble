@@ -122,7 +122,9 @@ class Client:
         self.plant_pro_spp = False
         self.profile = "unresolved"
         self._connection_lock = asyncio.Lock()
+        self._initialization_lock = asyncio.Lock()
         self._command_lock = asyncio.Lock()
+        self._session_initialized = False
         self._state_update_event = asyncio.Event()
         self._observed_state: dict[int, object] = {}
         self.last_error: str | None = None
@@ -271,6 +273,7 @@ class Client:
 
             stale_client = self.client
             self.client = None
+            self._session_initialized = False
             if stale_client is not None:
                 with contextlib.suppress(Exception):
                     await asyncio.wait_for(stale_client.disconnect(), timeout=5)
@@ -331,6 +334,7 @@ class Client:
             return
 
         self.client = None
+        self._session_initialized = False
         if self.status_callback:
             self.status_callback(False)
 
@@ -346,8 +350,8 @@ class Client:
     async def ensure_connected(self) -> bool:
         """Connect far enough to resolve the live GATT profile."""
         try:
-            await self._ensure_client()
-            return True
+            client = await self._ensure_client()
+            return await self._initialize_session(client)
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval connect for profile resolution failed", exc_info=err)
         except Exception as err:  # pylint: disable=broad-except
@@ -395,44 +399,26 @@ class Client:
             return
 
         decrypted = decrypt(data)
-        if len(decrypted) == 17:
-            self.receive_buffer += decrypted
-        else:
-            self.receive_buffer += decrypted
-            _LOGGER.debug("Got all data: %s ", to_hex(self.receive_buffer))
-            self._dispatch_update(self.receive_buffer)
+        if not decrypted:
+            return
+        # FluvalConnect clears the cache when a decoded chunk starts a new
+        # 0x68 frame, appends every chunk, and acts only once parsing succeeds.
+        if decrypted[0] == 0x68:
             self.receive_buffer = b""
+        self.receive_buffer += decrypted
+        if not protocol.old_receive_frame_ready(self.receive_buffer):
+            return
+        payload = self.receive_buffer
+        self.receive_buffer = b""
+        _LOGGER.debug("Got all data: %s ", to_hex(payload))
+        self._dispatch_update(payload)
 
     async def _connect(self):
         """Connect to the Fluval and subscribe to notifications."""
         connected = False
         try:
             client = await self._ensure_client()
-
-            if self.wake_read_uuid:
-                with contextlib.suppress(BleakError):
-                    await client.read_gatt_char(self.wake_read_uuid)
-
-            # FluvalConnect initializes every BLE light in this order after
-            # notifications are enabled: set the fixture clock, read its
-            # current parameters, then apply any state-dependent follow-up.
-            if self.ready_callback:
-                try:
-                    await self.ready_callback()
-                except Exception as err:  # pylint: disable=broad-except
-                    _LOGGER.warning("Fluval pre-read initialization failed", exc_info=err)
-
-            if self.raw_facebd:
-                await self.request_state()
-            elif self.init_write_uuid:
-                await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
-
-            if self.state_ready_callback:
-                try:
-                    await self.state_ready_callback(dict(self._observed_state))
-                except Exception as err:  # pylint: disable=broad-except
-                    _LOGGER.warning("Fluval post-read initialization failed", exc_info=err)
-            connected = True
+            connected = await self._initialize_session(client)
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval initial connection failed", exc_info=err)
             if self.status_callback:
@@ -444,6 +430,34 @@ class Client:
         finally:
             if not self._stopping and (connected or self._active_time == 0):
                 self.ping()
+
+    async def _initialize_session(self, client: BleakClient) -> bool:
+        """Run the APK initialization once for every physical GATT session."""
+        async with self._initialization_lock:
+            if self._session_initialized and client is self.client and client.is_connected:
+                return True
+            if client is not self.client or not client.is_connected:
+                return False
+
+            if self.wake_read_uuid:
+                with contextlib.suppress(BleakError):
+                    await client.read_gatt_char(self.wake_read_uuid)
+
+            if self.ready_callback:
+                await self.ready_callback()
+
+            if self.raw_facebd:
+                await self.request_state()
+            elif self.init_write_uuid:
+                await self._wait_for_command_gap()
+                await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
+                self.last_command_at = time.time()
+
+            if self.state_ready_callback:
+                await self.state_ready_callback(dict(self._observed_state))
+
+            self._session_initialized = True
+            return True
 
     def send(self, data: bytes):
         """Send a packet to the Fluval."""
@@ -467,6 +481,8 @@ class Client:
                 # the single owner of persistent reconnect cycles.
                 async with self._command_lock:
                     client = await self._ensure_client()
+                if not await self._initialize_session(client):
+                    raise BleakError("Fluval BLE session initialization failed")
 
                 # heartbeat loop
                 while time.time() < self.ping_time and not self._stopping and client is self.client:
@@ -538,12 +554,8 @@ class Client:
                 if isinstance(mtu_size, int) and mtu_size > 3:
                     chunk_size = mtu_size - 3
             payloads = [data[offset : offset + chunk_size] for offset in range(0, len(data), chunk_size)]
-        elif len(data) > 15:
-            # The classic APK path chunks the complete plaintext frame to 15
-            # bytes, then encrypts each slice independently.
-            payloads = [encryption.encrypt(bytearray(data[offset : offset + 15])) for offset in range(0, len(data), 15)]
         else:
-            payloads = [protocol.encrypted_old_packet(data)]
+            payloads = protocol.encrypted_old_frames(data)
 
         for index, payload in enumerate(payloads):
             _LOGGER.debug(
@@ -571,10 +583,12 @@ class Client:
                 await client.read_gatt_char(self.wake_read_uuid)
 
         if self.plant_pro_spp:
+            await self._wait_for_command_gap()
             await self._write_packet(
                 self.command_write_uuid,
                 protocol.SPP_READ_PARAMS_PACKET,
             )
+            self.last_command_at = time.time()
         elif self.raw_facebd and self.notify_uuid:
             # Read every available FACEBD state char. Some controllers return
             # only a wake byte on facebd81 and the real CBOR map on facebd80/02.
@@ -587,7 +601,9 @@ class Client:
                 _LOGGER.debug("Read Fluval state from %s: %s", read_uuid, to_hex(data))
                 observed = self._dispatch_update(bytes(data)) or observed
         elif self.init_write_uuid:
+            await self._wait_for_command_gap()
             await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
+            self.last_command_at = time.time()
 
         if observed and self._state_matches(expected_state):
             return True
@@ -623,6 +639,12 @@ class Client:
             return CLASSIC_COMMAND_GAP
         return COMMAND_GAP
 
+    async def _wait_for_command_gap(self) -> None:
+        """Honor the APK's per-command pacing from the last completed write."""
+        wait_time = self.last_command_at + self._command_gap() - time.time()
+        if wait_time > 0:
+            await asyncio.sleep(wait_time)
+
     async def send_now(
         self,
         data: bytes,
@@ -643,9 +665,7 @@ class Client:
                     with contextlib.suppress(BleakError):
                         await client.read_gatt_char(self.wake_read_uuid)
 
-                wait_time = self.last_command_at + self._command_gap() - time.time()
-                if wait_time > 0:
-                    await asyncio.sleep(wait_time)
+                await self._wait_for_command_gap()
 
                 write_copies = UNVERIFIED_WRITE_COPIES if verify and self.raw_facebd else 1
                 for copy_attempt in range(1, write_copies + 1):
@@ -717,6 +737,7 @@ class Client:
         """Disconnect the underlying BLE client without masking the original error."""
         client = self.client
         self.client = None
+        self._session_initialized = False
         if client:
             with contextlib.suppress(Exception):
                 await asyncio.wait_for(client.disconnect(), timeout=5)

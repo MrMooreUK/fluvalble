@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from custom_components.fluvalble.core import protocol
+from custom_components.fluvalble.core import encryption, protocol
 from custom_components.fluvalble.core import client as client_module
 from custom_components.fluvalble.core.client import Client
 
@@ -62,7 +62,12 @@ class _FakeTask:
         return None
 
 
-def _make_client(address="AA:BB:CC:DD:EE:FF", *, active_time=120, ping_interval=10):
+def _make_client(
+    address="AA:BB:CC:DD:EE:FF",
+    *,
+    active_time=120,
+    ping_interval=10,
+):
     ble_device = MagicMock()
     ble_device.address = address
     with patch("asyncio.create_task", side_effect=lambda coro: _FakeTask(coro)):
@@ -112,14 +117,29 @@ def _classic_characteristics():
     ]
 
 
-def test_old_protocol_notify_callback_flushes_short_final_notifications():
+def test_old_protocol_notify_callback_ignores_malformed_short_notifications():
     client = _make_client()
     update_callback = MagicMock()
     client.update_callback = update_callback
 
     client.notify_callback(MagicMock(), bytearray([0x54, 0x55]))
 
-    update_callback.assert_called_once_with(b"")
+    update_callback.assert_not_called()
+
+
+def test_old_protocol_notify_callback_reassembles_until_frame_is_valid():
+    client = _make_client()
+    update_callback = MagicMock(return_value=True)
+    client.update_callback = update_callback
+    packet = protocol.old_packet(protocol.OLD_READ_PARAMS + bytes((0, 1, 0)) + bytes(24))
+
+    for chunk in (packet[:15], packet[15:30], packet[30:]):
+        encoded = bytearray.fromhex("54")
+        encoded.extend(((len(chunk) + 1) ^ 0x54, 0x54))
+        encoded.extend(chunk)
+        client.notify_callback(MagicMock(), encoded)
+
+    update_callback.assert_called_once_with(packet)
 
 
 def test_raw_facebd_notify_callback_forwards_cbor_payload():
@@ -190,14 +210,72 @@ async def _async_test_write_packet_prefers_write_without_response():
     characteristic.properties = ["write", "write-without-response"]
     client._get_characteristic = MagicMock(return_value=characteristic)
 
-    with patch(
-        "custom_components.fluvalble.core.client.protocol.encrypted_old_packet",
-        return_value=bytearray(b"\x54\x01"),
-    ):
-        await client._write_packet("00001001-0000-1000-8000-00805F9B34FB", bytes([0x68, 0x03, 0x01, 0x6A]))
+    await client._write_packet("00001001-0000-1000-8000-00805F9B34FB", bytes([0x68, 0x03, 0x01, 0x6A]))
 
     kwargs = mock_client.write_gatt_char.await_args.kwargs
     assert kwargs["response"] is False
+    assert kwargs["data"][0] == 0x54
+    assert encryption.decode_message(kwargs["data"]) == bytes.fromhex("68 03 01 6a")
+
+
+def test_classic_write_packet_encodes_every_command_at_final_gatt_boundary():
+    asyncio.run(_async_test_classic_write_packet_encodes_every_command_at_final_gatt_boundary())
+
+
+async def _async_test_classic_write_packet_encodes_every_command_at_final_gatt_boundary():
+    client = _make_client()
+    mock_client = MagicMock()
+    mock_client.write_gatt_char = AsyncMock()
+    client.client = mock_client
+    characteristic = MagicMock(properties=["write-without-response"])
+    client._get_characteristic = MagicMock(return_value=characteristic)
+    packets = (
+        protocol.old_switch_packet(False),
+        protocol.old_switch_packet(True),
+        protocol.old_read_params_packet(),
+        protocol.old_mode_packet(2),
+        protocol.old_find_packet(),
+        protocol.old_weather_effect_packet(11),
+        protocol.old_clock_packet(),
+    )
+
+    for packet in packets:
+        await client._write_packet(client_module.LEGACY_COMMAND_WRITE_UUIDS[0], packet)
+
+    writes = [bytes(call.kwargs["data"]) for call in mock_client.write_gatt_char.await_args_list]
+    assert [encryption.decode_message(write) for write in writes] == list(packets)
+    assert all(write[:1] == b"\x54" for write in writes)
+
+
+def test_classic_long_write_chunks_complete_frame_once():
+    asyncio.run(_async_test_classic_long_write_chunks_complete_frame_once())
+
+
+async def _async_test_classic_long_write_chunks_complete_frame_once():
+    client = _make_client()
+    mock_client = MagicMock()
+    mock_client.write_gatt_char = AsyncMock()
+    client.client = mock_client
+    characteristic = MagicMock(properties=["write-without-response"])
+    client._get_characteristic = MagicMock(return_value=characteristic)
+    packet = protocol.old_pro_schedule_packet(
+        [
+            {"minute": 0, "channel_1": 0, "channel_2": 10, "channel_3": 20, "channel_4": 30},
+            {"minute": 720, "channel_1": 40, "channel_2": 50, "channel_3": 60, "channel_4": 70},
+            {"minute": 1439, "channel_1": 80, "channel_2": 90, "channel_3": 100, "channel_4": 0},
+            {"minute": 1080, "channel_1": 20, "channel_2": 30, "channel_3": 40, "channel_4": 50},
+            {"minute": 1200, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        ],
+        channel_count=4,
+    )
+
+    with patch("custom_components.fluvalble.core.client.asyncio.sleep", new=AsyncMock()):
+        await client._write_packet(client_module.LEGACY_COMMAND_WRITE_UUIDS[0], packet)
+
+    writes = [bytes(call.kwargs["data"]) for call in mock_client.write_gatt_char.await_args_list]
+    decoded = [encryption.decode_message(write) for write in writes]
+    assert decoded == [packet[:15], packet[15:30], packet[30:]]
+    assert b"".join(decoded) == packet
 
 
 def test_facebd_write_packet_chunks_native_schedule_at_att_limit():
@@ -408,6 +486,7 @@ async def _async_test_raw_connect_initialization_follows_apk_order():
     client.wake_read_uuid = None
     client.init_write_uuid = None
     connected = SimpleNamespace(is_connected=True)
+    client.client = connected
     client._ensure_client = AsyncMock(return_value=connected)
     client.ping = MagicMock()
     events = []
@@ -445,6 +524,7 @@ async def _async_test_classic_connect_initialization_follows_apk_order():
     client.wake_read_uuid = None
     client.init_write_uuid = "classic-init"
     connected = SimpleNamespace(is_connected=True)
+    client.client = connected
     client._ensure_client = AsyncMock(return_value=connected)
     client.ping = MagicMock()
     events = []
@@ -467,6 +547,32 @@ async def _async_test_classic_connect_initialization_follows_apk_order():
 
     assert events == ["clock", "state", "finish"]
     client._write_packet.assert_awaited_once_with("classic-init", protocol.old_read_params_packet())
+
+
+def test_session_initialization_runs_once_per_physical_connection():
+    asyncio.run(_async_test_session_initialization_runs_once_per_physical_connection())
+
+
+async def _async_test_session_initialization_runs_once_per_physical_connection():
+    client = _make_client()
+    connected = SimpleNamespace(is_connected=True)
+    client.client = connected
+    client.raw_facebd = False
+    client.init_write_uuid = None
+    ready = AsyncMock()
+    state_ready = AsyncMock()
+    client.ready_callback = ready
+    client.state_ready_callback = state_ready
+
+    assert await client._initialize_session(connected)
+    assert await client._initialize_session(connected)
+    ready.assert_awaited_once()
+    state_ready.assert_awaited_once_with({})
+
+    client._session_initialized = False
+    assert await client._initialize_session(connected)
+    assert ready.await_count == 2
+    assert state_ready.await_count == 2
 
 
 def test_device_provider_refreshes_adapter_route():

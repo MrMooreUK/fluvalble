@@ -45,14 +45,14 @@ class TestEncrypt:
     def test_structure(self):
         """Encrypted packet must have IV + length + key prefix then payload."""
         payload = bytearray([0x68, 0x05, 0x6D])
-        result = encryption.encrypt(payload)
+        result = encryption.encode_message(payload, key=0)
         assert result[0] == 0x54  # IV
         assert result[2] == 0x54  # key (rand=0 → key=IV)
         assert len(result) == 3 + len(payload)
 
     def test_length_field(self):
         payload = bytearray([0xAA, 0xBB])
-        result = encryption.encrypt(payload)
+        result = encryption.encode_message(payload, key=0)
         # length byte = (len(payload) + 1) XOR 0x54
         expected_length_byte = (len(payload) + 1) ^ 0x54
         assert result[1] == expected_length_byte
@@ -60,7 +60,7 @@ class TestEncrypt:
     def test_payload_unchanged_with_rand_zero(self):
         """With rand=0 the payload should pass through unchanged."""
         payload = bytearray([0x11, 0x22, 0x33])
-        result = encryption.encrypt(payload)
+        result = encryption.encode_message(payload, key=0)
         assert list(result[3:]) == list(payload)
 
 
@@ -68,7 +68,7 @@ class TestDecrypt:
     def test_round_trip(self):
         """encrypt → decrypt should return the original payload."""
         original = bytearray([0x68, 0x04, 0x00, 0x64, 0x00, 0x64])
-        encrypted = encryption.encrypt(original)
+        encrypted = encryption.encode_message(original, key=0)
         decrypted = encryption.decrypt(encrypted)
         assert list(decrypted) == list(original)
 
@@ -98,7 +98,7 @@ class TestAddCrcAndEncryptIntegration:
         """CMD_MODE = manual (0x68, 0x02, 0x00) should survive add_crc + encrypt + decrypt."""
         cmd = bytearray([0x68, 0x02, 0x00])
         with_crc = encryption.add_crc(bytearray(cmd))  # copy so we can compare
-        encrypted = encryption.encrypt(with_crc)
+        encrypted = encryption.encode_message(with_crc, key=0)
         decrypted = encryption.decrypt(encrypted)
         assert list(decrypted) == list(with_crc)
 
@@ -106,6 +106,17 @@ class TestAddCrcAndEncryptIntegration:
         """CMD_SWITCH on (0x68, 0x03, 0x01) round trip."""
         cmd = bytearray([0x68, 0x03, 0x01])
         with_crc = encryption.add_crc(bytearray(cmd))
-        encrypted = encryption.encrypt(with_crc)
+        encrypted = encryption.encode_message(with_crc, key=0)
         decrypted = encryption.decrypt(encrypted)
         assert list(decrypted) == list(with_crc)
+
+
+def test_apk_encoder_embeds_and_applies_selected_key():
+    payload = bytes.fromhex("68 03 01 6a")
+    assert encryption.encode_message(payload, key=0x2A) == bytes.fromhex("54 51 7e 42 29 2b 40")
+
+
+def test_apk_encoder_chunks_plaintext_at_fifteen_bytes():
+    payload = bytes(range(31))
+    frames = encryption.encode_message_chunks(payload, key=0)
+    assert [bytes(frame[3:]) for frame in frames] == [payload[:15], payload[15:30], payload[30:]]
