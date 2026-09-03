@@ -3,7 +3,7 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, call
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 from custom_components.fluvalble.core import (
     LAMP_PROFILE_AQUASKY,
@@ -86,15 +86,18 @@ def test_apk_product_identity_overrides_conflicting_manual_profile():
 
 def test_apk_product_identity_drives_spectrum_profile():
     assert _make_device(product_id=532).spectrum_profile() == "aquasky_current"
+    assert _make_device(product_id=328).spectrum_profile() == "aquasky_legacy"
+    assert _make_device(product_id=386).spectrum_profile() == "plant_current"
     assert _make_device(product_id=305).spectrum_profile() == "plant_legacy"
     assert _make_device(product_id=546).spectrum_profile() == "reef_current"
+    assert _make_device(product_id=289).spectrum_profile() == "reef_legacy"
 
 
-def test_explicit_profile_or_generation_selects_spectrum_without_product_id():
+def test_only_explicit_profile_selects_spectrum_without_product_id():
     assert _make_device(lamp_profile=LAMP_PROFILE_AQUASKY3).spectrum_profile() == "aquasky_current"
     assert _make_device(lamp_profile=LAMP_PROFILE_PLANT).spectrum_profile() == "plant_legacy"
     assert _make_device(lamp_profile=LAMP_PROFILE_MARINE).spectrum_profile() == "reef_legacy"
-    assert _make_device().spectrum_profile() == "aquasky_current"
+    assert _make_device().spectrum_profile() is None
     assert _make_device(name="Generic", model="Bluetooth LED").spectrum_profile() is None
 
 
@@ -606,6 +609,7 @@ def test_plant_pro_exposes_apk_five_channel_plant_spectrum():
     device = _make_device(
         name="PlantPro_AABBCC",
         model="Fluval Plant PRO LED",
+        product_id=386,
     )
 
     assert device.numbers() == NUMBERS
@@ -719,8 +723,12 @@ def test_marine_state_mix_uses_all_five_channels():
     assert (red, green, blue) == (191, 206, 255)
 
 
-def test_aquasky_uses_rgb_and_white_modes_without_synthetic_white():
-    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+def test_aquasky_uses_one_rgb_mode_with_native_white_translation():
+    device = _make_device(
+        name="AquaSky2.0_Test",
+        model="AquaSky 2.0 Bluetooth LED",
+        product_id=328,
+    )
 
     assert device.light_mode() == "rgb_white"
     assert device.channels_from_aquasky_rgb((0, 255, 128), 128) == {
@@ -735,6 +743,14 @@ def test_aquasky_uses_rgb_and_white_modes_without_synthetic_white():
         "channel_3": 0,
         "channel_4": 50,
     }
+    assert device.channels_from_aquasky_rgb((255, 255, 255), 128) == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 50,
+    }
+    device.values.update({"channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 50})
+    assert device.aquasky_rgb_255() == (255, 255, 255)
 
 
 def test_product_328_mauve_uses_apk_spectrum_calibration():
@@ -750,7 +766,11 @@ def test_product_328_mauve_uses_apk_spectrum_calibration():
 
 
 def test_plant_uses_apk_spectrum_instead_of_named_colour_guesses():
-    device = _make_device(name="Plant 3.0_AABB", model="Plant 3.0 Bluetooth LED")
+    device = _make_device(
+        name="Plant 3.0_AABB",
+        model="Plant 3.0 Bluetooth LED",
+        product_id=305,
+    )
 
     assert device.light_mode() == "rgb"
     assert device.channels_from_rgb((255, 0, 255), 255) == {
@@ -763,7 +783,11 @@ def test_plant_uses_apk_spectrum_instead_of_named_colour_guesses():
 
 
 def test_light_colour_cache_is_used_only_while_physical_channels_match():
-    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
+    device = _make_device(
+        name="AquaSky2.0_Test",
+        model="AquaSky 2.0 Bluetooth LED",
+        product_id=328,
+    )
     channels = {"channel_1": 0, "channel_2": 50, "channel_3": 0, "channel_4": 0}
     device.values.update(channels)
     with patch("custom_components.fluvalble.core.device.monotonic", return_value=10.0):

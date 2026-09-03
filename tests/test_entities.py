@@ -11,7 +11,6 @@ from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_EFFECT,
     ATTR_RGB_COLOR,
-    ATTR_WHITE,
     ColorMode,
 )
 from homeassistant.exceptions import HomeAssistantError
@@ -27,6 +26,7 @@ def _make_device():
         config_data={
             "mac": "AA:BB:CC:DD:EE:FF",
             "model": "AquaSky Bluetooth LED",
+            "product_id": 532,
         },
     )
     device.connected = True
@@ -291,16 +291,16 @@ async def _async_test_aquasky_mauve_does_not_enable_white_channel():
     )
 
 
-def test_aquasky_white_mode_uses_only_white_channel():
-    asyncio.run(_async_test_aquasky_white_mode_uses_only_white_channel())
+def test_aquasky_neutral_rgb_uses_only_white_channel():
+    asyncio.run(_async_test_aquasky_neutral_rgb_uses_only_white_channel())
 
 
-async def _async_test_aquasky_white_mode_uses_only_white_channel():
+async def _async_test_aquasky_neutral_rgb_uses_only_white_channel():
     device = _make_device()
     entity = light.FluvalLight(device, "light")
     device.async_apply_light_channels = AsyncMock(return_value=True)
 
-    await entity.async_turn_on(**{ATTR_WHITE: 128})
+    await entity.async_turn_on(**{ATTR_BRIGHTNESS: 128, ATTR_RGB_COLOR: (255, 255, 255)})
 
     device.async_apply_light_channels.assert_awaited_once_with(
         {
@@ -311,6 +311,9 @@ async def _async_test_aquasky_white_mode_uses_only_white_channel():
         }
     )
     assert device.light_brightness_255() == 128
+    assert entity._attr_supported_color_modes == {ColorMode.RGB}
+    assert entity._attr_color_mode is ColorMode.RGB
+    assert entity._attr_rgb_color == (255, 255, 255)
 
 
 def test_marine_light_uses_standard_rgb_control_for_all_five_channels():

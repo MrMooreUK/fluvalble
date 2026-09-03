@@ -571,22 +571,10 @@ class Device:
         if selected is not None:
             return selected
 
-        # A model/name containing an explicit Fluval generation is also usable
-        # evidence.  Generic family names remain unresolved rather than being
-        # silently assigned one of the APK's old/current spectrum assets.
-        identity = f"{self.model} {self.name}".lower().replace(" ", "")
-        if "aquasky3.0" in identity:
-            return "aquasky_current"
-        if "aquasky2.0" in identity:
-            return "aquasky_legacy"
-        if "plantpro" in identity or "plant4.0" in identity:
-            return "plant_current"
-        if "plant3.0" in identity:
-            return "plant_legacy"
-        if "reef4.0" in identity:
-            return "reef_current"
-        if "reef3.0" in identity or "marine3.0" in identity:
-            return "reef_legacy"
+        # A family or generation in a Bluetooth name is not sufficient to
+        # choose between the APK's old and current measured spectrum assets.
+        # Keep automatic selection product-ID based; users can still select an
+        # explicit fixture profile when an advertisement has no decodable ID.
         return None
 
     def uses_plant_spectrum(self) -> bool:
@@ -640,15 +628,20 @@ class Device:
         )
 
     def aquasky_rgb_255(self) -> tuple[int, int, int]:
-        """Return AquaSky RGB emitters using its APK spectrum profile."""
+        """Return AquaSky's APK channel state as one Home Assistant RGB colour."""
         if self._commanded_state_matches() and self._commanded_rgb is not None:
             return self._commanded_rgb
         profile = self.spectrum_profile()
         if profile is None:
             return (0, 0, 0)
+        percentages = tuple(int(self.values.get(channel, 0)) for channel in AQUASKY_NUMBERS)
+        # FluvalConnect names channel 4 Pure White. Report that native mode as
+        # neutral RGB so Home Assistant's single colour picker shows white.
+        if percentages[3] > 0 and not any(percentages[:3]):
+            return (255, 255, 255)
         return channel_percentages_to_rgb(
             profile,
-            tuple(int(self.values.get(channel, 0)) for channel in AQUASKY_NUMBERS[:3]),
+            percentages,
         )
 
     def channels_from_aquasky_rgb(
@@ -656,7 +649,13 @@ class Device:
         rgb: tuple[int, int, int],
         brightness: int,
     ) -> dict[str, int]:
-        """Fit HA RGB to AquaSky's APK-measured RGB emitters."""
+        """Translate HA RGB to AquaSky's APK-defined RGBW emitters."""
+        # Home Assistant's colour wheel expresses neutral white as equal RGB.
+        # Use Fluval's much brighter dedicated Pure White emitter for that
+        # achromatic request. Chromatic requests fit only R/G/B so pastel
+        # colours cannot be washed out by the physical white bank.
+        if rgb[0] == rgb[1] == rgb[2] and rgb != (0, 0, 0):
+            return self.channels_from_aquasky_white(brightness)
         profile = self.spectrum_profile()
         if profile is None:
             return {channel: 0 for channel in AQUASKY_NUMBERS}
@@ -667,7 +666,7 @@ class Device:
         }
 
     def channels_from_aquasky_white(self, brightness: int) -> dict[str, int]:
-        """Map HA white mode to only the AquaSky white channel."""
+        """Map neutral HA RGB to only the AquaSky Pure White channel."""
         return {
             "channel_1": 0,
             "channel_2": 0,

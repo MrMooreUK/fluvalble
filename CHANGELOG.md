@@ -11,15 +11,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Replaced hand-authored Plant and Marine colour guesses and generic AquaSky
   RGBW conversion with product-specific CIE colour transforms derived from the
   exact spectral power curves bundled in FluvalConnect. Product 328 now uses
-  the APK-selected `532_old_new.txt` profile, and all RGB requests keep the
-  dedicated AquaSky white emitter off.
+  the APK-selected `532_old_new.txt` profile, and chromatic RGB requests keep
+  the dedicated AquaSky white emitter off.
 - Limited the locally commanded colour cache to the controller's immediate
   stale-status grace period so a later app, schedule, or fixture change can no
   longer leave Home Assistant displaying the previous colour.
-- Modelled AquaSky's dedicated white emitter as Home Assistant's independent
-  White mode alongside RGB. Colour-wheel and favourite-colour commands now
-  drive only the physical RGB channels instead of letting Home Assistant's
-  generic RGBW conversion wash chromatic colours out with white.
+- Kept AquaSky behind one standard Home Assistant RGB picker: achromatic white
+  now drives the APK-defined Pure White channel, while chromatic colour-wheel
+  and favourite-colour commands drive only physical RGB instead of letting
+  generic RGBW conversion wash them out with white.
 - Restored the last commanded color as Home Assistant's display value instead
   of letting an immediate stale classic status notification move the picker
   away from the color already rendered by the fixture.

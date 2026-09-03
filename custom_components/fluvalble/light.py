@@ -6,7 +6,6 @@ from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_EFFECT,
     ATTR_RGB_COLOR,
-    ATTR_WHITE,
     ColorMode,
     LightEntity,
     LightEntityFeature,
@@ -62,8 +61,8 @@ class FluvalLight(FluvalEntity, LightEntity):
             self._attr_color_mode = ColorMode.BRIGHTNESS
             self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         else:
-            self._attr_color_mode = ColorMode.WHITE
-            self._attr_supported_color_modes = {ColorMode.RGB, ColorMode.WHITE}
+            self._attr_color_mode = ColorMode.RGB
+            self._attr_supported_color_modes = {ColorMode.RGB}
 
     def internal_update(self) -> None:
         """Refresh the entity from decoded fixture state."""
@@ -95,13 +94,9 @@ class FluvalLight(FluvalEntity, LightEntity):
             self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
             self._attr_rgb_color = None
         else:
-            self._attr_supported_color_modes = {ColorMode.RGB, ColorMode.WHITE}
-            if self.device.aquasky_white_mode():
-                self._attr_color_mode = ColorMode.WHITE
-                self._attr_rgb_color = None
-            else:
-                self._attr_color_mode = ColorMode.RGB
-                self._attr_rgb_color = self.device.aquasky_rgb_255()
+            self._attr_supported_color_modes = {ColorMode.RGB}
+            self._attr_color_mode = ColorMode.RGB
+            self._attr_rgb_color = self.device.aquasky_rgb_255()
 
         if self.hass:
             self._async_write_ha_state()
@@ -126,11 +121,8 @@ class FluvalLight(FluvalEntity, LightEntity):
                 255,
                 int(
                     kwargs.get(
-                        ATTR_WHITE,
-                        kwargs.get(
-                            ATTR_BRIGHTNESS,
-                            self.device.light_brightness_255() or 255,
-                        ),
+                        ATTR_BRIGHTNESS,
+                        self.device.light_brightness_255() or 255,
                     )
                 ),
             ),
@@ -202,9 +194,6 @@ class FluvalLight(FluvalEntity, LightEntity):
             rgb = tuple(kwargs[ATTR_RGB_COLOR])
             return self.device.channels_from_rgb(rgb, brightness), rgb
 
-        if ATTR_WHITE in kwargs:
-            white = max(1, min(255, int(kwargs[ATTR_WHITE])))
-            return self.device.channels_from_aquasky_white(white), None
         if ATTR_RGB_COLOR in kwargs:
             rgb = tuple(kwargs[ATTR_RGB_COLOR])
             return self.device.channels_from_aquasky_rgb(rgb, brightness), rgb

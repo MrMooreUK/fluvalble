@@ -26,7 +26,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | Feature | Description |
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
-| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGB plus an independent white mode; every RGB translation uses the exact product family's measured spectrum bundled with FluvalConnect. |
+| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky's physical RGBW emitters are translated behind one RGB picker; neutral white uses its dedicated APK-defined White channel while chromatic colours keep that channel off. Every translation uses the exact product family's measured spectrum bundled with FluvalConnect. |
 | **Weather effects** | Product IDs for the APK's 11-effect fixtures expose the native FluvalConnect weather catalogue, including lightning, colour cycle, cloud, and moon scenes. Selecting **off** restores the preceding static colour. |
 | **Four-effect fixtures** | Product IDs for the APK's newer four-effect fixtures expose Crescent moon, Partly cloudy, Lightning, and Sun and lightning through the standard light effect control. |
 | **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
@@ -233,7 +233,7 @@ After setup you'll see one device with entities like:
 
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
-| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGB plus independent white; product-specific FluvalConnect spectrum data translates Home Assistant colours to every physical channel layout. |
+| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky's RGBW channels appear as one RGB picker; product-specific FluvalConnect spectrum data translates Home Assistant colours to every physical channel layout. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Button** | Identify | Runs the fixture's native FluvalConnect Find command so the physical light identifies itself. |
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |

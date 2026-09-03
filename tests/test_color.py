@@ -7,6 +7,7 @@ from custom_components.fluvalble.core.color import (
     channel_percentages_to_rgb,
     rgb_to_channel_percentages,
 )
+from custom_components.fluvalble.core.products import PRODUCTS
 
 
 def test_all_apk_spectrum_profiles_have_the_expected_channel_count():
@@ -18,6 +19,12 @@ def test_all_apk_spectrum_profiles_have_the_expected_channel_count():
         "reef_current": 5,
         "reef_legacy": 5,
     }
+
+
+def test_every_known_apk_product_uses_a_matching_spectrum_channel_count():
+    for product in PRODUCTS.values():
+        assert product.spectrum_profile in SPECTRAL_XYZ
+        assert len(SPECTRAL_XYZ[product.spectrum_profile]) == product.channel_count
 
 
 def test_product_328_profile_fits_mauve_without_white():
@@ -108,3 +115,27 @@ def test_black_has_no_channel_output():
         255,
         channel_count=3,
     ) == (0, 0, 0)
+
+
+@pytest.mark.parametrize("profile", sorted(SPECTRAL_XYZ))
+@pytest.mark.parametrize(
+    "rgb",
+    [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 255)],
+)
+def test_every_apk_profile_produces_bounded_full_brightness_channels(profile, rgb):
+    channels = rgb_to_channel_percentages(profile, rgb, 255)
+
+    assert len(channels) == len(SPECTRAL_XYZ[profile])
+    assert all(0 <= value <= 100 for value in channels)
+    assert max(channels) == 100
+
+
+@pytest.mark.parametrize("profile", sorted(SPECTRAL_XYZ))
+def test_every_apk_profile_reports_each_physical_emitter_as_valid_rgb(profile):
+    for index in range(len(SPECTRAL_XYZ[profile])):
+        channels = tuple(100 if position == index else 0 for position in range(len(SPECTRAL_XYZ[profile])))
+        rgb = channel_percentages_to_rgb(profile, channels)
+
+        assert len(rgb) == 3
+        assert all(0 <= value <= 255 for value in rgb)
+        assert max(rgb) == 255
