@@ -24,6 +24,7 @@ from . import (
     LAMP_PROFILE_PLANT_PRO,
 )
 from .client import Client
+from .color import channel_percentages_to_rgb, rgb_to_channel_percentages
 from .discovery import (
     CONF_MODEL,
     CONF_PRODUCT_ID,
@@ -93,24 +94,6 @@ BLE_LOOKUP_RETRIES = 3
 PREVIEW_STEP_SECONDS = 2
 TRANSITION_STEP_SECONDS = 30
 DAY_MINUTES = 24 * 60
-
-# Approximate sRGB appearance of the five-channel spectral LEDs. These values
-# affect only Home Assistant's colour representation; BLE writes still use the
-# APK-defined channel order without conversion at the protocol layer.
-PLANT_CHANNEL_RGB = {
-    "channel_1": (1.00, 0.28, 0.38),
-    "channel_2": (0.18, 0.38, 1.00),
-    "channel_3": (0.72, 0.84, 1.00),
-    "channel_4": (1.00, 1.00, 1.00),
-    "channel_5": (1.00, 0.72, 0.42),
-}
-MARINE_CHANNEL_RGB = {
-    "channel_1": (1.00, 0.25, 0.45),  # Pink
-    "channel_2": (0.00, 1.00, 1.00),  # Cyan
-    "channel_3": (0.00, 0.10, 1.00),  # Blue
-    "channel_4": (0.55, 0.10, 1.00),  # Purple
-    "channel_5": (0.75, 0.86, 1.00),  # Cold White
-}
 
 
 class Attribute(TypedDict, total=False):
@@ -212,9 +195,9 @@ class Device:
         # lossy, so reconstructing RGB from those five channels would otherwise
         # make the colour picker jump after every status update.
         self._commanded_rgb: tuple[int, int, int] | None = None
-        self._commanded_rgbw: tuple[int, int, int, int] | None = None
         self._commanded_brightness: int | None = None
         self._commanded_channels: dict[str, int] | None = None
+        self._commanded_at: float | None = None
         self._effect_restore_channels: dict[str, int] | None = None
         self._reachability_unsub: Callable[[], None] | None = None
 
@@ -578,13 +561,21 @@ class Device:
         # Explicit profile choices are the only safe fallback when no APK
         # product ID was decoded. Auto detection must not invent a generation.
         profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
-        return {
+        selected = {
             LAMP_PROFILE_AQUASKY: "aquasky_legacy",
             LAMP_PROFILE_AQUASKY3: "aquasky_current",
             LAMP_PROFILE_PLANT: "plant_legacy",
             LAMP_PROFILE_PLANT_PRO: "plant_current",
             LAMP_PROFILE_MARINE: "reef_legacy",
         }.get(profile)
+        if selected is not None:
+            return selected
+
+        # A family or generation in a Bluetooth name is not sufficient to
+        # choose between the APK's old and current measured spectrum assets.
+        # Keep automatic selection product-ID based; users can still select an
+        # explicit fixture profile when an advertisement has no decodable ID.
+        return None
 
     def uses_plant_spectrum(self) -> bool:
         """Return whether the fixture uses the five-channel Plant spectrum."""
@@ -599,7 +590,11 @@ class Device:
 
     def light_mode(self) -> str:
         """Return the native Home Assistant colour mode for this fixture."""
-        return "rgb" if self.uses_plant_spectrum() or self.uses_marine_spectrum() else "rgbw"
+        if self.spectrum_profile() is None:
+            return "brightness"
+        if self.uses_plant_spectrum() or self.uses_marine_spectrum():
+            return "rgb"
+        return "rgb_white"
 
     def master_brightness(self) -> int:
         """Overall brightness as the brightest supported channel."""
@@ -613,31 +608,71 @@ class Device:
         return round(self.master_brightness() / 100 * 255)
 
     def light_rgb_255(self) -> tuple[int, int, int]:
-        """Return a five-channel spectrum as an RGB colour for Home Assistant."""
+        """Return a five-channel APK spectrum as an sRGB colour."""
         if self._commanded_state_matches() and self._commanded_rgb is not None:
             return self._commanded_rgb
 
-        mix_r = mix_g = mix_b = 0.0
-        channel_rgb = MARINE_CHANNEL_RGB if self.uses_marine_spectrum() else PLANT_CHANNEL_RGB
-        for channel, (channel_r, channel_g, channel_b) in channel_rgb.items():
-            weight = max(0, min(100, int(self.values.get(channel, 0)))) / 100
-            mix_r += channel_r * weight
-            mix_g += channel_g * weight
-            mix_b += channel_b * weight
-        peak = max(mix_r, mix_g, mix_b, 1e-6)
-        return (
-            max(0, min(255, round(mix_r / peak * 255))),
-            max(0, min(255, round(mix_g / peak * 255))),
-            max(0, min(255, round(mix_b / peak * 255))),
+        profile = self.spectrum_profile()
+        if profile is None:
+            return (0, 0, 0)
+        return channel_percentages_to_rgb(
+            profile,
+            tuple(int(self.values.get(channel, 0)) for channel in self.numbers()),
         )
 
-    def light_rgbw_255(self) -> tuple[int, int, int, int]:
-        """Return AquaSky physical channels as a normalized RGBW colour."""
-        if self._commanded_state_matches() and self._commanded_rgbw is not None:
-            return self._commanded_rgbw
-        channels = [int(self.values.get(channel, 0)) for channel in AQUASKY_NUMBERS]
-        peak = max(*channels, 1)
-        return tuple(round(value / peak * 255) for value in channels)  # type: ignore[return-value]
+    def aquasky_white_mode(self) -> bool:
+        """Return whether an AquaSky is using only its independent white channel."""
+        return (
+            all(int(self.values.get(channel, 0)) == 0 for channel in AQUASKY_NUMBERS[:3])
+            and int(self.values.get("channel_4", 0)) > 0
+        )
+
+    def aquasky_rgb_255(self) -> tuple[int, int, int]:
+        """Return AquaSky's APK channel state as one Home Assistant RGB colour."""
+        if self._commanded_state_matches() and self._commanded_rgb is not None:
+            return self._commanded_rgb
+        profile = self.spectrum_profile()
+        if profile is None:
+            return (0, 0, 0)
+        percentages = tuple(int(self.values.get(channel, 0)) for channel in AQUASKY_NUMBERS)
+        # FluvalConnect names channel 4 Pure White. Report that native mode as
+        # neutral RGB so Home Assistant's single colour picker shows white.
+        if percentages[3] > 0 and not any(percentages[:3]):
+            return (255, 255, 255)
+        return channel_percentages_to_rgb(
+            profile,
+            percentages,
+        )
+
+    def channels_from_aquasky_rgb(
+        self,
+        rgb: tuple[int, int, int],
+        brightness: int,
+    ) -> dict[str, int]:
+        """Translate HA RGB to AquaSky's APK-defined RGBW emitters."""
+        # Home Assistant's colour wheel expresses neutral white as equal RGB.
+        # Use Fluval's much brighter dedicated Pure White emitter for that
+        # achromatic request. Chromatic requests fit only R/G/B so pastel
+        # colours cannot be washed out by the physical white bank.
+        if rgb[0] == rgb[1] == rgb[2] and rgb != (0, 0, 0):
+            return self.channels_from_aquasky_white(brightness)
+        profile = self.spectrum_profile()
+        if profile is None:
+            return {channel: 0 for channel in AQUASKY_NUMBERS}
+        levels = rgb_to_channel_percentages(profile, rgb, brightness, channel_count=3)
+        return {
+            **dict(zip(AQUASKY_NUMBERS[:3], levels, strict=True)),
+            "channel_4": 0,
+        }
+
+    def channels_from_aquasky_white(self, brightness: int) -> dict[str, int]:
+        """Map neutral HA RGB to only the AquaSky Pure White channel."""
+        return {
+            "channel_1": 0,
+            "channel_2": 0,
+            "channel_3": 0,
+            "channel_4": self._ha_component_to_percent(255, brightness),
+        }
 
     @staticmethod
     def _ha_component_to_percent(component: int, brightness: int) -> int:
@@ -646,100 +681,28 @@ class Device:
         brightness = max(0, min(255, int(brightness)))
         return max(0, min(100, round(component / 255 * brightness / 255 * 100)))
 
-    def channels_from_rgbw(
-        self,
-        rgbw: tuple[int, int, int, int],
-        brightness: int,
-    ) -> dict[str, int]:
-        """Map an HA RGBW colour directly onto AquaSky channels."""
-        channels = {
-            channel: self._ha_component_to_percent(component, brightness)
-            for channel, component in zip(AQUASKY_NUMBERS, rgbw, strict=True)
-        }
-        # RGBW has no fifth component. Preserve a fifth non-Plant channel when
-        # a profile exposes one instead of silently zeroing it.
-        if "channel_5" in self.numbers():
-            channels["channel_5"] = int(self.values.get("channel_5", 0))
-        return channels
-
     def channels_from_rgb(
         self,
         rgb: tuple[int, int, int],
         brightness: int,
     ) -> dict[str, int]:
-        """Translate HA RGB into the active five-channel spectral layout."""
-        if self.uses_marine_spectrum():
-            return self._marine_channels_from_rgb(rgb, brightness)
-
-        red = max(0, min(255, int(rgb[0]))) / 255
-        green = max(0, min(255, int(rgb[1]))) / 255
-        blue = max(0, min(255, int(rgb[2]))) / 255
-        scale = max(0, min(255, int(brightness))) / 255
-
-        white = min(red, green, blue)
-        remaining_red = red - white
-        remaining_green = green - white
-        remaining_blue = blue - white
-        chroma = max(remaining_red, remaining_green, remaining_blue)
-        warmth = red / (red + blue + 1e-6)
-        white_weight = 0.0 if chroma >= 0.85 else (1.0 - chroma) * 0.55
-
-        def percent(value: float) -> int:
-            return max(0, min(100, round(value * scale * 100)))
-
-        return {
-            "channel_1": percent(remaining_red),
-            "channel_2": percent(remaining_blue),
-            "channel_3": percent(white * white_weight * (0.70 * (1.0 - warmth) + 0.15)),
-            "channel_4": percent(remaining_green * 0.85 + white * 0.45 * white_weight),
-            "channel_5": percent(white * white_weight * (0.70 * warmth + 0.15)),
-        }
-
-    def _marine_channels_from_rgb(
-        self,
-        rgb: tuple[int, int, int],
-        brightness: int,
-    ) -> dict[str, int]:
-        """Translate HA RGB into Pink/Cyan/Blue/Purple/Cold White levels."""
-        red = max(0, min(255, int(rgb[0]))) / 255
-        green = max(0, min(255, int(rgb[1]))) / 255
-        blue = max(0, min(255, int(rgb[2]))) / 255
-        scale = max(0, min(255, int(brightness))) / 255
-
-        cold_white = min(red, green, blue)
-        remaining_red = red - cold_white
-        remaining_green = green - cold_white
-        remaining_blue = blue - cold_white
-
-        # Marine fixtures have no green-only emitter. Cyan is the closest
-        # native channel, while shared red/blue energy maps to Purple.
-        cyan = remaining_green
-        remaining_blue = max(0.0, remaining_blue - cyan)
-        purple = min(remaining_red, remaining_blue)
-        pink = remaining_red - purple
-        blue_level = remaining_blue - purple
-
-        def percent(value: float) -> int:
-            return max(0, min(100, round(value * scale * 100)))
-
-        return {
-            "channel_1": percent(pink),
-            "channel_2": percent(cyan),
-            "channel_3": percent(blue_level),
-            "channel_4": percent(purple),
-            "channel_5": percent(cold_white),
-        }
+        """Fit HA RGB to the APK-measured five-channel spectrum."""
+        profile = self.spectrum_profile()
+        if profile is None:
+            return {channel: 0 for channel in self.numbers()}
+        levels = rgb_to_channel_percentages(profile, rgb, brightness)
+        return dict(zip(self.numbers(), levels, strict=True))
 
     def remember_commanded_light(
         self,
         channels: dict[str, int],
         *,
         rgb: tuple[int, int, int] | None = None,
-        rgbw: tuple[int, int, int, int] | None = None,
         brightness: int,
     ) -> None:
         """Remember the exact HA colour while device channels still match it."""
         self._commanded_channels = {channel: max(0, min(100, int(channels[channel]))) for channel in self.numbers()}
+        self._commanded_at = monotonic()
         self._commanded_brightness = max(1, min(255, int(brightness)))
         self._commanded_rgb = (
             (
@@ -750,29 +713,24 @@ class Device:
             if rgb is not None
             else None
         )
-        self._commanded_rgbw = (
-            (
-                max(0, min(255, int(rgbw[0]))),
-                max(0, min(255, int(rgbw[1]))),
-                max(0, min(255, int(rgbw[2]))),
-                max(0, min(255, int(rgbw[3]))),
-            )
-            if rgbw is not None
-            else None
-        )
 
     def clear_commanded_light(self) -> None:
         """Forget a cached HA colour after a non-light channel change."""
         self._commanded_rgb = None
-        self._commanded_rgbw = None
         self._commanded_brightness = None
         self._commanded_channels = None
+        self._commanded_at = None
 
     def _commanded_state_matches(self) -> bool:
-        """Return whether current decoded channels still match the HA command."""
+        """Return whether a locally commanded colour is still authoritative."""
         if self._commanded_channels is None:
             return False
-        return all(int(self.values.get(channel, 0)) == value for channel, value in self._commanded_channels.items())
+        if all(int(self.values.get(channel, -1)) == value for channel, value in self._commanded_channels.items()):
+            return True
+        # Classic controllers can emit one pre-command status notification
+        # immediately after accepting 6804.  Keep only a short grace period;
+        # later device changes must replace the cached HA colour.
+        return self._commanded_at is not None and monotonic() - self._commanded_at < 2.0
 
     async def async_apply_light_channels(self, values: dict[str, int]) -> bool:
         """Apply colour channels and ensure the physical fixture is powered on."""

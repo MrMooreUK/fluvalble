@@ -276,6 +276,7 @@ def _stub_homeassistant():
         BRIGHTNESS = "brightness"
         RGB = "rgb"
         RGBW = "rgbw"
+        WHITE = "white"
 
     class LightEntityFeature(enum.IntFlag):
         EFFECT = 4
@@ -299,6 +300,7 @@ def _stub_homeassistant():
     ha_light.ATTR_EFFECT = "effect"
     ha_light.ATTR_RGB_COLOR = "rgb_color"
     ha_light.ATTR_RGBW_COLOR = "rgbw_color"
+    ha_light.ATTR_WHITE = "white"
 
     # ---- homeassistant.components.websocket_api ----
     ha_ws = types.ModuleType("homeassistant.components.websocket_api")
