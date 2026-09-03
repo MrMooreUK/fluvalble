@@ -174,11 +174,11 @@ def test_advertisement_route_cannot_overwrite_active_connection_route(monkeypatc
     device.hass = MagicMock()
     scanners = {
         "C4:D8:D5:96:91:DA": SimpleNamespace(
-            name="krisroom",
+            name="krisroom (C4:D8:D5:96:91:DA)",
             details=SimpleNamespace(scanner_type=SimpleNamespace(value="remote")),
         ),
         "00:1A:7D:DA:71:13": SimpleNamespace(
-            name="CSR8510 USB adapter",
+            name="CSR8510 USB adapter (00:1A:7D:DA:71:13)",
             details=SimpleNamespace(scanner_type=SimpleNamespace(value="usb")),
         ),
     }
@@ -186,6 +186,21 @@ def test_advertisement_route_cannot_overwrite_active_connection_route(monkeypatc
         device_module.bluetooth,
         "async_scanner_by_source",
         lambda _hass, source: scanners.get(source),
+    )
+    scanner_devices = [
+        SimpleNamespace(
+            scanner=SimpleNamespace(source="C4:D8:D5:96:91:DA"),
+            advertisement=SimpleNamespace(rssi=-48),
+        ),
+        SimpleNamespace(
+            scanner=SimpleNamespace(source="00:1A:7D:DA:71:13"),
+            advertisement=SimpleNamespace(rssi=-88),
+        ),
+    ]
+    monkeypatch.setattr(
+        device_module.bluetooth,
+        "async_scanner_devices_by_address",
+        lambda _hass, _address, connectable: scanner_devices if connectable else [],
     )
 
     connected_device = SimpleNamespace(
@@ -219,12 +234,44 @@ def test_advertisement_route_cannot_overwrite_active_connection_route(monkeypatc
 
     assert device.attribute("active_connection_source")["value"] == "krisroom"
     assert device.conn_info["active_connection_source_address"] == "C4:D8:D5:96:91:DA"
-    assert device.attribute("advertisement_source")["value"] == "CSR8510 USB adapter"
+    assert device.conn_info["rssi"] == -48
+    assert device.attribute("rssi")["value"] == -48
+    assert device.attribute("rssi")["extra"]["last_updated"] == device.conn_info["rssi_updated_at"]
+    assert device.conn_info["advertisement_source"] == "CSR8510 USB adapter"
     assert device.conn_info["advertisement_source_address"] == "00:1A:7D:DA:71:13"
-    assert device.attribute("rssi")["value"] == -88
+    assert device.conn_info["advertisement_rssi"] == -88
+    assert device.conn_info["rssi"] == -48
 
     device.set_connected(False)
     assert device.attribute("active_connection_source")["value"] is None
+    assert device.attribute("rssi")["value"] == -48
+
+
+def test_connection_route_without_rssi_does_not_reuse_another_scanner(monkeypatch):
+    import custom_components.fluvalble.core.device as device_module
+
+    device = Device(
+        "AquaSky3.0_Test",
+        config_data={"mac": "AA:BB:CC:DD:EE:FF"},
+    )
+    device.hass = MagicMock()
+    device.conn_info["rssi"] = -82
+    device.conn_info["rssi_updated_at"] = datetime.now(UTC)
+    monkeypatch.setattr(
+        device_module.bluetooth,
+        "async_scanner_devices_by_address",
+        lambda _hass, _address, connectable: [],
+    )
+
+    connected_device = SimpleNamespace(
+        address=device.address,
+        details={"source": "C4:D8:D5:96:91:DA"},
+    )
+    device._record_active_connection_source(connected_device)
+
+    assert "rssi" not in device.conn_info
+    assert "rssi_updated_at" not in device.conn_info
+    assert device.attribute("rssi")["value"] is None
 
 
 def test_expected_disconnect_remains_reachable_after_successful_connect():

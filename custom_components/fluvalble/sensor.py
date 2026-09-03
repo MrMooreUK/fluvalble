@@ -32,6 +32,14 @@ class FluvalSensor(FluvalEntity, SensorEntity):
 
     _attr_entity_category = EntityCategory.DIAGNOSTIC
 
+    def __init__(self, device: Device, attr: str) -> None:
+        """Initialize a diagnostic sensor."""
+        if attr == "rssi":
+            # Persistent GATT sessions do not provide live RSSI. Keep this
+            # optional diagnostic disabled by default for new installations.
+            self._attr_entity_registry_enabled_default = False
+        super().__init__(device, attr)
+
     def internal_update(self):
         """Update sensor state from the device."""
         attribute = self.device.attribute(self.attr)
@@ -52,5 +60,7 @@ class FluvalSensor(FluvalEntity, SensorEntity):
             self._attr_native_unit_of_measurement = "dBm"
         elif self.attr == "last_seen":
             self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        elif self.attr == "active_connection_source":
+            self._attr_icon = "mdi:bluetooth"
         if self.hass:
             self._async_write_ha_state()
