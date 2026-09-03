@@ -90,11 +90,12 @@ def test_apk_product_identity_drives_spectrum_profile():
     assert _make_device(product_id=546).spectrum_profile() == "reef_current"
 
 
-def test_explicit_fixture_profile_is_only_spectrum_fallback_without_product_id():
+def test_explicit_profile_or_generation_selects_spectrum_without_product_id():
     assert _make_device(lamp_profile=LAMP_PROFILE_AQUASKY3).spectrum_profile() == "aquasky_current"
     assert _make_device(lamp_profile=LAMP_PROFILE_PLANT).spectrum_profile() == "plant_legacy"
     assert _make_device(lamp_profile=LAMP_PROFILE_MARINE).spectrum_profile() == "reef_legacy"
-    assert _make_device().spectrum_profile() is None
+    assert _make_device().spectrum_profile() == "aquasky_current"
+    assert _make_device(name="Generic", model="Bluetooth LED").spectrum_profile() is None
 
 
 def test_connection_attribute_uses_recent_activity_or_live_gatt():
@@ -672,7 +673,7 @@ def test_marine_name_fallback_uses_marine_channel_layout():
     )
 
     assert device.numbers() == NUMBERS
-    assert device.light_mode() == "rgb"
+    assert device.light_mode() == "brightness"
     assert device.entity_name("channel_2") == CHANNEL_NAMES_MARINE["channel_2"]
     assert device.entity_name("channel_4") == CHANNEL_NAMES_MARINE["channel_4"]
 
@@ -680,33 +681,21 @@ def test_marine_name_fallback_uses_marine_channel_layout():
 def test_marine_rgb_maps_to_apk_channel_semantics():
     device = _make_device(product_id=546)
 
-    assert device.channels_from_rgb((255, 0, 0), 255) == {
+    # Reef has no red emitter.  The APK spectrum fit uses Pink plus a small
+    # Cold White contribution for the nearest in-gamut magenta.
+    assert device.channels_from_rgb((255, 0, 255), 255) == {
         "channel_1": 100,
         "channel_2": 0,
         "channel_3": 0,
         "channel_4": 0,
-        "channel_5": 0,
-    }
-    assert device.channels_from_rgb((0, 255, 255), 255) == {
-        "channel_1": 0,
-        "channel_2": 100,
-        "channel_3": 0,
-        "channel_4": 0,
-        "channel_5": 0,
+        "channel_5": 10,
     }
     assert device.channels_from_rgb((0, 0, 255), 255) == {
         "channel_1": 0,
-        "channel_2": 0,
-        "channel_3": 100,
+        "channel_2": 100,
+        "channel_3": 98,
         "channel_4": 0,
-        "channel_5": 0,
-    }
-    assert device.channels_from_rgb((255, 0, 255), 255) == {
-        "channel_1": 0,
-        "channel_2": 0,
-        "channel_3": 0,
-        "channel_4": 100,
-        "channel_5": 0,
+        "channel_5": 6,
     }
     assert device.channels_from_rgb((255, 255, 255), 255) == {
         "channel_1": 0,
@@ -722,37 +711,54 @@ def test_marine_state_mix_uses_all_five_channels():
     device.values.update({channel: 0 for channel in NUMBERS})
     device.values["channel_2"] = 100
 
-    assert device.light_rgb_255() == (0, 255, 255)
+    assert device.light_rgb_255() == (0, 71, 255)
 
     device.values["channel_2"] = 0
     device.values["channel_5"] = 100
     red, green, blue = device.light_rgb_255()
-    assert blue == 255
-    assert red < green < blue
+    assert (red, green, blue) == (191, 206, 255)
 
 
-def test_aquasky_uses_rgbw_and_maps_channels_at_requested_brightness():
+def test_aquasky_uses_rgb_and_white_modes_without_synthetic_white():
     device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
 
-    assert device.light_mode() == "rgbw"
-    assert device.channels_from_rgbw((0, 255, 128, 0), 128) == {
-        "channel_1": 0,
+    assert device.light_mode() == "rgb_white"
+    assert device.channels_from_aquasky_rgb((0, 255, 128), 128) == {
+        "channel_1": 33,
         "channel_2": 50,
-        "channel_3": 25,
+        "channel_3": 10,
+        "channel_4": 0,
+    }
+    assert device.channels_from_aquasky_white(128) == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 50,
+    }
+
+
+def test_product_328_mauve_uses_apk_spectrum_calibration():
+    device = _make_device(product_id=328)
+
+    assert device.spectrum_profile() == "aquasky_legacy"
+    assert device.channels_from_aquasky_rgb((215, 150, 255), 255) == {
+        "channel_1": 94,
+        "channel_2": 34,
+        "channel_3": 100,
         "channel_4": 0,
     }
 
 
-def test_plant_uses_rgb_and_maps_saturated_colours_without_white_channels():
+def test_plant_uses_apk_spectrum_instead_of_named_colour_guesses():
     device = _make_device(name="Plant 3.0_AABB", model="Plant 3.0 Bluetooth LED")
 
     assert device.light_mode() == "rgb"
-    assert device.channels_from_rgb((255, 0, 0), 255) == {
+    assert device.channels_from_rgb((255, 0, 255), 255) == {
         "channel_1": 100,
         "channel_2": 0,
         "channel_3": 0,
         "channel_4": 0,
-        "channel_5": 0,
+        "channel_5": 3,
     }
 
 
@@ -760,13 +766,19 @@ def test_light_colour_cache_is_used_only_while_physical_channels_match():
     device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED")
     channels = {"channel_1": 0, "channel_2": 50, "channel_3": 0, "channel_4": 0}
     device.values.update(channels)
-    device.remember_commanded_light(channels, rgbw=(0, 255, 0, 0), brightness=128)
+    with patch("custom_components.fluvalble.core.device.monotonic", return_value=10.0):
+        device.remember_commanded_light(channels, rgb=(0, 255, 0), brightness=128)
 
-    assert device.light_rgbw_255() == (0, 255, 0, 0)
+    assert device.aquasky_rgb_255() == (0, 255, 0)
     assert device.light_brightness_255() == 128
 
     device.values["channel_1"] = 50
-    assert device.light_rgbw_255() == (255, 255, 0, 0)
+    with patch("custom_components.fluvalble.core.device.monotonic", return_value=11.0):
+        assert device.aquasky_rgb_255() == (0, 255, 0)
+
+    # A later physical/app/schedule change supersedes the command cache.
+    with patch("custom_components.fluvalble.core.device.monotonic", return_value=13.0):
+        assert device.aquasky_rgb_255() == (162, 255, 33)
 
 
 def test_apply_light_channels_turns_on_after_channel_write():

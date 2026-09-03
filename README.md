@@ -26,7 +26,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | Feature | Description |
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
-| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGBW; Plant, Plant Pro, and Marine spectra are translated to RGB. |
+| **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. AquaSky fixtures expose RGB plus an independent white mode; every RGB translation uses the exact product family's measured spectrum bundled with FluvalConnect. |
 | **Weather effects** | Product IDs for the APK's 11-effect fixtures expose the native FluvalConnect weather catalogue, including lightning, colour cycle, cloud, and moon scenes. Selecting **off** restores the preceding static colour. |
 | **Four-effect fixtures** | Product IDs for the APK's newer four-effect fixtures expose Crescent moon, Partly cloudy, Lightning, and Sun and lightning through the standard light effect control. |
 | **Native fixture schedules** | Store Auto and Professional schedules directly in supported classic, AquaSky 3.0/FACEBD, and FFF0/SPP controllers. The fixture follows its own clock; Home Assistant does not write channel levels every minute. |
@@ -233,7 +233,7 @@ After setup you'll see one device with entities like:
 
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
-| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGBW; Plant, Plant Pro, and Marine spectra use RGB translation. |
+| **Light** | Light | Native power, brightness, colour, and supported effects. AquaSky uses RGB plus independent white; product-specific FluvalConnect spectrum data translates Home Assistant colours to every physical channel layout. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Button** | Identify | Runs the fixture's native FluvalConnect Find command so the physical light identifies itself. |
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
@@ -321,7 +321,7 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | **ESPHome proxy is online but commands are unreliable** | Check Source for the adapter or proxy that owns the active connection, then check that proxy's Wi-Fi signal and scan settings. The integration asks HA for the best connectable route on reconnect; no adapter needs to be disabled manually. |
 | **Light entity doesn't turn the fixture on/off** | Ensure the light model uses the same BLE command set. Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
 | **Entities show "unavailable"** | The light may be out of range or off. Move the light or HA adapter closer; check Reachable, Last seen, and RSSI. An idle GATT disconnect is expected when a finite active connection window is configured. |
-| **Colour or mode doesn't update** | Some firmware reports only its physical channel levels. Plant/Marine RGB is therefore an approximation when the colour was changed outside Home Assistant. |
+| **Colour or mode doesn't update** | Some firmware reports only its physical channel levels. The integration derives the displayed RGB colour from the exact FluvalConnect spectrum profile selected by product ID; an unknown product needs an explicit lamp profile before spectrum-based colour translation is available. |
 | **Colour control doesn't change the light** | Confirm the fixture works in the Fluval app, select Manual mode, and retry. If it still fails, download diagnostics from the Fluval integration or device page and include the report with your model when opening an issue. |
 
 If you have a different Fluval BLE model and the light or other controls don't behave as expected, open an issue with your model name and (if possible) a note on what works in the official app.
@@ -330,7 +330,7 @@ If you have a different Fluval BLE model and the light or other controls don't b
 
 ## How it works
 
-The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). Newer controllers may use the unencrypted `FFF0` SPP service with `D1` command and `D2` status CBOR frames. Product identity is kept separate from that live GATT transport choice. No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
+The integration uses Home Assistant's Bluetooth support to connect to the Fluval light through either a local adapter or an ESPHome Bluetooth proxy. Commands (on/off, brightness, mode) are sent as small BLE packets; the encryption scheme for legacy controllers is based on reverse‑engineered protocols used by Fluval's own app and community projects (e.g. [Fluval Plant 3.0 BLE protocol](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/)). Newer controllers may use the unencrypted `FFF0` SPP service with `D1` command and `D2` status CBOR frames. Product identity is kept separate from that live GATT transport choice. [APK colour-control evidence](docs/apk-colour-evidence.md) documents how the standard Home Assistant colour picker is translated through the exact product spectrum rather than hand-authored colour guesses. No data is sent to Fluval or any third party—everything stays between your HA instance, Bluetooth route, and fixture.
 
 **BLE connection lifecycle:**
 - On load and reconnect, the integration asks HA for its best connectable BLE route. This includes local adapters and ESPHome Bluetooth proxies.
