@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Made APK product identity authoritative for channel count, channel labels,
+  spectrum profile, and native-effect catalogue. Fixtures without a decoded
+  product ID no longer acquire capabilities from editable Bluetooth names;
+  explicit fixture profiles and decoded live controller data remain supported
+  fallbacks.
 - Replaced hand-authored Plant and Marine colour guesses and generic AquaSky
   RGBW conversion with product-specific CIE colour transforms derived from the
   exact spectral power curves bundled in FluvalConnect. Product 328 now uses
