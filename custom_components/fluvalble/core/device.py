@@ -510,20 +510,14 @@ class Device:
             return 5
         if self._channel_count_hint in (4, 5):
             return self._channel_count_hint
-        if self.facebd:
-            return 4
         if self._uses_plant_pro_protocol():
+            # FluvalConnect's FFF0/SPP command schema always carries the five
+            # Plant-family emitters. This is live protocol evidence, not a
+            # product inference from the advertised name.
             return 5
-
-        model_l = (self.model or "").lower()
-        name_l = (self.name or "").lower()
-        combined = f"{model_l} {name_l}"
-
-        if any(token in combined for token in ("plant", "marine", "reef")):
-            return 5
-        # AquaSky controllers are RGBW. Plant/Marine fixtures remain 5-channel.
-        if "aquasky" in combined:
-            return 4
+        # Keep the historical five-channel superset until an APK product ID,
+        # explicit profile, or decoded controller response resolves the real
+        # count. Do not infer a layout from a user-editable Bluetooth name.
         return 5
 
     def _channel_labels(self) -> dict[str, str]:
@@ -545,13 +539,9 @@ class Device:
             return CHANNEL_NAMES_MARINE
         if profile in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
             return CHANNEL_NAMES_AQUASKY
-        model_l = (self.model or "").lower()
-        name_l = (self.name or "").lower()
-        if "marine" in model_l or "marine" in name_l or "reef" in model_l or "reef" in name_l:
-            return CHANNEL_NAMES_MARINE
-        if "plant" in model_l or "plant" in name_l:
-            return CHANNEL_NAMES_PLANT
-        return CHANNEL_NAMES_AQUASKY
+        # Unknown automatic fixtures retain generic Channel N labels until
+        # product identity or an explicit profile supplies APK channel names.
+        return {}
 
     def spectrum_profile(self) -> str | None:
         """Return the APK spectrum asset family for this exact fixture."""
@@ -749,8 +739,7 @@ class Device:
                 return False
         else:
             profile = (self.lamp_profile or LAMP_PROFILE_AUTO).lower()
-            identity = f"{self.name} {self.model}".lower().replace(" ", "")
-            if profile not in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3) and "aquasky" not in identity:
+            if profile not in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
                 return False
         if self.client is not None and self.client.command_write_uuid:
             return self.client.command_write_uuid.lower().startswith("00001001")
@@ -780,20 +769,14 @@ class Device:
         product = product_from_id(self.product_id)
         if product is not None:
             return product.native_effect_count in (4, 11)
-        if self.lamp_profile == LAMP_PROFILE_AQUASKY3:
-            return True
-        identity = f"{self.name} {self.model}".lower().replace(" ", "")
-        return "aquasky" in identity
+        return self.lamp_profile == LAMP_PROFILE_AQUASKY3
 
     def supports_plant_pro_effects(self) -> bool:
         """Return whether available evidence identifies a four-effect controller."""
         product = product_from_id(self.product_id)
         if product is not None:
             return product.native_effect_count == 4
-        if self.lamp_profile == LAMP_PROFILE_PLANT_PRO:
-            return True
-        identity = f"{self.name} {self.model}".lower().replace(" ", "")
-        return "plantpro" in identity or "plant4.0" in identity
+        return self.lamp_profile == LAMP_PROFILE_PLANT_PRO
 
     def uses_four_effect_catalogue(self) -> bool:
         """Return whether the APK assigns this product the four-effect catalogue."""

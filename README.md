@@ -51,6 +51,10 @@ The integration recognizes the light catalogue defined by the current FluvalConn
 - First-generation **Wing Nano, Roma, Vicenza, Venezia, A-Sky Aqua, and Plant Aqua** fixtures
 
 The exact product ID selects the APK-defined model, channel layout, and native-effect catalogue. Plant PRO (product 386) and Plant 4.0 (product 545) are distinct products even though both use the APK's five-channel Plant spectrum and may expose the same FFF0/SPP transport. BLE transport selection still comes from the fixture's live GATT services, covering the legacy encrypted, FACEBD, and FFF0/SPP protocols implemented by the integration.
+Bluetooth names are display data, not fixture capability evidence. If an
+advertisement does not contain an APK-known product ID, the integration keeps a
+generic layout until an explicit fixture profile or decoded controller response
+provides the missing capability information.
 
 ---
 
