@@ -8,7 +8,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceEntry
-from homeassistant.helpers.redact import async_redact_data
+
+try:
+    from homeassistant.helpers.redact import async_redact_data
+except ImportError:  # Home Assistant before the redaction helper moved
+    from homeassistant.components.diagnostics import async_redact_data
+
+from . import entry_runtime_data
 
 REDACTED = "**REDACTED**"
 TO_REDACT = {
@@ -37,8 +43,7 @@ async def async_get_config_entry_diagnostics(
     entry: ConfigEntry,
 ) -> dict[str, Any]:
     """Return redacted diagnostics for a config entry."""
-    del hass
-    return await _build_report(entry)
+    return await _build_report(entry, hass)
 
 
 async def async_get_device_diagnostics(
@@ -47,13 +52,16 @@ async def async_get_device_diagnostics(
     device: DeviceEntry,
 ) -> dict[str, Any]:
     """Return redacted diagnostics for a device."""
-    del hass, device
-    return await _build_report(entry)
+    del device
+    return await _build_report(entry, hass)
 
 
-async def _build_report(entry: ConfigEntry) -> dict[str, Any]:
+async def _build_report(
+    entry: ConfigEntry,
+    hass: HomeAssistant | None = None,
+) -> dict[str, Any]:
     """Collect a non-disruptive runtime snapshot when the device is ready."""
-    runtime = getattr(entry, "runtime_data", None)
+    runtime = entry_runtime_data(hass, entry) if hass is not None else getattr(entry, "runtime_data", None)
     fluval = getattr(runtime, "device", None)
     if fluval is None:
         report: dict[str, Any] = {"status": "not_ready"}

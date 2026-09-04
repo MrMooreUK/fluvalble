@@ -15,7 +15,17 @@ from homeassistant.components.light import (
 )
 from homeassistant.exceptions import HomeAssistantError
 
-from custom_components.fluvalble import binary_sensor, button, diagnostics, light, select, sensor, switch
+from custom_components.fluvalble import (
+    DOMAIN,
+    FluvalRuntimeData,
+    binary_sensor,
+    button,
+    diagnostics,
+    light,
+    select,
+    sensor,
+    switch,
+)
 from custom_components.fluvalble.core.device import Device
 
 
@@ -258,6 +268,27 @@ async def _async_test_downloadable_diagnostics_do_not_touch_ble():
     assert report["latest_advertisement"]["source_name"] == diagnostics.REDACTED
     assert report["active_connection"]["rssi"] == -70
     assert report["latest_advertisement"]["rssi"] == -82
+
+
+def test_diagnostics_support_legacy_runtime_storage():
+    asyncio.run(_async_test_diagnostics_support_legacy_runtime_storage())
+
+
+async def _async_test_diagnostics_support_legacy_runtime_storage():
+    fluval = SimpleNamespace(async_collect_diagnostics=AsyncMock(return_value={"status": "ok"}))
+    entry = SimpleNamespace(
+        entry_id="private-entry-id",
+        title="Kitchen Aquarium",
+        unique_id="AA:BB:CC:DD:EE:FF",
+        data={"mac": "AA:BB:CC:DD:EE:FF"},
+        options={},
+    )
+    hass = SimpleNamespace(data={DOMAIN: {entry.entry_id: FluvalRuntimeData(device=fluval)}})
+
+    report = await diagnostics._build_report(entry, hass)
+
+    fluval.async_collect_diagnostics.assert_awaited_once_with()
+    assert report["status"] == "ok"
 
 
 def test_light_internal_update_and_actions():

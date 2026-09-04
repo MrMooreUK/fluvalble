@@ -1393,7 +1393,8 @@ class Device:
         step_seconds: int = PREVIEW_STEP_SECONDS,
     ) -> bool:
         """Preview a 24-hour schedule on the real light in compressed time."""
-        await self.async_stop_preview()
+        if not await self.async_stop_preview():
+            return False
         self.preview_restore_values = {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
         self.preview_restore_mode = (
             self.values.get("mode") if self.values.get("mode") in {"automatic", "professional"} else None

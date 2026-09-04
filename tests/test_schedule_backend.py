@@ -15,7 +15,9 @@ from custom_components.fluvalble import (
     EFFECT_CATALOG,
     FluvalRuntimeData,
     SERVICE_RECALL_MANUAL_PRESET,
+    SERVICE_PREVIEW_SCHEDULE,
     SERVICE_SAVE_MANUAL_PRESET,
+    SERVICE_SET_CHANNELS,
     _register_services,
     _async_schedule_payload,
     _async_save_effect_schedule,
@@ -122,6 +124,71 @@ def test_manual_preset_slot_validator_rejects_other_values(slot):
 
 def test_manual_preset_services_dispatch_to_selected_device():
     asyncio.run(_async_test_manual_preset_services_dispatch_to_selected_device())
+
+
+def test_set_channels_service_reports_ble_write_failure():
+    asyncio.run(_async_test_set_channels_service_reports_ble_write_failure())
+
+
+async def _async_test_set_channels_service_reports_ble_write_failure():
+    from homeassistant.exceptions import HomeAssistantError
+
+    device = _make_device()
+    device.async_set_channels = AsyncMock(return_value=False)
+    device.diagnostics["last_error"] = "BLE write failed"
+    hass = _FakeHass(device)
+    _register_services(hass)
+
+    with pytest.raises(HomeAssistantError, match="BLE write failed"):
+        await hass.services.handlers[(DOMAIN, SERVICE_SET_CHANNELS)](
+            SimpleNamespace(
+                data={
+                    "entry_id": "entry_1",
+                    "red": 50,
+                    "transition": 0,
+                    "step_seconds": 0.1,
+                }
+            )
+        )
+
+    device.async_set_channels.assert_awaited_once_with(
+        {"channel_1": 50},
+        transition=0,
+        step_seconds=0.1,
+    )
+
+
+def test_preview_schedule_service_reports_start_failure():
+    asyncio.run(_async_test_preview_schedule_service_reports_start_failure())
+
+
+async def _async_test_preview_schedule_service_reports_start_failure():
+    from homeassistant.exceptions import HomeAssistantError
+
+    device = _make_device()
+    device.async_preview_schedule = AsyncMock(return_value=False)
+    device.diagnostics["last_error"] = "Unable to stop the previous preview"
+    hass = _FakeHass(device)
+    _register_services(hass)
+
+    points = _schedule_points()
+    with pytest.raises(HomeAssistantError, match="Unable to stop the previous preview"):
+        await hass.services.handlers[(DOMAIN, SERVICE_PREVIEW_SCHEDULE)](
+            SimpleNamespace(
+                data={
+                    "entry_id": "entry_1",
+                    "points": points,
+                    "duration": 60,
+                    "step_seconds": 2,
+                }
+            )
+        )
+
+    device.async_preview_schedule.assert_awaited_once_with(
+        points,
+        duration=60,
+        step_seconds=2,
+    )
 
 
 async def _async_test_manual_preset_services_dispatch_to_selected_device():

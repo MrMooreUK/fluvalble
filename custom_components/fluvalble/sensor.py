@@ -6,6 +6,7 @@ from homeassistant.const import EntityCategory, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import require_entry_runtime_data
 from .core.device import Device
 from .core.entity import FluvalEntity
 
@@ -18,7 +19,7 @@ def create_entities(device: Device) -> list:
 
 
 async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry, add_entities: AddEntitiesCallback) -> None:
-    runtime = config_entry.runtime_data
+    runtime = require_entry_runtime_data(hass, config_entry)
     device = runtime.device
 
     if device:

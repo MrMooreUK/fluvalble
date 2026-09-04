@@ -15,6 +15,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from . import require_entry_runtime_data
 from .core.device import Device
 from .core.effects import EFFECT_NONE
 from .core.entity import FluvalEntity
@@ -35,7 +36,7 @@ async def async_setup_entry(
     add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the Fluval light entity."""
-    runtime = config_entry.runtime_data
+    runtime = require_entry_runtime_data(hass, config_entry)
     device = runtime.device
 
     if device:

@@ -55,7 +55,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 @dataclass
 class FluvalRuntimeData:
-    """Runtime state for one Fluval config entry (stored on entry.runtime_data)."""
+    """Runtime state for one Fluval config entry."""
 
     device: Device | None = None
     pending_add_entities: dict[Platform, Any] = field(default_factory=dict)
@@ -75,6 +75,40 @@ def _runtime_device(entry_data: Any) -> Device | None:
     if isinstance(entry_data, dict):
         return entry_data.get("device")
     return None
+
+
+def entry_runtime_data(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> FluvalRuntimeData | None:
+    """Return runtime data on both current and older Home Assistant releases."""
+    runtime = getattr(entry, "runtime_data", None)
+    if isinstance(runtime, FluvalRuntimeData):
+        return runtime
+    legacy_runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    return legacy_runtime if isinstance(legacy_runtime, FluvalRuntimeData) else None
+
+
+def require_entry_runtime_data(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> FluvalRuntimeData:
+    """Return initialized runtime data for an entity platform."""
+    runtime = entry_runtime_data(hass, entry)
+    if runtime is None:
+        raise RuntimeError(f"Fluval runtime data is unavailable for config entry {entry.entry_id}")
+    return runtime
+
+
+def _store_entry_runtime_data(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    runtime: FluvalRuntimeData,
+) -> None:
+    """Store runtime data using APIs available on the running HA version."""
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = runtime
+    if hasattr(entry, "runtime_data"):
+        entry.runtime_data = runtime
 
 
 @callback
@@ -445,8 +479,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     _cleanup_duplicate_devices(hass, entry, mac)
 
     runtime = FluvalRuntimeData()
-    entry.runtime_data = runtime
-    hass.data[DOMAIN][entry.entry_id] = runtime
+    _store_entry_runtime_data(hass, entry, runtime)
     last_discovery_log = 0.0
 
     def create_runtime_task(coroutine) -> asyncio.Task:
@@ -824,19 +857,21 @@ def _register_services(hass: HomeAssistant) -> None:
         }
         if not values:
             raise HomeAssistantError("At least one channel value is required")
-        await device.async_set_channels(
+        if not await device.async_set_channels(
             values,
             transition=call.data["transition"],
             step_seconds=call.data["step_seconds"],
-        )
+        ):
+            raise HomeAssistantError(device.command_error_message())
 
     async def async_preview_schedule(call: ServiceCall) -> None:
         device = get_device(call)
-        await device.async_preview_schedule(
+        if not await device.async_preview_schedule(
             call.data["points"],
             duration=call.data["duration"],
             step_seconds=call.data["step_seconds"],
-        )
+        ):
+            raise HomeAssistantError(device.command_error_message())
 
     async def async_preview_native_schedule(call: ServiceCall) -> None:
         device = get_device(call)
@@ -1437,9 +1472,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
     if not unload_ok:
         return False
 
-    runtime = getattr(entry, "runtime_data", None)
-    if not isinstance(runtime, FluvalRuntimeData):
-        runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    runtime = entry_runtime_data(hass, entry)
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
         runtime.device.cancel_reachability_refresh()

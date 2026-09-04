@@ -2300,3 +2300,22 @@ def test_classic_manufacturer_data_is_not_facebd_protocol_evidence():
 
     assert device.facebd is False
     assert device.numbers() == AQUASKY_NUMBERS
+
+
+def test_schedule_preview_does_not_start_when_previous_preview_cannot_stop():
+    asyncio.run(_async_test_schedule_preview_does_not_start_when_previous_preview_cannot_stop())
+
+
+async def _async_test_schedule_preview_does_not_start_when_previous_preview_cannot_stop():
+    device = _make_device()
+    device.async_stop_preview = AsyncMock(return_value=False)
+
+    assert not await device.async_preview_schedule(
+        [
+            {"time": "08:00", "channel_1": 10},
+            {"time": "20:00", "channel_1": 0},
+        ]
+    )
+    device.async_stop_preview.assert_awaited_once_with()
+    assert device.preview_task is None
+    assert device.preview_restore_values is None
