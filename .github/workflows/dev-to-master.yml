@@ -1,8 +1,8 @@
 name: Dev → Master promotion check
 
 # Extra validation that only runs when dev is being merged into master/main.
-# Checks that the manifest version is a clean semver and that a CHANGELOG
-# entry exists for it, so a release can be created immediately after merge.
+# Checks that the manifest version is a clean semver and that the detailed
+# changelog and curated user-facing release notes are ready before merging.
 
 on:
   pull_request:
@@ -42,6 +42,24 @@ jobs:
               print("::error::Add a section '## [{version}] — YYYY-MM-DD' before merging.", file=sys.stderr)
               sys.exit(1)
           print(f"CHANGELOG entry found for {version}")
+          EOF
+
+      - name: Check curated release notes for this version
+        run: |
+          python - <<'EOF'
+          import json, sys
+          from pathlib import Path
+
+          version = json.load(open("custom_components/fluvalble/manifest.json"))["version"]
+          notes_path = Path("docs/releases") / f"v{version}.md"
+          if not notes_path.is_file():
+              print(f"::error::No curated release notes found at {notes_path}", file=sys.stderr)
+              sys.exit(1)
+          expected_heading = f"# Fluval BLE v{version}"
+          if not notes_path.read_text(encoding="utf-8").startswith(expected_heading):
+              print(f"::error::{notes_path} must start with '{expected_heading}'", file=sys.stderr)
+              sys.exit(1)
+          print(f"Curated release notes found for {version}: {notes_path}")
           EOF
 
       - name: Run full test suite one more time

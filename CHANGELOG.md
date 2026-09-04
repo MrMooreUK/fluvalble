@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Changed
+- Separated concise, user-facing GitHub release notes from the detailed
+  changelog. Release tags now require a reviewed, versioned notes file instead
+  of publishing an entire changelog section automatically.
 - Added a Home Assistant device picker to every Fluval action while retaining
   the historical config-entry and MAC selectors for existing automations and
   bundled cards. Target-free calls now fail when more than one light exists
