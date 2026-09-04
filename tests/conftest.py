@@ -114,10 +114,11 @@ def _stub_homeassistant():
 
     # ---- homeassistant.config_entries ----
     class _FakeConfigEntry:
-        def __init__(self, data=None, options=None):
+        def __init__(self, data=None, options=None, version=1):
             self.data = data or {}
             self.options = options or {}
             self.entry_id = "test_entry_id"
+            self.version = version
 
     class _FakeConfigFlow:
         # HA uses ConfigFlow(domain=DOMAIN) as a class keyword arg.

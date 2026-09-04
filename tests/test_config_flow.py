@@ -18,12 +18,46 @@ from homeassistant import config_entries
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.fluvalble.config_flow import (
+    ConfigFlow,
     OptionsFlowHandler,
     normalize_mac,
     unique_id_from_mac,
     validate_active_time,
     MAC_REGEX,
 )
+
+
+def test_config_flow_keeps_the_released_version_two_schema():
+    """Do not strand entries created by the earlier version-two build."""
+    assert ConfigFlow.VERSION == 2
+
+
+def test_version_one_config_entry_migrates_without_changing_user_data():
+    """Upstream version-one entries advance without rewriting their settings."""
+    from custom_components.fluvalble import async_migrate_entry
+
+    entry = config_entries.ConfigEntry(
+        data={"mac": "AA:BB:CC:DD:EE:FF"},
+        options={"lamp_profile": "plant", "active_time": 120},
+        version=1,
+    )
+    hass = MagicMock()
+
+    assert asyncio.run(async_migrate_entry(hass, entry)) is True
+    hass.config_entries.async_update_entry.assert_called_once_with(entry, version=2)
+    assert entry.data == {"mac": "AA:BB:CC:DD:EE:FF"}
+    assert entry.options == {"lamp_profile": "plant", "active_time": 120}
+
+
+def test_current_config_entry_version_is_accepted_without_rewrite():
+    """A version-two entry is already current and requires no mutation."""
+    from custom_components.fluvalble import async_migrate_entry
+
+    entry = config_entries.ConfigEntry(version=2)
+    hass = MagicMock()
+
+    assert asyncio.run(async_migrate_entry(hass, entry)) is True
+    hass.config_entries.async_update_entry.assert_not_called()
 
 
 def test_options_flow_uses_home_assistant_reload_helper():
