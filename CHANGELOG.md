@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.0.12] — 2026-09-04
+
 ### Fixed
 - Moved entity update subscriptions into Home Assistant's add/remove lifecycle
   and made failed light, mode, daylight-saving, identify, and clock actions
