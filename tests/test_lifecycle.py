@@ -11,11 +11,14 @@ from homeassistant import config_entries
 from custom_components.fluvalble import (
     DOMAIN,
     FluvalRuntimeData,
+    _store_entry_runtime_data,
     _async_update_listener,
     _register_legacy_options_reload,
     _register_static_paths,
     async_unload_entry,
+    entry_runtime_data,
 )
+from custom_components.fluvalble import binary_sensor, button, light, select, sensor, switch
 
 
 def test_current_options_flow_does_not_register_second_reload_listener():
@@ -30,6 +33,59 @@ def test_current_options_flow_does_not_register_second_reload_listener():
     assert hasattr(config_entries, "OptionsFlowWithReload")
     entry.add_update_listener.assert_not_called()
     entry.async_on_unload.assert_not_called()
+
+
+def test_runtime_data_falls_back_to_hass_data_on_home_assistant_2024_1():
+    """Legacy ConfigEntry objects have no runtime_data slot."""
+
+    class LegacyConfigEntry:
+        __slots__ = ("entry_id",)
+
+        def __init__(self):
+            self.entry_id = "entry_1"
+
+    entry = LegacyConfigEntry()
+    hass = SimpleNamespace(data={DOMAIN: {}})
+    runtime = FluvalRuntimeData()
+
+    _store_entry_runtime_data(hass, entry, runtime)
+
+    assert not hasattr(entry, "runtime_data")
+    assert entry_runtime_data(hass, entry) is runtime
+
+
+def test_runtime_data_uses_config_entry_slot_when_available():
+    entry = SimpleNamespace(entry_id="entry_1", runtime_data=None)
+    hass = SimpleNamespace(data={DOMAIN: {}})
+    runtime = FluvalRuntimeData()
+
+    _store_entry_runtime_data(hass, entry, runtime)
+
+    assert entry.runtime_data is runtime
+    assert entry_runtime_data(hass, entry) is runtime
+
+
+def test_all_entity_platforms_support_legacy_runtime_storage():
+    asyncio.run(_async_test_all_entity_platforms_support_legacy_runtime_storage())
+
+
+async def _async_test_all_entity_platforms_support_legacy_runtime_storage():
+    entry = SimpleNamespace(entry_id="entry_1")
+    runtime = FluvalRuntimeData()
+    hass = SimpleNamespace(data={DOMAIN: {entry.entry_id: runtime}})
+
+    for platform_module, platform in (
+        (binary_sensor, "binary_sensor"),
+        (button, "button"),
+        (light, "light"),
+        (select, "select"),
+        (sensor, "sensor"),
+        (switch, "switch"),
+    ):
+        add_entities = MagicMock()
+        await platform_module.async_setup_entry(hass, entry, add_entities)
+        add_entities.assert_not_called()
+        assert runtime.pending_add_entities[platform] is add_entities
 
 
 def test_legacy_options_flow_registers_one_reload_listener(monkeypatch):

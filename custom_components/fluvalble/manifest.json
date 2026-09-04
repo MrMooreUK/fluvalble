@@ -1,23 +1,6 @@
 {
   "domain": "fluvalble",
   "name": "Fluval Aquarium LED",
-  "icon": "mdi:led-strip",
-  "codeowners": [
-    "@MrMooreUK"
-  ],
-  "config_flow": true,
-  "dependencies": [
-    "bluetooth_adapters"
-  ],
-  "integration_type": "device",
-  "documentation": "https://github.com/MrMooreUK/fluvalble",
-  "iot_class": "local_push",
-  "requirements": [],
-  "version": "0.0.12",
-  "loggers": [
-    "custom_components.fluvalble"
-  ],
-  "issue_tracker": "https://github.com/MrMooreUK/fluvalble/issues",
   "bluetooth": [
     {
       "local_name": "Fluval*"
@@ -93,5 +76,22 @@
     {
       "service_uuid": "facebd00-0000-1000-8000-00805f9b34fb"
     }
-  ]
+  ],
+  "codeowners": [
+    "@MrMooreUK"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "bluetooth_adapters",
+    "http"
+  ],
+  "documentation": "https://github.com/MrMooreUK/fluvalble",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/MrMooreUK/fluvalble/issues",
+  "loggers": [
+    "custom_components.fluvalble"
+  ],
+  "requirements": [],
+  "version": "0.0.12"
 }

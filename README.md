@@ -248,7 +248,7 @@ and automation trace rather than showing an apparent success.
   alias: "Tank light disconnected"
   trigger:
     - platform: state
-      entity_id: binary_sensor.fluval_aabbccddeeff_connection
+      entity_id: binary_sensor.fluval_aabbccddeeff_reachable
       to: "off"
   action:
     - service: notify.mobile

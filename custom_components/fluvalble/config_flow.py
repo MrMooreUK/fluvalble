@@ -10,7 +10,11 @@ import voluptuous as vol
 
 from homeassistant.components import bluetooth
 from homeassistant import config_entries
-from homeassistant.config_entries import ConfigFlowResult
+
+try:
+    from homeassistant.config_entries import ConfigFlowResult
+except ImportError:  # Home Assistant before 2024.4
+    from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
 
 try:
     from homeassistant.config_entries import OptionsFlowWithReload as OptionsFlowBase
@@ -348,11 +352,23 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         config_entry: config_entries.ConfigEntry,
     ) -> config_entries.OptionsFlow:
         """Return the options flow handler."""
-        return OptionsFlowHandler()
+        if hasattr(config_entries, "OptionsFlowWithReload"):
+            return OptionsFlowHandler()
+        return OptionsFlowHandler(config_entry)
 
 
 class OptionsFlowHandler(OptionsFlowBase):
     """Handle options and let Home Assistant reload the config entry once."""
+
+    def __init__(self, legacy_config_entry: config_entries.ConfigEntry | None = None) -> None:
+        super().__init__()
+        self._legacy_config_entry = legacy_config_entry
+
+    def _config_entry(self) -> config_entries.ConfigEntry:
+        """Return the entry on both legacy and current options-flow APIs."""
+        if self._legacy_config_entry is not None:
+            return self._legacy_config_entry
+        return self.config_entry
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and handle the options form."""
@@ -374,7 +390,7 @@ class OptionsFlowHandler(OptionsFlowBase):
             step_id="init",
             data_schema=self.add_suggested_values_to_schema(
                 OPTIONS_SCHEMA,
-                self.config_entry.options,
+                self._config_entry().options,
             ),
         )
 
