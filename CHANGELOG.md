@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+- Added a Home Assistant device picker to every Fluval action while retaining
+  the historical config-entry and MAC selectors for existing automations and
+  bundled cards. Target-free calls now fail when more than one light exists
+  instead of controlling whichever fixture was loaded first.
+- Replaced controller-protocol codes in action names and descriptions with
+  fixture-focused language and detected-model capability wording.
+
 ### Fixed
 - Serialized complete per-fixture command transactions so concurrent entity or
   action calls cannot interleave the ordered packets for effects, channels,

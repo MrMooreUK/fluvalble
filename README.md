@@ -160,7 +160,9 @@ unsaved editor values.
 Supported fixtures can keep schedules in their own memory. The integration
 provides actions for Auto and Professional schedules, timed effects, manual
 presets, and schedule previews under **Developer tools → Actions**. The action
-UI contains the available fields and complete examples.
+UI contains the available fields, complete examples, and a Fluval light picker.
+Existing automations and bundled cards that identify a light by config-entry ID
+or Bluetooth address remain compatible.
 
 Schedule previews use data already stored by the fixture and never upload
 unsaved editor values. Using the normal light or Mode controls stops an active

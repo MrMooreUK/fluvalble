@@ -2,16 +2,13 @@ set_channels:
   name: Set color channels
   description: Set one or more Fluval light color channels, optionally ramping over time.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light to control.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     red:
       name: Red
       description: Red channel intensity, 0-100%.
@@ -72,19 +69,16 @@ set_channels:
           unit_of_measurement: s
 
 recall_manual_preset:
-  name: Recall classic manual preset
-  description: Apply one fixture-resident P1-P4 preset on a classic Fluval controller. The fixture must be on and its presets must have been read successfully.
+  name: Recall manual preset
+  description: Apply one fixture-resident P1-P4 preset on a supported first-generation Fluval light. The light must be on and its presets must have been read successfully.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose preset should be recalled.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     slot:
       name: Preset slot
       description: Fixture-resident manual preset P1 through P4.
@@ -97,19 +91,16 @@ recall_manual_preset:
           mode: box
 
 save_manual_preset:
-  name: Save classic manual preset
-  description: Save the current manual channel levels in fixture slot P1-P4 using the classic Fluval controller's native preset command.
+  name: Save manual preset
+  description: Save the current channel levels in fixture slot P1-P4 on a supported first-generation Fluval light.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose current levels should be saved.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     slot:
       name: Preset slot
       description: Fixture-resident manual preset P1 through P4.
@@ -125,16 +116,13 @@ preview_schedule:
   name: Preview schedule
   description: Preview an editor-owned channel curve with ordinary channel writes. This does not use fixture-native preview.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light on which to preview the schedule.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     points:
       name: Schedule points
       description: List of points with time plus channel_1 through channel_5 values in the fixture's APK-defined order. Previous RGB-style names remain accepted as aliases.
@@ -175,18 +163,15 @@ preview_schedule:
 
 preview_native_schedule:
   name: Preview native schedule time
-  description: Preview one minute of an Auto or Professional schedule already stored on the fixture, using the APK-native preview command.
+  description: Preview one minute of an Auto or Professional schedule already stored on the light.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light on which to preview the stored schedule.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     minute:
       name: Minute of day
       description: Fixture schedule minute to preview, from midnight (0) through 23:59 (1439).
@@ -210,31 +195,25 @@ stop_preview:
   name: Stop preview
   description: Stop an editor-owned or fixture-native schedule preview and restore the prior fixture mode.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose schedule preview should stop.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
 
 save_schedule:
   name: Save schedule
   description: Save a Fluval 24-hour curve and optionally upload it to the fixture's native scheduler.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose schedule should be saved.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     points:
       name: Schedule points
       description: List of schedule points with time plus channel_1 through channel_5 values in the fixture's APK-defined order. Previous RGB-style names remain accepted as aliases.
@@ -256,7 +235,7 @@ save_schedule:
         object:
     mode:
       name: Schedule mode
-      description: Manual saves the curve and disables the onboard scheduler. Native uploads an APK-supported curve (4-10 classic/OLD; 4-12 FACEBD/MESH) and lets the fixture run its own clock.
+      description: Manual saves the curve and disables the onboard scheduler. Native uploads a curve within the detected light's supported point limit and lets the fixture run its own clock.
       selector:
         select:
           options:
@@ -265,18 +244,15 @@ save_schedule:
 
 set_native_auto_schedule:
   name: Set native Auto schedule
-  description: Write the controller's native Auto sunrise/sunset schedule using the classic, FACEBD, or FFF0/SPP protocol.
+  description: Write an Auto sunrise and sunset schedule to the detected light's onboard scheduler.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose Auto schedule should be set.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     schedule:
       name: Auto schedule
       description: Sunrise, sunset, optional sleep time, ramp minutes, and channel_1 through channel_5 day/night levels in the fixture's APK-defined order. Previous Plant-specific names remain accepted as aliases.
@@ -304,21 +280,18 @@ set_native_auto_schedule:
 
 set_native_pro_schedule:
   name: Set native Professional schedule
-  description: Write native Professional schedule points using the classic, FACEBD, or FFF0/SPP protocol. Previous Plant-specific channel names remain accepted as aliases.
+  description: Write timed channel points to the detected light's onboard Professional schedule. Previous Plant-specific channel names remain accepted as aliases.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose Professional schedule should be set.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     points:
       name: Schedule points
-      description: Four to 10 points for classic/OLD or four to 12 for FACEBD/SPP, in the fixture's APK-defined channel order.
+      description: Four to 12 timed points in the detected light's channel order. The integration enforces the model's supported limit.
       required: true
       example:
         - time: "08:00"
@@ -350,18 +323,15 @@ set_native_pro_schedule:
 
 set_native_effect_schedule:
   name: Set native effect schedule
-  description: Store up to seven timed native-effect windows directly in a supported classic, FACEBD, or FFF0/SPP fixture. The exact APK product ID selects the 11-effect catalogue or four-effect subset. An empty list clears all windows.
+  description: Store up to seven timed native-effect windows on a supported Fluval light. The detected model selects the available effects. An empty list clears all windows.
   fields:
-    entry_id:
-      name: Config entry ID
-      description: Optional config entry ID when more than one Fluval light is configured.
+    device_id:
+      name: Light
+      description: Fluval light whose timed effects should be set.
+      required: true
       selector:
-        text:
-    mac:
-      name: MAC address
-      description: Optional Bluetooth MAC address when more than one Fluval light is configured.
-      selector:
-        text:
+        device:
+          integration: fluvalble
     windows:
       name: Effect windows
       description: Windows with start/end, effect, optional weekdays, and optional enabled state. Each weekday can be assigned to only one window, matching FluvalConnect.
