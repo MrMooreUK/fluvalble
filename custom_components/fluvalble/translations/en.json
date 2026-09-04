@@ -50,6 +50,11 @@
       }
     }
   },
+  "exceptions": {
+    "command_failed": {
+      "message": "Unable to control the Fluval light: {error}"
+    }
+  },
   "entity": {
     "binary_sensor": {
       "connection": {

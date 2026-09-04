@@ -246,6 +246,9 @@ After setup you'll see one device with entities like:
 | **Switch** | Daylight saving time | FACEBD-only fixture DST setting, available after confirmed controller readback. |
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `light.fluval_aabbccddeeff_light`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
+If a light, mode, daylight-saving, Identify, or Sync clock command cannot reach
+the fixture, Home Assistant reports the BLE failure directly in the action UI
+and automation trace rather than showing an apparent success.
 
 ---
 

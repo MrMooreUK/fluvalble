@@ -45,9 +45,8 @@ class FluvalSyncClockButton(FluvalEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Force a clock sync on the connected lamp."""
         if not await self.device.async_sync_clock(force=True):
-            _LOGGER.warning("Fluval clock sync failed for %s", self.device.mac)
-        else:
-            _LOGGER.info("Fluval clock synced for %s", self.device.mac)
+            self._raise_command_error()
+        _LOGGER.info("Fluval clock synced for %s", self.device.mac)
 
 
 class FluvalIdentifyButton(FluvalEntity, ButtonEntity):
@@ -59,4 +58,4 @@ class FluvalIdentifyButton(FluvalEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Send FluvalConnect's native Find command."""
         if not await self.device.async_identify():
-            _LOGGER.warning("Fluval identify command failed for %s", self.device.mac)
+            self._raise_command_error()

@@ -13,7 +13,6 @@ from homeassistant.components.light import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core.device import Device
@@ -257,7 +256,3 @@ class FluvalLight(FluvalEntity, LightEntity):
             self._raise_command_error()
         self._attr_is_on = False
         self._async_write_ha_state()
-
-    def _raise_command_error(self) -> None:
-        """Report a failed BLE command through Home Assistant's service call."""
-        raise HomeAssistantError(self.device.command_error_message())

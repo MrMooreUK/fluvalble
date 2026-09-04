@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 from homeassistant.components.switch import SwitchEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory, Platform
@@ -12,8 +10,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .core.device import Device
 from .core.entity import FluvalEntity
-
-_LOGGER = logging.getLogger(__name__)
 
 PARALLEL_UPDATES = 0
 
@@ -61,12 +57,14 @@ class FluvalDaylightSavingSwitch(FluvalEntity, SwitchEntity):
         """Enable fixture daylight-saving handling."""
         del kwargs
         if not await self.device.async_set_daylight_saving_time(True):
-            _LOGGER.warning("Unable to enable daylight-saving time for %s", self.device.mac)
+            self.internal_update()
+            self._raise_command_error()
         self.internal_update()
 
     async def async_turn_off(self, **kwargs) -> None:
         """Disable fixture daylight-saving handling."""
         del kwargs
         if not await self.device.async_set_daylight_saving_time(False):
-            _LOGGER.warning("Unable to disable daylight-saving time for %s", self.device.mac)
+            self.internal_update()
+            self._raise_command_error()
         self.internal_update()
