@@ -66,7 +66,20 @@ def _stub_homeassistant():
 
     # ---- homeassistant.exceptions ----
     class HomeAssistantError(Exception):
-        pass
+        def __init__(
+            self,
+            message=None,
+            *,
+            translation_domain=None,
+            translation_key=None,
+            translation_placeholders=None,
+        ):
+            self.translation_domain = translation_domain
+            self.translation_key = translation_key
+            self.translation_placeholders = translation_placeholders
+            if message is None and translation_placeholders:
+                message = translation_placeholders.get("error")
+            super().__init__(message)
 
     ha_exc = types.ModuleType("homeassistant.exceptions")
     ha_exc.HomeAssistantError = HomeAssistantError
@@ -184,8 +197,20 @@ def _stub_homeassistant():
         def _async_write_ha_state(self):
             pass
 
-        async def async_will_remove_from_hass(self):
+        async def async_added_to_hass(self):
             pass
+
+        def async_on_remove(self, callback):
+            callbacks = getattr(self, "_on_remove_callbacks", None)
+            if callbacks is None:
+                callbacks = []
+                self._on_remove_callbacks = callbacks
+            callbacks.append(callback)
+
+        async def async_will_remove_from_hass(self):
+            for callback in reversed(getattr(self, "_on_remove_callbacks", [])):
+                callback()
+            self._on_remove_callbacks = []
 
     ha_entity = types.ModuleType("homeassistant.helpers.entity")
     ha_entity.Entity = _FakeEntity

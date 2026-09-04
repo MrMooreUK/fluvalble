@@ -45,7 +45,7 @@ class FluvalSelect(FluvalEntity, SelectEntity):
     async def async_select_option(self, option: str) -> None:
         if not await self.device.async_select_option(self.attr, option):
             self.internal_update()
-            return
+            self._raise_command_error()
 
         self._attr_current_option = option
         self._async_write_ha_state()

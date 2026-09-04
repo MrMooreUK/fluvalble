@@ -1,5 +1,8 @@
 """Base entity of a Fluval BLE connected LED device for home assistant."""
 
+from typing import NoReturn
+
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH
 from homeassistant.helpers.entity import DeviceInfo, Entity
 
@@ -41,11 +44,25 @@ class FluvalEntity(Entity):
         # Store the bound method so deregistration uses the exact same object.
         self._update_handler = self.internal_update
         self._update_handler()
-        device.register_update(attr, self._update_handler)
 
-    async def async_will_remove_from_hass(self) -> None:
-        """Clean up update-handler registration when the entity is removed."""
-        self.device.deregister_update(self.attr, self._update_handler)
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to device updates after Home Assistant adds the entity."""
+        await super().async_added_to_hass()
+        self.device.register_update(self.attr, self._update_handler)
+        self.async_on_remove(
+            lambda: self.device.deregister_update(
+                self.attr,
+                self._update_handler,
+            )
+        )
+
+    def _raise_command_error(self) -> NoReturn:
+        """Raise a translated Home Assistant error for a failed device command."""
+        raise HomeAssistantError(
+            translation_domain=DOMAIN,
+            translation_key="command_failed",
+            translation_placeholders={"error": self.device.command_error_message()},
+        )
 
     def internal_update(self):
         """Provide a function for internal updates."""

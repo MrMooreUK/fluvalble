@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Moved entity update subscriptions into Home Assistant's add/remove lifecycle
+  and made failed light, mode, daylight-saving, identify, and clock actions
+  raise one translated command error instead of silently returning or only
+  writing a log message.
 - Made APK product identity authoritative for channel count, channel labels,
   spectrum profile, and native-effect catalogue. Fixtures without a decoded
   product ID no longer acquire capabilities from editable Bluetooth names;

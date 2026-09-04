@@ -379,8 +379,47 @@ async def _async_test_light_entity_surfaces_ble_command_failures():
     device.async_set_switch = AsyncMock(return_value=False)
     entity = light.FluvalLight(device, "light")
 
-    with pytest.raises(HomeAssistantError, match="connect failed: fixture unavailable"):
+    with pytest.raises(HomeAssistantError, match="connect failed: fixture unavailable") as raised:
         await entity.async_turn_off()
+
+    assert raised.value.translation_domain == "fluvalble"
+    assert raised.value.translation_key == "command_failed"
+    assert raised.value.translation_placeholders == {"error": "connect failed: fixture unavailable"}
+
+
+def test_non_light_entities_surface_ble_command_failures():
+    asyncio.run(_async_test_non_light_entities_surface_ble_command_failures())
+
+
+async def _async_test_non_light_entities_surface_ble_command_failures():
+    device = _make_device()
+    device.client = SimpleNamespace(
+        last_error="write failed: fixture unavailable",
+        command_write_uuid=None,
+    )
+    device.facebd = True
+    device.values["daylight_saving_time"] = False
+    device.async_select_option = AsyncMock(return_value=False)
+    device.async_set_daylight_saving_time = AsyncMock(return_value=False)
+    device.async_identify = AsyncMock(return_value=False)
+    device.async_sync_clock = AsyncMock(return_value=False)
+
+    actions = (
+        select.FluvalSelect(device, "mode").async_select_option("automatic"),
+        switch.FluvalDaylightSavingSwitch(
+            device,
+            "daylight_saving_time",
+        ).async_turn_on(),
+        button.FluvalIdentifyButton(device, "identify").async_press(),
+        button.FluvalSyncClockButton(device, "sync_clock").async_press(),
+    )
+
+    for action in actions:
+        with pytest.raises(HomeAssistantError, match="write failed: fixture unavailable") as raised:
+            await action
+        assert raised.value.translation_domain == "fluvalble"
+        assert raised.value.translation_key == "command_failed"
+        assert raised.value.translation_placeholders == {"error": "write failed: fixture unavailable"}
 
 
 def test_light_exposes_and_routes_classic_native_effects():
@@ -446,14 +485,41 @@ def test_light_exposes_facebd_native_effects():
     ]
 
 
-def test_entity_unregisters_update_handler():
+def test_entity_subscribes_and_unregisters_update_handler_in_ha_lifecycle():
     device = _make_device()
+    device.register_update = MagicMock()
     device.deregister_update = MagicMock()
     entity = light.FluvalLight(device, "light")
 
-    asyncio.run(entity.async_will_remove_from_hass())
+    async def run_test():
+        assert device.register_update.call_count == 0
+        await entity.async_added_to_hass()
+        device.register_update.assert_called_once_with("light", entity._update_handler)
 
+        await entity.async_will_remove_from_hass()
+
+    asyncio.run(run_test())
     device.deregister_update.assert_called_once_with("light", entity._update_handler)
+
+
+def test_entity_reload_cycle_leaves_no_stale_update_handlers():
+    device = _make_device()
+
+    async def run_test():
+        first = light.FluvalLight(device, "light")
+        assert first._update_handler not in device.updates_component
+        await first.async_added_to_hass()
+        assert device.updates_component == [first._update_handler]
+        await first.async_will_remove_from_hass()
+        assert device.updates_component == []
+
+        second = light.FluvalLight(device, "light")
+        await second.async_added_to_hass()
+        assert device.updates_component == [second._update_handler]
+        await second.async_will_remove_from_hass()
+        assert device.updates_component == []
+
+    asyncio.run(run_test())
 
 
 def test_controls_remain_available_when_recently_seen_but_not_connected():
