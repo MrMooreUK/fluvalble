@@ -49,9 +49,9 @@ The integration recognizes the light catalogue defined by the current FluvalConn
 - **Siena 2.0 and Roma & Shaker 2.0**
 - First-generation **Wing Nano, Roma, Vicenza, Venezia, A-Sky Aqua, and Plant Aqua** fixtures
 
-The advertised product ID selects the FluvalConnect model, channel layout, and
-available effects. An unrecognized product uses a generic layout until its
-fixture profile can be confirmed. See the
+Information advertised by the light selects its FluvalConnect model, channel
+layout, and available effects. An unidentified light uses a generic layout
+until its fixture profile can be confirmed. See the
 [technical reference](docs/technical-reference.md) for product and protocol
 details.
 
@@ -136,10 +136,11 @@ window releases the Bluetooth connection when idle so the official Fluval app
 or a Fluval gateway can connect. The backward-compatible default is `120`
 seconds.
 
-FFF0/SPP fixtures permit only one BLE central at a time. Persistent mode therefore
-prevents the official app or gateway from connecting while Home Assistant holds
-the connection, and it also continuously occupies one local-adapter or ESPHome
-proxy connection slot.
+Some newer fixtures, including Plant PRO and Plant 4.0, permit only one
+Bluetooth controller at a time. Persistent mode therefore prevents the official
+app or gateway from connecting while Home Assistant holds the connection, and
+it also continuously occupies one local-adapter or ESPHome proxy connection
+slot.
 
 ---
 
@@ -184,7 +185,7 @@ After setup you'll see one device with entities like:
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
 | **Sensors** | Signal strength / Source / Last seen | Optional Bluetooth diagnostics. Signal strength is disabled by default; Source shows the active route's friendly name. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
-| **Switch** | Daylight saving time | FACEBD-only fixture DST setting, available after confirmed controller readback. |
+| **Switch** | Daylight saving time | Onboard setting available on supported AquaSky 3.0 fixtures. |
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `light.fluval_aabbccddeeff_light`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
 If a light, mode, daylight-saving, Identify, or Sync clock command cannot reach
@@ -303,7 +304,7 @@ its APK sources are documented separately in
 - Project maintenance and Home Assistant integration development by [@MrMooreUK](https://github.com/MrMooreUK).
 - AquaSky 3 schedule-card work and ESPHome Bluetooth Proxy improvements by [@atomicalsoftwares](https://github.com/atomicalsoftwares).
 - APK-backed product profiles, native controls, effects, schedules, and diagnostics contributed by [@Wheemer](https://github.com/Wheemer).
-- FFF0/SPP protocol research and Plant PRO hardware validation by [@cryystyy](https://github.com/cryystyy/fluval-plant-pro-4-homeassistant), used under the MIT License.
+- Plant PRO Bluetooth protocol research and hardware validation by [@cryystyy](https://github.com/cryystyy/fluval-plant-pro-4-homeassistant), used under the MIT License.
 - Community protocol research shared in the [Fluval Plant 3.0 BLE protocol discussion](https://www.plantedtank.net/threads/reverse-engineering-the-fluval-plant-3.0-ble-protocol.1325539/) and by the project's [contributors](https://github.com/MrMooreUK/fluvalble/graphs/contributors).
 - Licensed under the **Apache License 2.0**. See [LICENSE](LICENSE) in this repo.
 
