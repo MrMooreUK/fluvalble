@@ -179,7 +179,7 @@ class FluvalLight(FluvalEntity, LightEntity):
             self._attr_supported_features = LightEntityFeature.EFFECT
         else:
             self._attr_effect = None
-            self._attr_supported_features = 0
+            self._attr_supported_features = LightEntityFeature(0)
 
     def _requested_color(
         self,

@@ -24,6 +24,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, format_mac
 from homeassistant.helpers.storage import Store
 from .core import (
+    CONFIG_ENTRY_VERSION,
     CONF_ACTIVE_TIME,
     CONF_PING_INTERVAL,
     DEFAULT_ACTIVE_TIME,
@@ -40,6 +41,16 @@ except ImportError:  # pragma: no cover - stubbed test environments
     ConfigEntryState = None  # type: ignore[misc, assignment]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate historical Fluval config entries to the current schema."""
+    if entry.version == 1:
+        _LOGGER.info("Migrating Fluval config entry %s from version 1 to 2", entry.entry_id)
+        hass.config_entries.async_update_entry(entry, version=CONFIG_ENTRY_VERSION)
+        return True
+
+    return entry.version == CONFIG_ENTRY_VERSION
 
 
 @dataclass

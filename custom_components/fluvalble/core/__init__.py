@@ -1,6 +1,7 @@
 """Constants for the Fluval Aquarium LED integration."""
 
 DOMAIN = "fluvalble"
+CONFIG_ENTRY_VERSION = 2
 
 # Options flow keys / defaults
 CONF_PING_INTERVAL = "ping_interval"

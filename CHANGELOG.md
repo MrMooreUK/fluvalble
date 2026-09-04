@@ -7,6 +7,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Keep the single five-channel Plant 3.0 light entity renderable on Home
+  Assistant 2026.9 by using the required typed empty feature flag when the
+  integration exposes an empty effect list.
+- Restore config-entry schema version 2 and migrate version 1 entries so
+  installations that previously ran a version 2 build are not rejected as a
+  downgrade by Home Assistant.
+
 ### Changed
 - Separated concise, user-facing GitHub release notes from the detailed
   changelog. Release tags now require a reviewed, versioned notes file instead

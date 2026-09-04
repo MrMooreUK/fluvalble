@@ -72,6 +72,23 @@ def test_create_entities_for_platforms():
     assert len(switch.create_entities(device)) == 1
 
 
+def test_empty_effect_list_uses_typed_empty_feature_flag():
+    """HA 2026.9 requires supported_features to remain an IntFlag value."""
+    device = Device(
+        "Fluval Plant 3.0",
+        config_data={
+            "mac": "AA:BB:CC:DD:EE:FF",
+            "product_id": 305,
+        },
+    )
+
+    entity = light.create_entities(device)[0]
+
+    assert entity._attr_supported_color_modes == {ColorMode.RGB}
+    assert entity._attr_supported_features == light.LightEntityFeature(0)
+    assert isinstance(entity._attr_supported_features, light.LightEntityFeature)
+
+
 def test_identify_button_routes_to_device_command():
     async def run_test():
         device = _make_device()

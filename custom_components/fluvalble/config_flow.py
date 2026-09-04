@@ -22,6 +22,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import format_mac
 
 from .core import (
+    CONFIG_ENTRY_VERSION,
     CONF_ACTIVE_TIME,
     CONF_LAMP_PROFILE,
     CONF_PING_INTERVAL,
@@ -188,7 +189,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any], ble_name: st
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Fluval Aquarium LED."""
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
 
     def __init__(self) -> None:
         super().__init__()
