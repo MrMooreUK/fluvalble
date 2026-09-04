@@ -99,6 +99,7 @@ def _stub_homeassistant():
         DIAGNOSTIC = "diagnostic"
 
     ha_const = types.ModuleType("homeassistant.const")
+    ha_const.ATTR_DEVICE_ID = "device_id"
     ha_const.CONF_MAC = "mac"
     ha_const.EVENT_HOMEASSISTANT_STARTED = "homeassistant_started"
     ha_const.Platform = Platform

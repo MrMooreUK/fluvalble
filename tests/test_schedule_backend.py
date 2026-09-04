@@ -59,9 +59,11 @@ class _FakeHass:
 class _FakeServices:
     def __init__(self):
         self.handlers = {}
+        self.schemas = {}
 
     def async_register(self, domain, service, handler, schema=None):
         self.handlers[(domain, service)] = handler
+        self.schemas[(domain, service)] = schema
 
 
 def _make_device(*, product_id=None):
@@ -135,7 +137,7 @@ async def _async_test_manual_preset_services_dispatch_to_selected_device():
         SimpleNamespace(data={"entry_id": "entry_1", "slot": 2})
     )
     await hass.services.handlers[(DOMAIN, SERVICE_SAVE_MANUAL_PRESET)](
-        SimpleNamespace(data={"entry_id": "entry_1", "slot": 3})
+        SimpleNamespace(data={"mac": "aa:bb:cc:dd:ee:ff", "slot": 3})
     )
 
     device.async_recall_manual_preset.assert_awaited_once_with(2)
@@ -147,6 +149,85 @@ async def _async_test_manual_preset_services_dispatch_to_selected_device():
         await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](
             SimpleNamespace(data={"entry_id": "entry_1", "slot": 1})
         )
+
+
+def test_service_without_target_keeps_single_fixture_compatibility():
+    asyncio.run(_async_test_service_without_target_keeps_single_fixture_compatibility())
+
+
+async def _async_test_service_without_target_keeps_single_fixture_compatibility():
+    device = _make_device()
+    device.async_recall_manual_preset = AsyncMock(return_value=True)
+    hass = _FakeHass(device)
+    _register_services(hass)
+
+    await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](SimpleNamespace(data={"slot": 4}))
+
+    device.async_recall_manual_preset.assert_awaited_once_with(4)
+
+
+def test_services_accept_home_assistant_device_targets():
+    asyncio.run(_async_test_services_accept_home_assistant_device_targets())
+
+
+async def _async_test_services_accept_home_assistant_device_targets():
+    from unittest.mock import patch
+
+    first = _make_device()
+    second = Device(
+        "Plant4.0_Test",
+        config_data={"mac": "11:22:33:44:55:66", "model": "Fluval Plant 4.0 LED", "product_id": 545},
+    )
+    second.connected = True
+    first.async_recall_manual_preset = AsyncMock(return_value=True)
+    second.async_recall_manual_preset = AsyncMock(return_value=True)
+    hass = _FakeHass(first)
+    hass.data[DOMAIN]["entry_2"] = FluvalRuntimeData(device=second)
+    registry = SimpleNamespace(
+        async_get=lambda device_id: SimpleNamespace(config_entries={"entry_2"}) if device_id == "device_2" else None
+    )
+
+    with patch("custom_components.fluvalble.dr.async_get", return_value=registry, create=True):
+        _register_services(hass)
+        await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](
+            SimpleNamespace(data={"device_id": "device_2", "slot": 2})
+        )
+
+    first.async_recall_manual_preset.assert_not_awaited()
+    second.async_recall_manual_preset.assert_awaited_once_with(2)
+    schema = hass.services.schemas[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)].schema
+    assert {"device_id", "entry_id", "mac"}.issubset(schema)
+
+
+def test_service_without_target_rejects_ambiguous_fixtures():
+    asyncio.run(_async_test_service_without_target_rejects_ambiguous_fixtures())
+
+
+async def _async_test_service_without_target_rejects_ambiguous_fixtures():
+    from homeassistant.exceptions import HomeAssistantError
+
+    first = _make_device()
+    second = Device(
+        "Plant4.0_Test",
+        config_data={"mac": "11:22:33:44:55:66", "model": "Fluval Plant 4.0 LED", "product_id": 545},
+    )
+    second.connected = True
+    hass = _FakeHass(first)
+    hass.data[DOMAIN]["entry_2"] = FluvalRuntimeData(device=second)
+    _register_services(hass)
+
+    with pytest.raises(HomeAssistantError, match="Select one Fluval light"):
+        await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](SimpleNamespace(data={"slot": 1}))
+
+
+def test_service_descriptions_use_device_picker_and_fixture_language():
+    source = (Path(__file__).parents[1] / "custom_components" / "fluvalble" / "services.yaml").read_text()
+
+    assert source.count("integration: fluvalble") == 10
+    assert "entry_id:" not in source
+    assert "MAC address" not in source
+    for internal_label in ("classic/OLD", "FACEBD", "FFF0", "SPP", "MESH", "product ID"):
+        assert internal_label not in source
 
 
 def test_schedule_validator_limits_schedule_size():

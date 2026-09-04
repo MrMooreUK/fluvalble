@@ -17,7 +17,7 @@ from homeassistant import config_entries
 from homeassistant.components import bluetooth
 from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_MAC, EVENT_HOMEASSISTANT_STARTED, Platform
+from homeassistant.const import ATTR_DEVICE_ID, CONF_MAC, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
@@ -143,6 +143,14 @@ NATIVE_EFFECT_WEEKDAYS = (
     "saturday",
     "sunday",
 )
+SERVICE_TARGET_FIELDS = {
+    vol.Optional(ATTR_DEVICE_ID): str,
+    # Retain the two historical selectors for saved automations and the bundled
+    # Lovelace cards. They are intentionally omitted from services.yaml so new
+    # action-editor calls use Home Assistant's device picker.
+    vol.Optional("entry_id"): str,
+    vol.Optional("mac"): str,
+}
 RETIRED_CHANNEL_SUFFIXES = tuple(f"_channel_{index}" for index in range(1, 6))
 RETIRED_DIAGNOSTIC_SUFFIXES = (
     "_diagnostics",
@@ -324,8 +332,7 @@ def _validate_manual_preset_slot(value: object) -> int:
 
 CHANNEL_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Optional("red"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("green"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("blue"): vol.All(int, vol.Range(min=0, max=100)),
@@ -338,8 +345,7 @@ CHANNEL_SERVICE_SCHEMA = vol.Schema(
 
 PREVIEW_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("points"): _validate_schedule_points,
         vol.Optional("duration", default=60): vol.All(int, vol.Range(min=1, max=3600)),
         vol.Optional("step_seconds", default=2): vol.All(int, vol.Range(min=1, max=300)),
@@ -348,24 +354,17 @@ PREVIEW_SERVICE_SCHEMA = vol.Schema(
 
 NATIVE_PREVIEW_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("minute"): vol.All(int, vol.Range(min=0, max=1439)),
         vol.Required("schedule_type"): vol.In(["auto", "professional"]),
     }
 )
 
-STOP_PREVIEW_SERVICE_SCHEMA = vol.Schema(
-    {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
-    }
-)
+STOP_PREVIEW_SERVICE_SCHEMA = vol.Schema(SERVICE_TARGET_FIELDS)
 
 SCHEDULE_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("points"): _validate_schedule_points,
         vol.Optional("mode"): vol.In(["manual", "native"]),
     }
@@ -373,32 +372,28 @@ SCHEDULE_SERVICE_SCHEMA = vol.Schema(
 
 NATIVE_AUTO_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("schedule"): _validate_native_auto_schedule,
     }
 )
 
 NATIVE_PRO_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("points"): _validate_native_pro_points,
     }
 )
 
 NATIVE_EFFECT_SCHEDULE_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("windows"): _validate_native_effect_windows,
     }
 )
 
 MANUAL_PRESET_SERVICE_SCHEMA = vol.Schema(
     {
-        vol.Optional("entry_id"): str,
-        vol.Optional("mac"): str,
+        **SERVICE_TARGET_FIELDS,
         vol.Required("slot"): _validate_manual_preset_slot,
     }
 )
@@ -730,9 +725,26 @@ def _register_services(hass: HomeAssistant) -> None:
     if hass.data[DOMAIN].get(SERVICES_REGISTERED):
         return
 
-    def get_device(call: ServiceCall) -> Device:
-        entry_id = call.data.get("entry_id")
-        mac = (call.data.get("mac") or "").upper()
+    def target_entry_ids(data: dict) -> set[str] | None:
+        """Resolve a Home Assistant device target to its config entries."""
+        device_id = data.get(ATTR_DEVICE_ID)
+        if not device_id:
+            return None
+        device_entry = dr.async_get(hass).async_get(device_id)
+        if device_entry is None:
+            raise HomeAssistantError("The selected Home Assistant device no longer exists")
+        entry_ids = set(getattr(device_entry, "config_entries", set()) or set())
+        if not entry_ids:
+            raise HomeAssistantError("The selected device is not managed by Fluval BLE")
+        return entry_ids
+
+    def loaded_device_candidates(data: dict, device_entry_ids: set[str] | None = None) -> list[tuple[str, Device]]:
+        """Return loaded fixtures matching every supplied target identifier."""
+        entry_id = data.get("entry_id")
+        mac = (data.get("mac") or "").upper()
+        if device_entry_ids is None and data.get(ATTR_DEVICE_ID):
+            device_entry_ids = target_entry_ids(data)
+        candidates: list[tuple[str, Device]] = []
         for candidate_entry_id, entry_data in hass.data[DOMAIN].items():
             if candidate_entry_id in {
                 SERVICES_REGISTERED,
@@ -742,44 +754,48 @@ def _register_services(hass: HomeAssistant) -> None:
                 continue
             device = _runtime_device(entry_data)
             if device is None:
+                continue
+            if device_entry_ids is not None and candidate_entry_id not in device_entry_ids:
                 continue
             if entry_id and candidate_entry_id != entry_id:
                 continue
             if mac and device.mac.upper() != mac:
                 continue
-            return device
-        raise HomeAssistantError("No matching Fluval BLE device is ready")
+            candidates.append((candidate_entry_id, device))
+        return candidates
+
+    def get_device(call: ServiceCall) -> Device:
+        candidates = loaded_device_candidates(call.data)
+        if len(candidates) == 1:
+            return candidates[0][1]
+        if len(candidates) > 1:
+            raise HomeAssistantError("Select one Fluval light for this action")
+        raise HomeAssistantError("The selected Fluval light is not loaded or available")
 
     def get_entry_id(data: dict) -> str:
         entry_id = data.get("entry_id")
         mac = (data.get("mac") or "").upper()
-        for candidate_entry_id, entry_data in hass.data[DOMAIN].items():
-            if candidate_entry_id in {
-                SERVICES_REGISTERED,
-                STATIC_REGISTERED,
-                WEBSOCKET_REGISTERED,
-            }:
-                continue
-            device = _runtime_device(entry_data)
-            if device is None:
-                continue
-            if entry_id and candidate_entry_id == entry_id:
-                return candidate_entry_id
-            if mac and device is not None and device.mac.upper() == mac:
-                return candidate_entry_id
+        device_entry_ids = target_entry_ids(data)
+        candidates = {
+            candidate_entry_id for candidate_entry_id, _device in loaded_device_candidates(data, device_entry_ids)
+        }
 
-        for entry in hass.config_entries.async_entries(DOMAIN):
+        config_entries = getattr(hass, "config_entries", None)
+        entries = config_entries.async_entries(DOMAIN) if config_entries is not None else []
+        for entry in entries:
             entry_mac = (entry.data.get(CONF_MAC) or "").upper()
-            if entry_id and entry.entry_id == entry_id:
-                return entry.entry_id
-            if mac and entry_mac == mac:
-                return entry.entry_id
+            if device_entry_ids is not None and entry.entry_id not in device_entry_ids:
+                continue
+            if entry_id and entry.entry_id != entry_id:
+                continue
+            if mac and entry_mac != mac:
+                continue
+            candidates.add(entry.entry_id)
 
-        if not entry_id and not mac:
-            entries = hass.config_entries.async_entries(DOMAIN)
-            if entries:
-                return entries[0].entry_id
-
+        if len(candidates) == 1:
+            return candidates.pop()
+        if len(candidates) > 1:
+            raise HomeAssistantError("Select one Fluval light for this action")
         raise HomeAssistantError("No matching Fluval BLE config entry was found")
 
     async def async_set_channels(call: ServiceCall) -> None:
