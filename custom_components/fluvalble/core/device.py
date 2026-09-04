@@ -1,12 +1,13 @@
 """A single Fluval BLE connected LED device."""
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 import asyncio
 import contextlib
 from datetime import UTC, datetime, timedelta
+from functools import wraps
 import logging
 from time import monotonic
-from typing import Any, TypedDict
+from typing import Any, Concatenate, ParamSpec, TypeVar, TypedDict, cast
 
 from bleak import AdvertisementData, BLEDevice, BleakError, BleakScanner
 from homeassistant.components import bluetooth
@@ -94,6 +95,22 @@ BLE_LOOKUP_RETRIES = 3
 PREVIEW_STEP_SECONDS = 2
 TRANSITION_STEP_SECONDS = 30
 DAY_MINUTES = 24 * 60
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+
+
+def serialized_device_command(
+    method: Callable[Concatenate["Device", _P], Awaitable[_R]],
+) -> Callable[Concatenate["Device", _P], Awaitable[_R]]:
+    """Run one complete device command without interleaving another."""
+
+    @wraps(method)
+    async def wrapped(self: "Device", *args: _P.args, **kwargs: _P.kwargs) -> _R:
+        async with self.command_transaction():
+            return await method(self, *args, **kwargs)
+
+    return cast(Callable[Concatenate["Device", _P], Awaitable[_R]], wrapped)
 
 
 class Attribute(TypedDict, total=False):
@@ -190,6 +207,10 @@ class Device:
         self._clock_synced = False
         self._clock_sync_started = False
         self._clock_sync_lock = asyncio.Lock()
+        self._command_transaction_lock = asyncio.Lock()
+        self._command_transaction_owner: asyncio.Task[Any] | None = None
+        self._command_transaction_depth = 0
+        self._command_generation = 0
         # Preserve the exact colour HA requested while the decoded physical
         # channels still match it.  Plant RGB conversion is intentionally
         # lossy, so reconstructing RGB from those five channels would otherwise
@@ -218,6 +239,30 @@ class Device:
     def controls_available(self) -> bool:
         """Return true when HA has enough BLE info to attempt commands."""
         return bool(self.client or self.conn_info.get("last_seen"))
+
+    @contextlib.asynccontextmanager
+    async def command_transaction(self, *, supersede_transition: bool = True) -> AsyncIterator[None]:
+        """Serialize a complete command while allowing nested device helpers."""
+        task = asyncio.current_task()
+        if task is not None and self._command_transaction_owner is task:
+            self._command_transaction_depth += 1
+            try:
+                yield
+            finally:
+                self._command_transaction_depth -= 1
+            return
+
+        await self._command_transaction_lock.acquire()
+        self._command_transaction_owner = task
+        self._command_transaction_depth = 1
+        if supersede_transition:
+            self._command_generation += 1
+        try:
+            yield
+        finally:
+            self._command_transaction_depth = 0
+            self._command_transaction_owner = None
+            self._command_transaction_lock.release()
 
     def touch_seen(self, *, rssi: int | None = None, notify: bool = True) -> None:
         """Record successful advertisement, connection, or command activity."""
@@ -722,6 +767,7 @@ class Device:
         # later device changes must replace the cached HA colour.
         return self._commanded_at is not None and monotonic() - self._commanded_at < 2.0
 
+    @serialized_device_command
     async def async_apply_light_channels(self, values: dict[str, int]) -> bool:
         """Apply colour channels and ensure the physical fixture is powered on."""
         if not await self.async_set_channels(values):
@@ -808,6 +854,7 @@ class Device:
         self.values["effect"] = None
         self._effect_restore_channels = None
 
+    @serialized_device_command
     async def async_set_effect(self, effect: str) -> bool:
         """Start one APK-native effect on a supported Fluval controller."""
         if not await self._async_prepare_command():
@@ -875,6 +922,7 @@ class Device:
             handler()
         return True
 
+    @serialized_device_command
     async def async_set_native_auto_schedule(
         self,
         schedule: dict[str, Any],
@@ -942,6 +990,7 @@ class Device:
             return "plant_pro", protocol.SPP_MIN_PRO_POINTS, protocol.SPP_MAX_PRO_POINTS
         return "classic", protocol.OLD_MIN_PRO_POINTS, protocol.OLD_MAX_PRO_POINTS
 
+    @serialized_device_command
     async def async_set_native_pro_schedule(
         self,
         points: list[dict[str, Any]],
@@ -1017,6 +1066,7 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
+    @serialized_device_command
     async def async_set_native_effect_schedule(self, windows: list[dict[str, Any]]) -> bool:
         """Store APK-native timed weather-effect windows in the fixture."""
         if not await self._async_prepare_command():
@@ -1083,12 +1133,14 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
+    @serialized_device_command
     async def async_stop_effect(self) -> bool:
         """Stop a native effect by restoring the preceding static channel mix."""
         if not self.values.get("effect"):
             return True
         return await self.async_set_channels(self._channels_after_effect(), force=True)
 
+    @serialized_device_command
     async def async_set_master_brightness(self, level: int) -> bool:
         """Scale all supported channels to level, preserving ratios."""
         level = min(100, max(0, round(level / 10) if level > 100 else int(level)))
@@ -1173,6 +1225,7 @@ class Device:
         with contextlib.suppress(ValueError):
             target.remove(handler)
 
+    @serialized_device_command
     async def async_set_value(self, attr: str, value: int) -> bool:
         """Set values received by entities such as numbers and switches."""
         if attr.startswith("channel_"):
@@ -1190,6 +1243,43 @@ class Device:
         force: bool = False,
     ) -> bool:
         """Set multiple channel values, optionally ramping over time."""
+        if transition <= 0:
+            async with self.command_transaction():
+                return await self._async_set_channels_now(values, force=force)
+
+        async with self.command_transaction():
+            generation = self._command_generation
+            channels = self.numbers()
+            targets = {
+                channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels
+            }
+            start_values = {channel: int(self.values[channel]) for channel in channels}
+
+        steps = max(1, int(transition / max(1, step_seconds)))
+        for step in range(1, steps + 1):
+            async with self.command_transaction(supersede_transition=False):
+                if generation != self._command_generation:
+                    self.diagnostics["status"] = "transition_interrupted"
+                    self._notify_diagnostics_throttled()
+                    return True
+                ratio = step / steps
+                step_values = {
+                    channel: round(start_values[channel] + ((targets[channel] - start_values[channel]) * ratio))
+                    for channel in channels
+                }
+                if not await self._async_set_channels_now(step_values, force=force):
+                    return False
+            if step < steps:
+                await asyncio.sleep(step_seconds)
+        return True
+
+    async def _async_set_channels_now(
+        self,
+        values: dict[str, int],
+        *,
+        force: bool = False,
+    ) -> bool:
+        """Apply one channel frame inside an active command transaction."""
         channels = self.numbers()
         effect_active = bool(self.values.get("effect"))
         force = force or effect_active
@@ -1221,43 +1311,18 @@ class Device:
                 return False
             self.values["mode"] = "manual"
 
-        if transition <= 0:
-            for channel, value in targets.items():
-                self.values[channel] = value
-            ok = await self._async_send_channel_state(
-                old_values,
-                force_power=force,
-                single_channel=single_channel,
-            )
-            if ok and effect_active:
-                self._clear_effect_state()
-                for handler in self.updates_component:
-                    handler()
-            return ok
-
-        steps = max(1, int(transition / max(1, step_seconds)))
-        start_values = {channel: int(old_values[channel]) for channel in channels}
-        for step in range(1, steps + 1):
-            ratio = step / steps
-            for channel in channels:
-                start = start_values[channel]
-                end = targets[channel]
-                self.values[channel] = round(start + ((end - start) * ratio))
-            if not await self._async_send_channel_state(
-                old_values,
-                force_power=force,
-                single_channel=single_channel,
-            ):
-                self.values = old_values
-                return False
-            if step < steps:
-                await asyncio.sleep(step_seconds)
-
-        if effect_active:
+        for channel, value in targets.items():
+            self.values[channel] = value
+        ok = await self._async_send_channel_state(
+            old_values,
+            force_power=force,
+            single_channel=single_channel,
+        )
+        if ok and effect_active:
             self._clear_effect_state()
             for handler in self.updates_component:
                 handler()
-        return True
+        return ok
 
     async def _async_send_channel_state(
         self,
@@ -1319,6 +1384,7 @@ class Device:
                 handler()
         return ok
 
+    @serialized_device_command
     async def async_preview_schedule(
         self,
         points: list[dict[str, Any]],
@@ -1335,6 +1401,7 @@ class Device:
         self.preview_task = asyncio.create_task(self._async_preview_schedule(points, duration, step_seconds))
         return True
 
+    @serialized_device_command
     async def async_preview_native_schedule(self, minute: int, schedule_type: str) -> bool:
         """Preview one minute of a schedule already stored by the fixture."""
         if schedule_type not in {"auto", "professional"} or not 0 <= minute < DAY_MINUTES:
@@ -1404,6 +1471,7 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
+    @serialized_device_command
     async def async_stop_preview(self, *, restore: bool = True) -> bool:
         """Stop any running preview, optionally restoring its preceding state."""
         restored = True
@@ -1662,6 +1730,7 @@ class Device:
         minute %= DAY_MINUTES
         return f"{minute // 60:02d}:{minute % 60:02d}"
 
+    @serialized_device_command
     async def async_set_switch(self, attr: str, value: bool) -> bool:
         """Set switch values and send the updated state to the light."""
         _LOGGER.debug("Switch %s changed to %s", attr, value)
@@ -1689,6 +1758,7 @@ class Device:
                 handler()
         return ok
 
+    @serialized_device_command
     async def async_set_daylight_saving_time(self, enabled: bool) -> bool:
         """Set the fixture-owned FACEBD daylight-saving flag."""
         if not await self._async_prepare_command():
@@ -1728,6 +1798,7 @@ class Device:
             return None
         return [int(value) for value in presets[slot - 1]]
 
+    @serialized_device_command
     async def async_recall_manual_preset(self, slot: int) -> bool:
         """Apply one fixture-resident classic P1-P4 preset as FluvalConnect does."""
         if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 4:
@@ -1771,6 +1842,7 @@ class Device:
         )
         return True
 
+    @serialized_device_command
     async def async_save_manual_preset(self, slot: int) -> bool:
         """Save the current classic channel state in fixture slot P1-P4."""
         if isinstance(slot, bool) or not isinstance(slot, int) or not 1 <= slot <= 4:
@@ -1813,6 +1885,7 @@ class Device:
         )
         return True
 
+    @serialized_device_command
     async def async_identify(self) -> bool:
         """Ask the fixture to identify itself using FluvalConnect's Find command."""
         if not await self._async_prepare_command():
@@ -1827,6 +1900,7 @@ class Device:
             packet = protocol.old_find_packet()
         return await self._async_send_packet(packet)
 
+    @serialized_device_command
     async def async_select_option(self, attr: str, option: str) -> bool:
         """Set select values and send the updated state to the light."""
         if attr != "mode" or option not in MODES:
@@ -1870,6 +1944,7 @@ class Device:
             if not await self._async_finish_clock_sync(state):
                 _LOGGER.warning("Fluval timezone sync failed after connect for %s", self.address)
 
+    @serialized_device_command
     async def async_sync_clock(self, *, force: bool = False) -> bool:
         """Run the APK's clock, state-read, and timezone initialization sequence."""
         if self._clock_synced and not force:
@@ -2057,6 +2132,7 @@ class Device:
             }
         return {key: value for key, value in decoded.items() if key in supported_keys}
 
+    @serialized_device_command
     async def async_refresh_state(self) -> bool:
         """Resolve the controller and request its current state."""
         if not await self._async_ensure_client() or self.client is None:

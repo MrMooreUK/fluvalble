@@ -416,6 +416,60 @@ async def _async_test_normal_light_and_mode_controls_stop_active_previews_first(
     assert events == [("stop_preview", False), ("set_option", None)]
 
 
+def test_preview_stop_and_replacement_entity_command_are_atomic():
+    asyncio.run(_async_test_preview_stop_and_replacement_entity_command_are_atomic())
+
+
+async def _async_test_preview_stop_and_replacement_entity_command_are_atomic():
+    device = _make_device()
+    device.values["led_on_off"] = True
+    events = []
+    first_stop_started = asyncio.Event()
+    release_first_stop = asyncio.Event()
+    stop_calls = 0
+
+    async def stop_preview(*, restore=True):
+        nonlocal stop_calls
+        stop_calls += 1
+        events.append(("stop_preview", restore))
+        if stop_calls == 1:
+            first_stop_started.set()
+            await release_first_stop.wait()
+        return True
+
+    async def set_switch(_attr, _value):
+        events.append(("set_switch", None))
+        return True
+
+    async def set_option(_attr, _option):
+        events.append(("set_option", None))
+        return True
+
+    device.async_stop_preview = AsyncMock(side_effect=stop_preview)
+    device.async_set_switch = AsyncMock(side_effect=set_switch)
+    device.async_select_option = AsyncMock(side_effect=set_option)
+    light_entity = light.FluvalLight(device, "light")
+    mode_entity = select.FluvalSelect(device, "mode")
+
+    power_task = asyncio.create_task(light_entity.async_turn_off())
+    await first_stop_started.wait()
+    mode_task = asyncio.create_task(mode_entity.async_select_option("automatic"))
+    await asyncio.sleep(0)
+
+    assert events == [("stop_preview", True)]
+    assert not mode_task.done()
+
+    release_first_stop.set()
+    await power_task
+    await mode_task
+    assert events == [
+        ("stop_preview", True),
+        ("set_switch", None),
+        ("stop_preview", False),
+        ("set_option", None),
+    ]
+
+
 def test_turn_off_is_attempted_when_preview_stop_fails():
     asyncio.run(_async_test_turn_off_is_attempted_when_preview_stop_fails())
 

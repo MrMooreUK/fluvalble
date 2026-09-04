@@ -102,6 +102,11 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Turn on the fixture and apply an optional colour or brightness."""
+        async with self.device.command_transaction():
+            await self._async_turn_on(**kwargs)
+
+    async def _async_turn_on(self, **kwargs) -> None:
+        """Apply one complete turn-on transaction."""
         replaces_preview_state = any(key in kwargs for key in (ATTR_EFFECT, ATTR_BRIGHTNESS, ATTR_RGB_COLOR))
         if not await self.device.async_stop_preview(restore=not replaces_preview_state):
             self._raise_command_error()
@@ -255,6 +260,11 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def async_turn_off(self, **kwargs) -> None:
         """Turn off the fixture without rewriting its colour channels."""
+        async with self.device.command_transaction():
+            await self._async_turn_off(**kwargs)
+
+    async def _async_turn_off(self, **kwargs) -> None:
+        """Apply one complete turn-off transaction."""
         preview_stopped = await self.device.async_stop_preview()
         powered_off = await self.device.async_set_switch("led_on_off", False)
         if not preview_stopped or not powered_off:
