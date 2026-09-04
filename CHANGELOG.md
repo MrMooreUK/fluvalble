@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Match the FluvalConnect APK's Bluetooth scan boundary by requiring a
+  catalogued light product ID for automatic discovery. Device names and shared
+  service UUIDs no longer allow pumps, feeders, gateways, or unrelated BLE
+  devices to be offered as Fluval lights; manual setup remains available.
 - Keep the single five-channel Plant 3.0 light entity renderable on Home
   Assistant 2026.9 by using the required typed empty feature flag when the
   integration exposes an empty effect list.
