@@ -1404,23 +1404,32 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
-    async def async_stop_preview(self) -> bool:
-        """Stop any running editor or fixture-native schedule preview."""
+    async def async_stop_preview(self, *, restore: bool = True) -> bool:
+        """Stop any running preview, optionally restoring its preceding state."""
         restored = True
+        had_editor_preview = any(
+            value is not None
+            for value in (
+                self.preview_task,
+                self.preview_restore_mode,
+                self.preview_restore_values,
+            )
+        )
         if self.preview_task and not self.preview_task.done():
             self.preview_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self.preview_task
         self.preview_task = None
         restore_mode = self.preview_restore_mode
+        restore_values = self.preview_restore_values
         self.preview_restore_mode = None
-        if restore_mode is not None:
-            self.preview_restore_values = None
+        self.preview_restore_values = None
+        if restore and restore_mode is not None:
             restored = await self.async_select_option("mode", restore_mode)
-        elif self.preview_restore_values:
-            restore_values = self.preview_restore_values
-            self.preview_restore_values = None
+        elif restore and restore_values:
             restored = await self.async_set_channels(restore_values)
+        elif had_editor_preview:
+            self.diagnostics["status"] = "preview_interrupted"
 
         if self.native_preview_active:
             if not await self._async_prepare_command():
@@ -1434,12 +1443,18 @@ class Device:
             if not stopped:
                 self._set_diagnostic_error("native_preview_stop_failed", "Unable to stop fixture schedule preview")
                 return False
-            if not await self._async_restore_native_preview_mode():
-                self._set_diagnostic_error(
-                    "native_preview_restore_failed", "Preview stopped but fixture mode was not restored"
-                )
-                return False
-            self.diagnostics["status"] = "native_preview_stopped"
+            if restore:
+                if not await self._async_restore_native_preview_mode():
+                    self._set_diagnostic_error(
+                        "native_preview_restore_failed", "Preview stopped but fixture mode was not restored"
+                    )
+                    return False
+                self.diagnostics["status"] = "native_preview_stopped"
+            else:
+                self.native_preview_active = False
+                self.native_preview_schedule_type = None
+                self.native_preview_restore_mode = None
+                self.diagnostics["status"] = "native_preview_interrupted"
             self._notify_diagnostics_throttled()
         return restored
 

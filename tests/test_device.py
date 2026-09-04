@@ -1782,6 +1782,57 @@ async def _async_test_stopping_preview_reactivates_the_native_fixture_mode():
     device.async_set_channels.assert_not_awaited()
 
 
+def test_interrupting_editor_preview_discards_restore_state():
+    asyncio.run(_async_test_interrupting_editor_preview_discards_restore_state())
+
+
+async def _async_test_interrupting_editor_preview_discards_restore_state():
+    device = _make_device()
+    device.preview_restore_values = {"channel_1": 50}
+    device.preview_restore_mode = "professional"
+    device.async_select_option = AsyncMock(return_value=True)
+    device.async_set_channels = AsyncMock(return_value=True)
+
+    assert await device.async_stop_preview(restore=False)
+
+    assert device.preview_restore_values is None
+    assert device.preview_restore_mode is None
+    assert device.diagnostics["status"] == "preview_interrupted"
+    device.async_select_option.assert_not_awaited()
+    device.async_set_channels.assert_not_awaited()
+
+
+def test_interrupting_native_preview_sends_only_apk_stop_packet():
+    asyncio.run(_async_test_interrupting_native_preview_sends_only_apk_stop_packet())
+
+
+async def _async_test_interrupting_native_preview_sends_only_apk_stop_packet():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = SimpleNamespace(
+        wifi_facebd=True,
+        plant_pro_spp=False,
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+    )
+    device.values["mode"] = "automatic"
+    device.native_preview_active = True
+    device.native_preview_schedule_type = "auto"
+    device.native_preview_restore_mode = "manual"
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_stop_preview(restore=False)
+
+    device._async_send_packet.assert_awaited_once()
+    assert protocol.decode_cbor_map(device._async_send_packet.await_args.args[0]) == {
+        protocol.WIFI_AUTO_PREVIEW_KEY: 1440
+    }
+    assert device.values["mode"] == "automatic"
+    assert not device.native_preview_active
+    assert device.native_preview_schedule_type is None
+    assert device.native_preview_restore_mode is None
+    assert device.diagnostics["status"] == "native_preview_interrupted"
+
+
 async def _async_test_plant_pro_clock_action_sends_apk_mesh_clock_packet():
     device = _make_device(
         name="PlantPro_AABBCC",
