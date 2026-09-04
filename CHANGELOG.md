@@ -7,6 +7,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+- Stopped software and fixture-native schedule previews before normal light or
+  Mode controls, preventing a preview from issuing channel or mode packets over
+  a newer user command.
+
 ---
 
 ## [0.0.12] — 2026-09-04

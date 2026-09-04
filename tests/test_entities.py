@@ -366,6 +366,98 @@ async def _async_test_light_entity_handles_power_only_actions():
     assert device.async_set_switch.await_args_list[1].args == ("led_on_off", False)
 
 
+def test_normal_light_and_mode_controls_stop_active_previews_first():
+    asyncio.run(_async_test_normal_light_and_mode_controls_stop_active_previews_first())
+
+
+async def _async_test_normal_light_and_mode_controls_stop_active_previews_first():
+    device = _make_device()
+    device.values["led_on_off"] = True
+    events = []
+
+    async def stop_preview(*, restore=True):
+        events.append(("stop_preview", restore))
+        return True
+
+    async def apply_channels(_channels):
+        events.append(("apply_channels", None))
+        return True
+
+    async def set_switch(_attr, _value):
+        events.append(("set_switch", None))
+        return True
+
+    async def set_option(_attr, _option):
+        events.append(("set_option", None))
+        return True
+
+    device.async_stop_preview = AsyncMock(side_effect=stop_preview)
+    device.async_apply_light_channels = AsyncMock(side_effect=apply_channels)
+    device.async_set_switch = AsyncMock(side_effect=set_switch)
+    device.async_select_option = AsyncMock(side_effect=set_option)
+    light_entity = light.FluvalLight(device, "light")
+    mode_entity = select.FluvalSelect(device, "mode")
+
+    await light_entity.async_turn_on(**{ATTR_RGB_COLOR: (0, 255, 0)})
+    device.async_stop_preview.assert_awaited_once_with(restore=False)
+    assert events == [("stop_preview", False), ("apply_channels", None)]
+
+    device.async_stop_preview.reset_mock()
+    events.clear()
+    await light_entity.async_turn_off()
+    device.async_stop_preview.assert_awaited_once_with()
+    assert events == [("stop_preview", True), ("set_switch", None)]
+
+    device.async_stop_preview.reset_mock()
+    events.clear()
+    await mode_entity.async_select_option("automatic")
+    device.async_stop_preview.assert_awaited_once_with(restore=False)
+    device.async_select_option.assert_awaited_once_with("mode", "automatic")
+    assert events == [("stop_preview", False), ("set_option", None)]
+
+
+def test_turn_off_is_attempted_when_preview_stop_fails():
+    asyncio.run(_async_test_turn_off_is_attempted_when_preview_stop_fails())
+
+
+async def _async_test_turn_off_is_attempted_when_preview_stop_fails():
+    device = _make_device()
+    device.client = SimpleNamespace(
+        last_error="preview stop failed",
+        command_write_uuid=None,
+    )
+    device.async_stop_preview = AsyncMock(return_value=False)
+    device.async_set_switch = AsyncMock(return_value=True)
+    entity = light.FluvalLight(device, "light")
+
+    with pytest.raises(HomeAssistantError, match="preview stop failed"):
+        await entity.async_turn_off()
+
+    device.async_stop_preview.assert_awaited_once_with()
+    device.async_set_switch.assert_awaited_once_with("led_on_off", False)
+
+
+def test_turn_on_does_not_write_over_a_preview_that_failed_to_stop():
+    asyncio.run(_async_test_turn_on_does_not_write_over_a_preview_that_failed_to_stop())
+
+
+async def _async_test_turn_on_does_not_write_over_a_preview_that_failed_to_stop():
+    device = _make_device()
+    device.client = SimpleNamespace(
+        last_error="preview stop failed",
+        command_write_uuid=None,
+    )
+    device.async_stop_preview = AsyncMock(return_value=False)
+    device.async_apply_light_channels = AsyncMock(return_value=True)
+    entity = light.FluvalLight(device, "light")
+
+    with pytest.raises(HomeAssistantError, match="preview stop failed"):
+        await entity.async_turn_on(**{ATTR_RGB_COLOR: (0, 255, 0)})
+
+    device.async_stop_preview.assert_awaited_once_with(restore=False)
+    device.async_apply_light_channels.assert_not_awaited()
+
+
 def test_light_entity_surfaces_ble_command_failures():
     asyncio.run(_async_test_light_entity_surfaces_ble_command_failures())
 

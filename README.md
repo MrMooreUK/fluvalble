@@ -183,7 +183,9 @@ native preview commands against the schedule already stored by the controller.
 They never upload unsaved editor values. Classic controllers receive their
 dedicated preview-level frames; FACEBD and FFF0/SPP controllers evaluate the
 stored schedule for the requested minute themselves. **Stop preview** sends the
-APK stop command and restores the fixture's prior mode.
+APK stop command and restores the fixture's prior mode. Using the normal light
+or Mode controls also stops an active preview first, so no preview packet can
+override the newer user command.
 
 The separate timed-effects card writes the same onboard effect windows exposed
 by `fluvalble.set_native_effect_schedule`. It limits the effect picker to the
