@@ -14,8 +14,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0  # Full history so we can read the full CHANGELOG
 
       - name: Extract version from tag
         id: version
@@ -31,27 +29,16 @@ jobs:
           fi
           echo "Version check passed: $manifest_version"
 
-      - name: Extract changelog for this release
-        id: changelog
+      - name: Prepare curated release notes
         run: |
-          python - <<'EOF'
-          import re, sys
-
-          tag = "${{ steps.version.outputs.version }}"
-          text = open("CHANGELOG.md").read()
-
-          # Extract the section for this version
-          pattern = rf"## \[{re.escape(tag)}\].*?(?=\n## \[|\Z)"
-          match = re.search(pattern, text, re.DOTALL)
-          if not match:
-              print(f"No CHANGELOG section found for version {tag}", file=sys.stderr)
-              sys.exit(1)
-
-          section = match.group(0).strip()
-          # Write to file for use in next step (avoids quoting issues)
-          open("/tmp/release_notes.md", "w").write(section)
-          print(f"Extracted release notes for {tag}")
-          EOF
+          notes_path="docs/releases/v${{ steps.version.outputs.version }}.md"
+          if [ ! -f "$notes_path" ]; then
+            echo "::error::Missing curated release notes: $notes_path"
+            echo "::error::Add and review this file before creating the release tag."
+            exit 1
+          fi
+          cp "$notes_path" /tmp/release_notes.md
+          echo "Using curated release notes from $notes_path"
 
       - name: Package integration
         run: |
