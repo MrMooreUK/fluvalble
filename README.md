@@ -349,6 +349,9 @@ The integration uses Home Assistant's Bluetooth support to connect to the Fluval
 - Reachable remains on for five minutes after an advertisement, successful connection, or successful command. Signal strength is the latest advertisement sample from the scanner selected for GATT while connected; its timestamp remains visible because Fluval controllers normally stop advertising during an active session. An advertisement from another scanner cannot overwrite that value.
 - Source shows only the friendly name of the adapter or proxy confirmed by Home Assistant's connected GATT client. The latest advertisement and per-scanner addresses remain available in downloadable diagnostics instead of separate device-page entities.
 - Each reconnect uses a fresh BLE client and the current HA-selected route.
+- Complete commands are serialized per fixture. Multi-packet operations retain
+  their APK-defined ordering even when different Home Assistant entities or
+  actions are called concurrently.
 
 ---
 

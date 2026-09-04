@@ -43,6 +43,11 @@ class FluvalSelect(FluvalEntity, SelectEntity):
             self._async_write_ha_state()
 
     async def async_select_option(self, option: str) -> None:
+        async with self.device.command_transaction():
+            await self._async_select_option(option)
+
+    async def _async_select_option(self, option: str) -> None:
+        """Apply one complete mode-selection transaction."""
         if not await self.device.async_stop_preview(restore=False):
             self.internal_update()
             self._raise_command_error()

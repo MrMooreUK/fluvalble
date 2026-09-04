@@ -457,6 +457,146 @@ async def _async_test_native_weather_effect_uses_apk_packet():
     }
 
 
+def test_complete_device_commands_cannot_interleave_packets():
+    asyncio.run(_async_test_complete_device_commands_cannot_interleave_packets())
+
+
+async def _async_test_complete_device_commands_cannot_interleave_packets():
+    device = _make_device(
+        name="AquaSky2.0_Test",
+        model="AquaSky 2.0 Bluetooth LED",
+        product_id=328,
+    )
+    device.client = SimpleNamespace(command_write_uuid="00001001-0000-1000-8000-00805f9b34fb")
+    device.values.update({"mode": "automatic", "led_on_off": False})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    first_packet_started = asyncio.Event()
+    release_first_packet = asyncio.Event()
+    packets = []
+
+    async def send_packet(packet):
+        packets.append(packet)
+        if len(packets) == 1:
+            first_packet_started.set()
+            await release_first_packet.wait()
+        return True
+
+    device._async_send_packet = AsyncMock(side_effect=send_packet)
+
+    effect_task = asyncio.create_task(device.async_set_effect("Lightning"))
+    await first_packet_started.wait()
+    power_task = asyncio.create_task(device.async_set_switch("led_on_off", False))
+    await asyncio.sleep(0)
+
+    assert packets == [protocol.old_mode_packet(0)]
+    assert not power_task.done()
+
+    release_first_packet.set()
+    assert await effect_task
+    assert await power_task
+    assert packets == [
+        protocol.old_mode_packet(0),
+        protocol.old_switch_packet(True),
+        protocol.old_weather_effect_packet(2),
+        protocol.old_switch_packet(False),
+    ]
+
+
+def test_device_command_transaction_is_reentrant_for_nested_helpers():
+    asyncio.run(_async_test_device_command_transaction_is_reentrant_for_nested_helpers())
+
+
+async def _async_test_device_command_transaction_is_reentrant_for_nested_helpers():
+    device = _make_device(
+        name="AquaSky2.0_Test",
+        model="AquaSky 2.0 Bluetooth LED",
+        product_id=328,
+    )
+    device.client = SimpleNamespace(command_write_uuid="00001001-0000-1000-8000-00805f9b34fb")
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    async def nested_command():
+        async with device.command_transaction():
+            return await device.async_apply_light_channels(
+                {
+                    "channel_1": 10,
+                    "channel_2": 20,
+                    "channel_3": 30,
+                    "channel_4": 40,
+                }
+            )
+
+    assert await asyncio.wait_for(nested_command(), timeout=1)
+    assert device._command_transaction_depth == 0
+    assert device._command_transaction_owner is None
+    assert not device._command_transaction_lock.locked()
+
+
+def test_cancelled_command_releases_device_transaction():
+    asyncio.run(_async_test_cancelled_command_releases_device_transaction())
+
+
+async def _async_test_cancelled_command_releases_device_transaction():
+    device = _make_device()
+    transaction_started = asyncio.Event()
+
+    async def hold_transaction():
+        async with device.command_transaction():
+            transaction_started.set()
+            await asyncio.Event().wait()
+
+    task = asyncio.create_task(hold_transaction())
+    await transaction_started.wait()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    async with asyncio.timeout(1):
+        async with device.command_transaction():
+            pass
+
+    assert device._command_transaction_owner is None
+    assert not device._command_transaction_lock.locked()
+
+
+def test_new_command_supersedes_long_channel_transition_between_frames():
+    asyncio.run(_async_test_new_command_supersedes_long_channel_transition_between_frames())
+
+
+async def _async_test_new_command_supersedes_long_channel_transition_between_frames():
+    device = _make_device()
+    device._async_set_channels_now = AsyncMock(return_value=True)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    transition_sleeping = asyncio.Event()
+    release_transition = asyncio.Event()
+
+    async def transition_sleep(_delay):
+        transition_sleeping.set()
+        await release_transition.wait()
+
+    with patch("custom_components.fluvalble.core.device.asyncio.sleep", side_effect=transition_sleep):
+        transition_task = asyncio.create_task(
+            device.async_set_channels(
+                {"channel_1": 100},
+                transition=60,
+                step_seconds=30,
+            )
+        )
+        await transition_sleeping.wait()
+
+        assert await device.async_set_switch("led_on_off", False)
+        release_transition.set()
+        assert await transition_task
+
+    device._async_set_channels_now.assert_awaited_once()
+    device._async_send_packet.assert_awaited_once_with(protocol.old_switch_packet(False))
+    assert device.diagnostics["status"] == "transition_interrupted"
+
+
 def test_plant_pro_native_effect_uses_key_14_packet():
     asyncio.run(_async_test_plant_pro_native_effect_uses_key_14_packet())
 

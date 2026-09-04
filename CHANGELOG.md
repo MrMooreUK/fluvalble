@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Fixed
+- Serialized complete per-fixture command transactions so concurrent entity or
+  action calls cannot interleave the ordered packets for effects, channels,
+  schedules, previews, presets, clock synchronization, or state refresh.
 - Stopped software and fixture-native schedule previews before normal light or
   Mode controls, preventing a preview from issuing channel or mode packets over
   a newer user command.
