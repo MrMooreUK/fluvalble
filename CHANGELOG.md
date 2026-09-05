@@ -24,6 +24,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Keep the Connected since diagnostic enabled for persistent connections while
   disabling only the stale RSSI sensor. Restored channel controls explicitly
   default to enabled.
+- Route near-neutral colour-picker white to AquaSky's dedicated Pure White
+  emitter, accounting for Home Assistant frontend RGB quantization.
+- Turn the fixture off when every exact physical-channel slider reaches zero.
 
 ---
 

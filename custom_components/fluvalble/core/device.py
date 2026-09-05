@@ -55,6 +55,7 @@ NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 SELECTS = ["mode"]
 SENSORS = ["rssi", "last_seen", "active_connection_source", "connection_mode"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
+AQUASKY_NEUTRAL_RGB_TOLERANCE = 8
 CHANNEL_NAMES_AQUASKY = {
     "channel_1": "Red",
     "channel_2": "Green",
@@ -689,7 +690,10 @@ class Device:
         # Use Fluval's much brighter dedicated Pure White emitter for that
         # achromatic request. Chromatic requests fit only R/G/B so pastel
         # colours cannot be washed out by the physical white bank.
-        if rgb[0] == rgb[1] == rgb[2] and rgb != (0, 0, 0):
+        # HA's frontend can quantize a neutral picker selection a few counts
+        # away from exact equality (for example 255/255/250). Treat that tiny
+        # chroma as neutral without collapsing genuinely pastel colours.
+        if max(rgb) > 0 and max(rgb) - min(rgb) <= AQUASKY_NEUTRAL_RGB_TOLERANCE:
             return self.channels_from_aquasky_white(brightness)
         profile = self.spectrum_profile()
         if profile is None:
@@ -773,6 +777,8 @@ class Device:
         if not await self.async_set_channels(values):
             return False
         self.clear_commanded_light()
+        if not any(values.values()):
+            return True
         if not self.values.get("led_on_off"):
             return await self.async_set_switch("led_on_off", True)
         return True
@@ -1402,6 +1408,10 @@ class Device:
                     return False
                 self.values["led_on_off"] = True
             ok = await self._async_send_packet(protocol.old_all_zone_packet(self._channel_values()))
+            if ok and not any_channel_on and self.values["led_on_off"]:
+                ok = await self._async_send_packet(protocol.old_switch_packet(False))
+                if ok:
+                    self.values["led_on_off"] = False
 
         if not ok:
             self.values = old_values

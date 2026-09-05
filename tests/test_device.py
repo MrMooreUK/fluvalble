@@ -954,6 +954,12 @@ def test_aquasky_uses_one_rgb_mode_with_native_white_translation():
         "channel_3": 0,
         "channel_4": 50,
     }
+    assert device.channels_from_aquasky_rgb((255, 255, 250), 128) == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 50,
+    }
     device.values.update({"channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 50})
     assert device.aquasky_rgb_255() == (255, 255, 255)
 
@@ -1405,6 +1411,34 @@ async def _async_test_classic_power_on_precedes_apk_all_zone_packet():
         call(protocol.old_switch_packet(True)),
         call(protocol.old_all_zone_packet([75, 0, 0, 0])),
     ]
+
+
+def test_classic_zero_channels_switches_fixture_off():
+    asyncio.run(_async_test_classic_zero_channels_switches_fixture_off())
+
+
+async def _async_test_classic_zero_channels_switches_fixture_off():
+    device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED", product_id=328)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update(
+        {
+            "mode": "manual",
+            "led_on_off": True,
+            "channel_1": 25,
+            "channel_2": 0,
+            "channel_3": 0,
+            "channel_4": 0,
+        }
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 0})
+    assert device._async_send_packet.await_args_list == [
+        call(protocol.old_all_zone_packet([0, 0, 0, 0])),
+        call(protocol.old_switch_packet(False)),
+    ]
+    assert device.values["led_on_off"] is False
 
 
 def test_classic_manual_preset_actions_use_apk_packets():
