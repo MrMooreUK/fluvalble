@@ -134,7 +134,16 @@ The **Active connection window** accepts `0` for a persistent connection or
 command latency and reconnects immediately after an unexpected drop. A finite
 window releases the Bluetooth connection when idle so the official Fluval app
 or a Fluval gateway can connect. The backward-compatible default is `120`
-seconds.
+seconds. The **Connection mode** diagnostic reports `Persistent` or the exact
+configured timeout, such as `30 seconds`.
+
+Signal strength and the timestamp diagnostic remain registered but are disabled
+in persistent mode because advertisement-derived values are not meaningful for
+an open GATT session. Selecting a finite timeout and reloading the integration
+restores those same entities, with their existing entity IDs and history.
+Entities disabled manually by the user remain disabled. In finite mode,
+the timestamp is shown as **Last seen** for the latest confirmed fixture
+activity.
 
 Some newer fixtures, including Plant PRO and Plant 4.0, permit only one
 Bluetooth controller at a time. Persistent mode therefore prevents the official
@@ -185,7 +194,7 @@ After setup you'll see one device with entities like:
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Button** | Identify | Runs the fixture's native FluvalConnect Find command so the physical light identifies itself. |
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
-| **Sensors** | Signal strength / Source / Last seen | Optional Bluetooth diagnostics. Signal strength is disabled by default; Source shows the active route's friendly name. |
+| **Sensors** | Connection mode / Signal strength / Source / Last seen | Bluetooth diagnostics. Connection mode reports `Persistent` or the configured timeout. Signal strength and Last seen remain registered but are disabled in persistent mode; Source shows the active route's friendly name. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
 | **Switch** | Daylight saving time | Onboard setting available on supported AquaSky 3.0 fixtures. |
 
@@ -296,7 +305,8 @@ its APK sources are documented separately in
 - Home Assistant selects the best connectable local adapter or ESPHome proxy on each connection.
 - Persistent mode keeps the session open; finite mode releases it after the configured idle window.
 - Reachable describes recent fixture activity rather than only the current GATT connection.
-- Signal strength and Source describe the route used for the active connection.
+- Connection mode reports whether the GATT session is persistent or the exact idle timeout.
+- Signal strength and Last seen are integration-disabled in persistent mode and restored for a finite timeout; Source shows the active route's friendly name.
 
 ---
 
