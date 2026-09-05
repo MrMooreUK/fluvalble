@@ -701,19 +701,20 @@ def _sync_connection_diagnostic_registry_entries(
 
     registry = er.async_get(hass)
     persistent = active_time == 0
-    managed_suffixes = ("_rssi", "_last_seen")
-
     for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
-        if not str(getattr(entity, "unique_id", "")).endswith(managed_suffixes):
+        unique_id = str(getattr(entity, "unique_id", ""))
+        is_rssi = unique_id.endswith("_rssi")
+        is_last_seen = unique_id.endswith("_last_seen")
+        if not is_rssi and not is_last_seen:
             continue
 
         disabled_by = getattr(entity, "disabled_by", None)
-        if persistent and disabled_by is None:
+        if is_rssi and persistent and disabled_by is None:
             registry.async_update_entity(
                 entity.entity_id,
                 disabled_by=er.RegistryEntryDisabler.INTEGRATION,
             )
-        elif not persistent and disabled_by is er.RegistryEntryDisabler.INTEGRATION:
+        elif disabled_by is er.RegistryEntryDisabler.INTEGRATION:
             registry.async_update_entity(entity.entity_id, disabled_by=None)
 
 

@@ -303,7 +303,7 @@ def test_persistent_connection_mode_hides_stale_rssi():
 
     assert connection_mode._attr_native_value == "Persistent"
     assert rssi._attr_entity_registry_enabled_default is False
-    assert connected_since._attr_entity_registry_enabled_default is False
+    assert connected_since._attr_entity_registry_enabled_default is True
     assert rssi._attr_available is False
     assert rssi._attr_native_value is None
     assert rssi._attr_extra_state_attributes == {

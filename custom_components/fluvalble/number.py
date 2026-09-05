@@ -36,6 +36,7 @@ async def async_setup_entry(
 class FluvalChannelNumber(FluvalEntity, NumberEntity):
     """Expose one APK-defined emitter as an exact percentage slider."""
 
+    _attr_entity_registry_enabled_default = True
     _attr_icon = "mdi:brightness-6"
     _attr_mode = NumberMode.SLIDER
     _attr_native_unit_of_measurement = "%"

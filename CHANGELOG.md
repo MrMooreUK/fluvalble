@@ -19,6 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   0–100% values; direct channel changes update the light's best-fit display
   state without writing the approximate RGB conversion back to the fixture.
 
+### Fixed
+
+- Keep the Connected since diagnostic enabled for persistent connections while
+  disabling only the stale RSSI sensor. Restored channel controls explicitly
+  default to enabled.
+
 ---
 
 ## [0.0.13] — 2026-09-05 — Hotfix
