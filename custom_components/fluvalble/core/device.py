@@ -53,7 +53,7 @@ NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4", "channel_5"]
 # control for every supported light family. Schedule editors configure those
 # modes; they are not a second fixture mode selector.
 SELECTS = ["mode"]
-SENSORS = ["rssi", "last_seen", "active_connection_source"]
+SENSORS = ["rssi", "last_seen", "active_connection_source", "connection_mode"]
 AQUASKY_NUMBERS = ["channel_1", "channel_2", "channel_3", "channel_4"]
 CHANNEL_NAMES_AQUASKY = {
     "channel_1": "Red",
@@ -1168,6 +1168,10 @@ class Device:
         """List of diagnostics sensors provided by the device."""
         return list(SENSORS)
 
+    def is_persistent_connection(self) -> bool:
+        """Return whether Home Assistant keeps the GATT session open."""
+        return self._active_time == 0
+
     def supports_facebd_dst_control(self) -> bool:
         """Return whether this fixture uses FluvalConnect's FACEBD DST setting."""
         return self._uses_wifi_protocol()
@@ -1188,6 +1192,13 @@ class Device:
             value = self.values.get(attr)
             return Attribute(is_on=value) if isinstance(value, bool) else Attribute()
         if attr == "rssi":
+            if self.is_persistent_connection():
+                return Attribute(
+                    native_unit_of_measurement="dBm",
+                    extra={
+                        "last_updated": self.conn_info.get("rssi_updated_at"),
+                    },
+                )
             return Attribute(
                 value=self.conn_info.get("rssi"),
                 native_unit_of_measurement="dBm",
@@ -1204,7 +1215,16 @@ class Device:
                     "gatt_connected": self.connected,
                 },
             )
+        if attr == "connection_mode":
+            if self.is_persistent_connection():
+                return Attribute(value="Persistent")
+            suffix = "second" if self._active_time == 1 else "seconds"
+            return Attribute(value=f"{self._active_time} {suffix}")
         if attr == "last_seen":
+            if self.is_persistent_connection():
+                if not self.connected:
+                    return Attribute()
+                return Attribute(value=self.conn_info.get("active_connection_connected_at"))
             return Attribute(value=self.conn_info.get("last_seen"))
         return Attribute()
 

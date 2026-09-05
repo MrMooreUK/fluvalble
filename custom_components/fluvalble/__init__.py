@@ -504,7 +504,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     if entry.unique_id != desired_unique_id:
         hass.config_entries.async_update_entry(entry, unique_id=desired_unique_id)
 
+    active_time = entry.options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME)
     _migrate_legacy_registry_entries(hass, entry, mac)
+    _sync_connection_diagnostic_registry_entries(hass, entry, active_time)
     _cleanup_duplicate_devices(hass, entry, mac)
 
     runtime = FluvalRuntimeData()
@@ -534,7 +536,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         """Instantiate Device and add entities for any platforms that are already loaded."""
         _LOGGER.debug("Creating device for %s", mac)
         ping_interval = entry.options.get(CONF_PING_INTERVAL, DEFAULT_PING_INTERVAL)
-        active_time = entry.options.get(CONF_ACTIVE_TIME, DEFAULT_ACTIVE_TIME)
         device = Device(
             entry.title,
             service_info.device,
@@ -686,6 +687,33 @@ def _migrate_legacy_registry_entries(hass: HomeAssistant, entry: ConfigEntry, ma
         if getattr(device_entry, "serial_number", None) == mac:
             _LOGGER.info("Clearing MAC address from serial number for %s", device_entry.id)
             device_registry.async_update_device(device_entry.id, serial_number=None)
+
+
+@callback
+def _sync_connection_diagnostic_registry_entries(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    active_time: int,
+) -> None:
+    """Keep connection diagnostics available only when their values are meaningful."""
+    from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
+
+    registry = er.async_get(hass)
+    persistent = active_time == 0
+    managed_suffixes = ("_rssi", "_last_seen")
+
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if not str(getattr(entity, "unique_id", "")).endswith(managed_suffixes):
+            continue
+
+        disabled_by = getattr(entity, "disabled_by", None)
+        if persistent and disabled_by is None:
+            registry.async_update_entity(
+                entity.entity_id,
+                disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+            )
+        elif not persistent and disabled_by is er.RegistryEntryDisabler.INTEGRATION:
+            registry.async_update_entity(entity.entity_id, disabled_by=None)
 
 
 @callback

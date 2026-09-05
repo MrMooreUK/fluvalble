@@ -120,8 +120,14 @@
       "last_seen": {
         "name": "Last seen"
       },
+      "connected_since": {
+        "name": "Connected since"
+      },
       "active_connection_source": {
         "name": "Source"
+      },
+      "connection_mode": {
+        "name": "Connection mode"
       }
     }
   }
