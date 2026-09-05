@@ -9,6 +9,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Added
 
+- Added an optional per-fixture three-second return to the Auto or Professional
+  mode used before exact channel-slider adjustment. Reaching zero still powers
+  off immediately, and any intervening channel, power, or mode action cancels
+  the return. The option defaults to off so a stored hardware schedule cannot
+  unexpectedly relight the fixture.
 - Restored enabled, device-page controls for every physical light channel while
   retaining the standard Home Assistant light entity. The sliders use the
   FluvalConnect APK's product-specific four- or five-channel names and exact

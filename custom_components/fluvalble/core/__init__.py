@@ -7,9 +7,11 @@ CONFIG_ENTRY_VERSION = 2
 CONF_PING_INTERVAL = "ping_interval"
 CONF_ACTIVE_TIME = "active_time"
 CONF_LAMP_PROFILE = "lamp_profile"
+CONF_RESTORE_PREVIOUS_MODE = "restore_previous_mode"
 DEFAULT_PING_INTERVAL = 10  # seconds between keep-alive reads
 DEFAULT_ACTIVE_TIME = 120  # seconds to stay connected after last command
 DEFAULT_LAMP_PROFILE = "auto"
+DEFAULT_RESTORE_PREVIOUS_MODE = False
 
 # Lamp profile options (options flow + channel layout)
 LAMP_PROFILE_AUTO = "auto"

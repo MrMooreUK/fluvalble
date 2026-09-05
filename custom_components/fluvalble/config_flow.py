@@ -30,9 +30,11 @@ from .core import (
     CONF_ACTIVE_TIME,
     CONF_LAMP_PROFILE,
     CONF_PING_INTERVAL,
+    CONF_RESTORE_PREVIOUS_MODE,
     DEFAULT_ACTIVE_TIME,
     DEFAULT_LAMP_PROFILE,
     DEFAULT_PING_INTERVAL,
+    DEFAULT_RESTORE_PREVIOUS_MODE,
     DOMAIN,
     LAMP_PROFILE_AQUASKY,
     LAMP_PROFILE_AQUASKY3,
@@ -87,6 +89,10 @@ OPTIONS_SCHEMA = vol.Schema(
             int,
             vol.Range(min=0, max=600),
         ),
+        vol.Optional(
+            CONF_RESTORE_PREVIOUS_MODE,
+            default=DEFAULT_RESTORE_PREVIOUS_MODE,
+        ): bool,
     }
 )
 

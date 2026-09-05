@@ -127,7 +127,7 @@ schedule evidence while removing Bluetooth addresses, names, manufacturer and
 service payloads, paths, and registry identifiers. Creating the report does not
 disconnect, scan for, reconnect to, or send commands to the light.
 
-### Connection options
+### Integration options
 
 Open the integration's **Configure** dialog to adjust its BLE connection behavior.
 The **Active connection window** accepts `0` for a persistent connection or
@@ -145,6 +145,14 @@ restores those same entities, with their existing entity IDs and history.
 Entities disabled manually by the user remain disabled. In finite mode,
 the timestamp is shown as **Last seen** for the latest confirmed fixture
 activity.
+
+The optional **Restore previous mode after channels reach zero** setting keeps
+exact channel-slider adjustments in Manual mode while any channel remains above
+zero. When every channel reaches zero, the fixture turns off immediately; after
+three seconds without another channel, power, or mode command, it returns to the
+Auto or Professional mode that was active before the adjustment. The setting is
+off by default because restoring a hardware-scheduled mode can turn the fixture
+back on according to its stored schedule.
 
 Some newer fixtures, including Plant PRO and Plant 4.0, permit only one
 Bluetooth controller at a time. Persistent mode therefore prevents the official
