@@ -7,8 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+---
+
+## [0.0.13] — 2026-09-05 — Hotfix
+
 ### Fixed
 
+- Added a Connection mode diagnostic that reports `Persistent` or the exact
+  idle timeout. Signal strength and Last seen remain registered but are
+  disabled while persistent mode makes advertisement-derived values misleading;
+  selecting a finite timeout restores integration-disabled entities without
+  overriding user-disabled entities or replacing their history.
 - Match the FluvalConnect APK's Bluetooth scan boundary by requiring a
   catalogued light product ID for automatic discovery. Device names and shared
   service UUIDs no longer allow pumps, feeders, gateways, or unrelated BLE
