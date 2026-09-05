@@ -1338,8 +1338,13 @@ class Device:
             force_power=force,
             single_channel=single_channel,
         )
-        if ok and effect_active:
-            self._clear_effect_state()
+        if ok:
+            # Physical channel values are authoritative. Forget any cached RGB
+            # request and refresh both exact sliders and the light's best-fit
+            # display state without writing that approximation back.
+            self.clear_commanded_light()
+            if effect_active:
+                self._clear_effect_state()
             for handler in self.updates_component:
                 handler()
         return ok

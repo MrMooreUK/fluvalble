@@ -16,9 +16,9 @@ from custom_components.fluvalble import (
 )
 
 
-def test_retired_platforms_are_replaced_by_native_colour_light():
+def test_native_colour_light_and_exact_channel_controls_are_both_loaded():
     assert Platform.LIGHT in PLATFORMS
-    assert Platform.NUMBER not in PLATFORMS
+    assert Platform.NUMBER in PLATFORMS
     assert Platform.SWITCH in PLATFORMS
 
 
@@ -118,7 +118,6 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
     )
 
     assert [call.args[0] for call in registry.async_remove.call_args_list] == [
-        channel.entity_id,
         legacy_number.entity_id,
         legacy_switch.entity_id,
         schedule_mode.entity_id,

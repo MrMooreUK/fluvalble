@@ -22,6 +22,7 @@ from custom_components.fluvalble import (
     button,
     diagnostics,
     light,
+    number,
     select,
     sensor,
     switch,
@@ -77,10 +78,104 @@ def test_create_entities_for_platforms():
     assert len(button.create_entities(device)) == 2
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
+    channel_entities = number.create_entities(device)
+    assert [entity._attr_name for entity in channel_entities] == [
+        "Red",
+        "Green",
+        "Blue",
+        "White",
+    ]
     assert switch.create_entities(device) == []
 
     device.facebd = True
     assert len(switch.create_entities(device)) == 1
+
+
+@pytest.mark.parametrize(
+    ("product_id", "expected_names"),
+    [
+        (532, ["Red", "Green", "Blue", "White"]),
+        (305, ["Pink", "Blue", "Cold White", "White", "Warm White"]),
+        (546, ["Pink", "Cyan", "Blue", "Purple", "Cold White"]),
+    ],
+)
+def test_channel_controls_follow_apk_product_layout(product_id, expected_names):
+    device = Device(
+        "Fluval_Test",
+        config_data={"mac": "AA:BB:CC:DD:EE:FF", "product_id": product_id},
+    )
+    device.connected = True
+    device.conn_info["last_seen"] = datetime.now(UTC)
+
+    entities = number.create_entities(device)
+
+    assert [entity._attr_name for entity in entities] == expected_names
+    assert all(entity._attr_native_min_value == 0 for entity in entities)
+    assert all(entity._attr_native_max_value == 100 for entity in entities)
+    assert all(entity._attr_native_step == 1 for entity in entities)
+    assert all(entity._attr_native_unit_of_measurement == "%" for entity in entities)
+    assert all(entity._attr_available for entity in entities)
+    assert all(getattr(entity, "_attr_entity_category", None) is None for entity in entities)
+    assert all(getattr(entity, "_attr_entity_registry_enabled_default", True) for entity in entities)
+
+
+def test_channel_control_writes_exact_emitter_percentage():
+    asyncio.run(_async_test_channel_control_writes_exact_emitter_percentage())
+
+
+async def _async_test_channel_control_writes_exact_emitter_percentage():
+    device = _make_device()
+    device.async_set_value = AsyncMock(return_value=True)
+    entity = number.FluvalChannelNumber(device, "channel_2")
+
+    await entity.async_set_native_value(37)
+
+    device.async_set_value.assert_awaited_once_with("channel_2", 37)
+
+
+def test_channel_control_refreshes_light_with_new_best_fit_colour():
+    asyncio.run(_async_test_channel_control_refreshes_light_with_new_best_fit_colour())
+
+
+async def _async_test_channel_control_refreshes_light_with_new_best_fit_colour():
+    device = _make_device()
+    device.values.update(
+        {
+            "channel_1": 100,
+            "channel_2": 0,
+            "channel_3": 0,
+            "channel_4": 0,
+            "mode": "manual",
+            "led_on_off": True,
+        }
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_channel_state = AsyncMock(return_value=True)
+    light_entity = light.FluvalLight(device, "light")
+    channel_entity = number.FluvalChannelNumber(device, "channel_2")
+    device.updates_component.extend([light_entity.internal_update, channel_entity.internal_update])
+    original_rgb = light_entity._attr_rgb_color
+
+    await channel_entity.async_set_native_value(100)
+
+    assert channel_entity._attr_native_value == 100
+    assert light_entity._attr_rgb_color == device.aquasky_rgb_255()
+    assert light_entity._attr_rgb_color != original_rgb
+    device._async_send_channel_state.assert_awaited_once()
+
+
+def test_channel_control_surfaces_ble_command_failure():
+    asyncio.run(_async_test_channel_control_surfaces_ble_command_failure())
+
+
+async def _async_test_channel_control_surfaces_ble_command_failure():
+    device = _make_device()
+    device.client = SimpleNamespace(last_error="fixture unavailable", command_write_uuid=None)
+    device.async_set_value = AsyncMock(return_value=False)
+    entity = number.FluvalChannelNumber(device, "channel_1")
+
+    with pytest.raises(HomeAssistantError, match="fixture unavailable"):
+        await entity.async_set_native_value(25)
 
 
 def test_empty_effect_list_uses_typed_empty_feature_flag():

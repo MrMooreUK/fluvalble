@@ -1332,6 +1332,33 @@ async def _async_test_facebd_single_channel_change_uses_apk_single_zone_packet()
     device._async_send_packet.assert_awaited_once_with(protocol.wifi_single_zone_packet(4, 75))
 
 
+def test_exact_channel_change_replaces_cached_light_approximation_and_refreshes_entities():
+    asyncio.run(_async_test_exact_channel_change_replaces_cached_light_approximation_and_refreshes_entities())
+
+
+async def _async_test_exact_channel_change_replaces_cached_light_approximation_and_refreshes_entities():
+    device = _make_device(product_id=532)
+    device.client = _facebd_client()
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device.remember_commanded_light(
+        {"channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+        rgb=(255, 0, 0),
+        brightness=255,
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    update_handler = MagicMock()
+    device.updates_component.append(update_handler)
+
+    assert await device.async_set_channels({"channel_2": 37})
+
+    device._async_send_packet.assert_awaited_once_with(protocol.wifi_single_zone_packet(1, 37))
+    assert device._commanded_channels is None
+    assert device._commanded_rgb is None
+    assert device._commanded_brightness is None
+    update_handler.assert_called_once_with()
+
+
 def test_spp_multi_channel_change_keeps_all_zone_packet():
     asyncio.run(_async_test_spp_multi_channel_change_keeps_all_zone_packet())
 
