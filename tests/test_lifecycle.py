@@ -18,7 +18,7 @@ from custom_components.fluvalble import (
     async_unload_entry,
     entry_runtime_data,
 )
-from custom_components.fluvalble import binary_sensor, button, light, select, sensor, switch
+from custom_components.fluvalble import binary_sensor, button, light, number, select, sensor, switch
 
 
 def test_current_options_flow_does_not_register_second_reload_listener():
@@ -78,6 +78,7 @@ async def _async_test_all_entity_platforms_support_legacy_runtime_storage():
         (binary_sensor, "binary_sensor"),
         (button, "button"),
         (light, "light"),
+        (number, "number"),
         (select, "select"),
         (sensor, "sensor"),
         (switch, "switch"),

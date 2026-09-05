@@ -27,6 +27,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 |--------|-------------|
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. Product-specific FluvalConnect data translates the colour picker to the fixture's physical channels. |
+| **Exact channel controls** | Adjust every physical emitter with the same 0–100% channel layout and product-specific labels used by FluvalConnect. These sliders remain the authoritative control for exact spectrum tuning. |
 | **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. |
 | **Native fixture schedules** | Store Auto, Professional, and timed-effect schedules directly on supported fixtures so they continue running without Home Assistant. |
 | **Daylight-saving control** | Supported fixtures expose their onboard daylight-saving setting as a configuration switch. |
@@ -35,7 +36,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
 | **Bluetooth routing** | Works with local Bluetooth adapters and ESP32 boards running ESPHome Bluetooth Proxy. Home Assistant automatically selects the best connectable route on each connection. |
 
-Entities are created per device around one native colour light, with mode and connection status alongside it. Everything updates from the device when it sends state, so the UI stays in sync.
+Entities are created per device around one native colour light, with exact physical-channel sliders, mode, and connection status alongside it. Everything updates from the device when it sends state, so the UI stays in sync.
 
 ---
 
@@ -110,7 +111,7 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 1. Go to **Settings** → **Devices & services** → **Add integration**.
 2. Search for **Fluval Aquarium LED** (or **Fluval BLE**).
 3. **Select your light** from the dropdown. The list shows only devices that look like Fluval lights (by Bluetooth service or name), so your aquarium light is easy to find. Ensure the light is **on** and in range before adding.
-   - If your light appears: choose it and submit. The integration creates one device with a primary light entity, mode select, identify and clock-sync buttons, connection status, and diagnostic sensors.
+   - If your light appears: choose it and submit. The integration creates one device with a primary light entity, exact channel sliders, mode select, identify and clock-sync buttons, connection status, and diagnostic sensors.
    - If it's not in the list: choose **"My device isn't in the list — enter MAC address manually"**, then enter the MAC (e.g. `AA:BB:CC:DD:EE:FF`). You can find the MAC in your phone's Bluetooth settings or the Fluval app.
 4. After setup, the light and supporting entities appear on the device. If you only see the integration card (for example, "Update") and no light entity, see [Troubleshooting](#troubleshooting) below.
 
@@ -191,12 +192,20 @@ After setup you'll see one device with entities like:
 | Entity | Display name | Purpose |
 |--------|-------------|---------|
 | **Light** | Light | Power, brightness, colour, and supported native effects. |
+| **Numbers** | Product-specific channel names | Exact 0–100% control of each physical emitter: Red / Green / Blue / White for AquaSky, or the five APK-defined Plant or Marine channels. |
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Button** | Identify | Runs the fixture's native FluvalConnect Find command so the physical light identifies itself. |
 | **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
 | **Sensors** | Connection mode / Signal strength / Source / Last seen | Bluetooth diagnostics. Connection mode reports `Persistent` or the configured timeout. Signal strength and Last seen remain registered but are disabled in persistent mode; Source shows the active route's friendly name. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
 | **Switch** | Daylight saving time | Onboard setting available on supported AquaSky 3.0 fixtures. |
+
+The channel sliders are the exact fixture state and match FluvalConnect's
+manual controls. The standard light entity is a convenience layer: its colour
+picker converts RGB requests through the detected product's APK spectrum data,
+and its brightness control scales the current channel proportions. Moving a
+channel slider immediately updates the light entity's best-fit displayed colour
+and brightness, but that approximation is never written back to the fixture.
 
 Entity IDs follow the pattern `<platform>.fluval_<mac_without_colons>_<name>`, for example `light.fluval_aabbccddeeff_light`. You can find the exact IDs in **Settings → Devices & services → Fluval Aquarium LED → entities**.
 If a light, mode, daylight-saving, Identify, or Sync clock command cannot reach

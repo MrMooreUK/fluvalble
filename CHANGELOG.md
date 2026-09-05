@@ -7,6 +7,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Restored enabled, device-page controls for every physical light channel while
+  retaining the standard Home Assistant light entity. The sliders use the
+  FluvalConnect APK's product-specific four- or five-channel names and exact
+  0–100% values; direct channel changes update the light's best-fit display
+  state without writing the approximate RGB conversion back to the fixture.
+
+### Fixed
+
+- Keep the Connected since diagnostic enabled for persistent connections while
+  disabling only the stale RSSI sensor. Restored channel controls explicitly
+  default to enabled.
+- Route near-neutral colour-picker white to AquaSky's dedicated Pure White
+  emitter, accounting for Home Assistant frontend RGB quantization.
+- Turn the fixture off when every exact physical-channel slider reaches zero.
+
 ---
 
 ## [0.0.13] — 2026-09-05 — Hotfix

@@ -77,6 +77,13 @@ converts the result back to sRGB. A recently commanded RGB value is retained
 for the short interval in which a classic controller can report one stale
 pre-command status packet; it is discarded when later channel state differs.
 
+Home Assistant exposes both layers on the same device. The Number entities are
+the authoritative 0–100% values for the APK-defined physical emitters. The
+Light entity translates convenient RGB and overall-brightness requests into
+those values. A direct slider change clears any cached RGB request and refreshes
+the Light entity from the resulting spectrum; the inverse, best-fit RGB value
+is display-only and is never sent back to the fixture.
+
 The APK does not provide an arbitrary RGB-picker conversion to copy: its
 manual screen exposes one percentage slider per physical emitter. The colour
 picker is therefore a Home Assistant adapter built on the APK's measured
