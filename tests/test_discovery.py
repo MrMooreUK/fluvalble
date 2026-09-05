@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from custom_components.fluvalble.core.discovery import (
     CONF_MODEL,
     CONF_PRODUCT_ID,
@@ -11,6 +13,7 @@ from custom_components.fluvalble.core.discovery import (
     discovery_metadata,
     is_likely_fluval,
 )
+from custom_components.fluvalble.core.products import PRODUCTS
 
 
 def _advertisement(service_uuids=None, service_data=None, manufacturer_data=None):
@@ -21,35 +24,28 @@ def _advertisement(service_uuids=None, service_data=None, manufacturer_data=None
     return adv
 
 
-def test_aquasky_name_is_likely_fluval():
-    assert is_likely_fluval("AquaSky3.0_2F3176")
+@pytest.mark.parametrize(
+    "name",
+    [
+        "Fluval",
+        "Fluval Pump",
+        "AquaSky3.0_2F3176",
+        "Plant 3.0_AABBCC",
+        "Plant Nano_123",
+        "PlantPro_AABBCC",
+        "Plant Pro 4.0_AABBCC",
+        "Marine 3.0_AABBCC",
+        "Reef_1234",
+    ],
+)
+def test_name_alone_never_qualifies_a_light(name):
+    assert not is_likely_fluval(name)
 
 
-def test_plant_name_is_likely_fluval():
-    assert is_likely_fluval("Plant 3.0_AABBCC")
-
-
-def test_plant_nano_name_is_likely_fluval():
-    assert is_likely_fluval("Plant Nano_123")
-
-
-def test_plant_pro_and_plant_4_names_are_likely_fluval():
-    assert is_likely_fluval("PlantPro_AABBCC")
-    assert is_likely_fluval("Plant Pro 4.0_AABBCC")
-    assert is_likely_fluval("Plant 4.0_AABBCC")
-
-
-def test_bare_plant_name_is_not_fluval():
-    assert not is_likely_fluval("Plant Sensor")
-    assert not is_likely_fluval("plant")
-    assert not is_likely_fluval("Marine Radio")
-    assert not is_likely_fluval("reef")
-
-
-def test_facebd_service_uuid_is_likely_fluval():
+def test_facebd_service_uuid_alone_is_not_product_identity():
     adv = _advertisement(service_uuids=["facebd00-7261-6262-6974-696f74626c65"])
 
-    assert is_likely_fluval(None, adv)
+    assert not is_likely_fluval(None, adv)
 
 
 def test_classic_service_uuid_alone_is_not_fluval():
@@ -100,10 +96,26 @@ def test_mesh_service_uuid_requires_apk_known_binary_product():
     assert not is_likely_fluval(None, unknown)
 
 
-def test_mesh_with_fluval_name_is_likely_fluval():
+def test_mesh_with_fluval_name_still_requires_apk_product_id():
     adv = _advertisement(service_uuids=["0000fff0-0000-1000-8000-00805f9b34fb"])
 
-    assert is_likely_fluval("Fluval Mesh_ABCD", adv)
+    assert not is_likely_fluval("Fluval Mesh_ABCD", adv)
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_qualifies_from_classic_advertisement(product_id):
+    encoded = f"{product_id:04X}".encode("ascii")
+    company_id = int.from_bytes(encoded[:2], "little")
+    adv = _advertisement(manufacturer_data={company_id: encoded[2:] + b"0103"})
+
+    assert is_likely_fluval("Misleading device name", adv)
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_qualifies_from_binary_advertisement(product_id):
+    adv = _advertisement(manufacturer_data={65535: b"\x00" * 8 + product_id.to_bytes(2, "big")})
+
+    assert is_likely_fluval("Misleading device name", adv)
 
 
 def test_detect_model_plant_not_aquasky():

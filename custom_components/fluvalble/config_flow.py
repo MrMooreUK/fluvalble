@@ -154,7 +154,7 @@ def _device_display_name(
 async def _get_discovered_devices(
     hass: HomeAssistant,
 ) -> list[bluetooth.BluetoothServiceInfoBleak]:
-    """Return only devices that look like Fluval lights (by service UUID or name)."""
+    """Return advertisements with an APK-supported Fluval light product ID."""
     try:
         get_discovered = getattr(bluetooth, "async_discovered_service_info", None)
         if not get_discovered:
@@ -162,8 +162,8 @@ async def _get_discovered_devices(
         all_devices = get_discovered(hass, connectable=True)
     except Exception:  # noqa: BLE001
         return []
-    # Only show devices that advertise the Fluval service or have "Fluval" in the name,
-    # so the list isn't full of random BLE devices that are hard to identify.
+    # The manifest's names and service UUIDs only wake the config flow. Apply
+    # the APK's product-ID gate before showing any device to the user.
     return [info for info in all_devices if _is_likely_fluval(info)]
 
 
@@ -222,8 +222,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._mac_already_configured(mac):
             return self.async_abort(reason="already_configured")
 
-        # Secondary filter after manifest matchers — abort anything that isn't
-        # a real Fluval LED (manifest wildcards can still be broad).
+        # Secondary filter after manifest matchers. The APK accepts lights by
+        # product ID, not by a brand-looking name or a shared service UUID.
         adv = discovery_info.advertisement
         local_name = (adv.local_name if adv else None) or discovery_info.name
         if not is_likely_fluval(local_name, adv):
