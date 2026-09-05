@@ -130,6 +130,7 @@ async def _async_test_unload_stops_software_preview_task():
         preview_task=preview_task,
         native_preview_active=False,
         cancel_reachability_refresh=MagicMock(),
+        async_cancel_channel_mode_restore=AsyncMock(),
         async_stop_preview=AsyncMock(return_value=True),
         client=None,
     )
@@ -143,6 +144,7 @@ async def _async_test_unload_stops_software_preview_task():
     assert await async_unload_entry(hass, entry)
 
     device.cancel_reachability_refresh.assert_called_once_with()
+    device.async_cancel_channel_mode_restore.assert_awaited_once_with()
     device.async_stop_preview.assert_awaited_once_with()
     assert entry.entry_id not in hass.data[DOMAIN]
 

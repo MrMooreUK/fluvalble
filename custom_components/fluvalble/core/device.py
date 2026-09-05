@@ -16,7 +16,9 @@ from homeassistant.helpers.event import async_track_point_in_time
 
 from . import (
     CONF_LAMP_PROFILE,
+    CONF_RESTORE_PREVIOUS_MODE,
     DEFAULT_LAMP_PROFILE,
+    DEFAULT_RESTORE_PREVIOUS_MODE,
     LAMP_PROFILE_AQUASKY,
     LAMP_PROFILE_AQUASKY3,
     LAMP_PROFILE_AUTO,
@@ -95,6 +97,7 @@ BLE_LOOKUP_TIMEOUT = 10
 BLE_LOOKUP_RETRIES = 3
 PREVIEW_STEP_SECONDS = 2
 TRANSITION_STEP_SECONDS = 30
+PREVIOUS_MODE_RESTORE_DELAY = 3
 DAY_MINUTES = 24 * 60
 
 _P = ParamSpec("_P")
@@ -221,6 +224,9 @@ class Device:
         self._commanded_channels: dict[str, int] | None = None
         self._commanded_at: float | None = None
         self._effect_restore_channels: dict[str, int] | None = None
+        self._restore_previous_mode = bool(config_data.get(CONF_RESTORE_PREVIOUS_MODE, DEFAULT_RESTORE_PREVIOUS_MODE))
+        self._channel_restore_mode: str | None = None
+        self._channel_restore_task: asyncio.Task[None] | None = None
         self._reachability_unsub: Callable[[], None] | None = None
 
         if device and advertisement:
@@ -282,6 +288,53 @@ class Device:
         if self._reachability_unsub is not None:
             self._reachability_unsub()
             self._reachability_unsub = None
+
+    def cancel_channel_mode_restore(self, *, clear_saved_mode: bool = True) -> None:
+        """Cancel a delayed mode restoration after manual channel control."""
+        task = self._channel_restore_task
+        self._channel_restore_task = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+        if clear_saved_mode:
+            self._channel_restore_mode = None
+
+    async def async_cancel_channel_mode_restore(self) -> None:
+        """Cancel and finish a pending mode-restoration task during unload."""
+        task = self._channel_restore_task
+        self.cancel_channel_mode_restore()
+        if task is not None and task is not asyncio.current_task():
+            await asyncio.gather(task, return_exceptions=True)
+
+    def _schedule_channel_mode_restore(self) -> None:
+        """Restore the pre-adjustment fixture mode after a short quiet period."""
+        if not self._restore_previous_mode or self._channel_restore_mode is None:
+            return
+        self.cancel_channel_mode_restore(clear_saved_mode=False)
+        self._channel_restore_task = asyncio.create_task(self._async_restore_channel_mode())
+
+    async def _async_restore_channel_mode(self) -> None:
+        """Wait for quiet, then restore the mode displaced by channel control."""
+        try:
+            await asyncio.sleep(PREVIOUS_MODE_RESTORE_DELAY)
+            if any(self._channel_values()) or self.values.get("mode") != "manual":
+                self._channel_restore_mode = None
+                return
+            restore_mode = self._channel_restore_mode
+            self._channel_restore_task = None
+            self._channel_restore_mode = None
+            if restore_mode is not None and not await self.async_select_option("mode", restore_mode):
+                _LOGGER.warning(
+                    "Could not restore Fluval mode %s after channel controls reached zero",
+                    restore_mode,
+                )
+            else:
+                for handler in self.updates_component:
+                    handler()
+        except asyncio.CancelledError:
+            return
+        finally:
+            if self._channel_restore_task is asyncio.current_task():
+                self._channel_restore_task = None
 
     @callback
     def _on_reachability_expired(self, _now: datetime) -> None:
@@ -1255,7 +1308,10 @@ class Device:
     async def async_set_value(self, attr: str, value: int) -> bool:
         """Set values received by entities such as numbers and switches."""
         if attr.startswith("channel_"):
-            return await self.async_set_channels({attr: int(value)})
+            return await self.async_set_channels(
+                {attr: int(value)},
+                restore_mode_on_zero=True,
+            )
 
         _LOGGER.debug("Value %s changed to %s", attr, value)
         return False
@@ -1267,11 +1323,16 @@ class Device:
         transition: int = 0,
         step_seconds: int = TRANSITION_STEP_SECONDS,
         force: bool = False,
+        restore_mode_on_zero: bool = False,
     ) -> bool:
         """Set multiple channel values, optionally ramping over time."""
         if transition <= 0:
             async with self.command_transaction():
-                return await self._async_set_channels_now(values, force=force)
+                return await self._async_set_channels_now(
+                    values,
+                    force=force,
+                    restore_mode_on_zero=restore_mode_on_zero,
+                )
 
         async with self.command_transaction():
             generation = self._command_generation
@@ -1293,7 +1354,11 @@ class Device:
                     channel: round(start_values[channel] + ((targets[channel] - start_values[channel]) * ratio))
                     for channel in channels
                 }
-                if not await self._async_set_channels_now(step_values, force=force):
+                if not await self._async_set_channels_now(
+                    step_values,
+                    force=force,
+                    restore_mode_on_zero=restore_mode_on_zero,
+                ):
                     return False
             if step < steps:
                 await asyncio.sleep(step_seconds)
@@ -1304,8 +1369,10 @@ class Device:
         values: dict[str, int],
         *,
         force: bool = False,
+        restore_mode_on_zero: bool = False,
     ) -> bool:
         """Apply one channel frame inside an active command transaction."""
+        self.cancel_channel_mode_restore(clear_saved_mode=not restore_mode_on_zero)
         channels = self.numbers()
         effect_active = bool(self.values.get("effect"))
         force = force or effect_active
@@ -1326,6 +1393,14 @@ class Device:
             return False
 
         if self.values.get("mode") != "manual":
+            previous_mode = cast(Any, self.values.get("mode"))
+            if (
+                restore_mode_on_zero
+                and self._restore_previous_mode
+                and isinstance(previous_mode, str)
+                and previous_mode in {"automatic", "professional"}
+            ):
+                self._channel_restore_mode = previous_mode
             if self._uses_wifi_protocol():
                 ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE["manual"]))
             elif self._uses_plant_pro_protocol():
@@ -1353,6 +1428,8 @@ class Device:
                 self._clear_effect_state()
             for handler in self.updates_component:
                 handler()
+            if restore_mode_on_zero and not any(targets.values()):
+                self._schedule_channel_mode_restore()
         return ok
 
     async def _async_send_channel_state(
@@ -1769,6 +1846,7 @@ class Device:
     @serialized_device_command
     async def async_set_switch(self, attr: str, value: bool) -> bool:
         """Set switch values and send the updated state to the light."""
+        self.cancel_channel_mode_restore()
         _LOGGER.debug("Switch %s changed to %s", attr, value)
         old_values = dict(self.values)
         self.values[attr] = value
@@ -1942,6 +2020,7 @@ class Device:
         if attr != "mode" or option not in MODES:
             return False
 
+        self.cancel_channel_mode_restore()
         _LOGGER.debug("Mode changed to %s", option)
         old_values = dict(self.values)
         self.values[attr] = option

@@ -19,12 +19,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from custom_components.fluvalble.config_flow import (
     ConfigFlow,
+    OPTIONS_SCHEMA,
     OptionsFlowHandler,
     normalize_mac,
     unique_id_from_mac,
     validate_active_time,
     MAC_REGEX,
 )
+from custom_components.fluvalble.core import (
+    CONF_RESTORE_PREVIOUS_MODE,
+    DEFAULT_RESTORE_PREVIOUS_MODE,
+)
+
+
+def test_restore_previous_mode_option_defaults_off():
+    assert CONF_RESTORE_PREVIOUS_MODE in OPTIONS_SCHEMA.schema
+    assert DEFAULT_RESTORE_PREVIOUS_MODE is False
 
 
 def test_config_flow_keeps_the_released_version_two_schema():
@@ -71,6 +81,7 @@ def test_options_flow_uses_saved_values_as_suggestions():
         "lamp_profile": "plant",
         "ping_interval": 15,
         "active_time": 0,
+        "restore_previous_mode": True,
     }
     flow = OptionsFlowHandler()
     flow.config_entry.options = options
@@ -94,6 +105,7 @@ def test_options_flow_submission_is_owned_by_reload_helper():
         "lamp_profile": "auto",
         "ping_interval": 10,
         "active_time": 120,
+        "restore_previous_mode": False,
     }
 
     result = asyncio.run(flow.async_step_init(submitted))
@@ -112,6 +124,7 @@ def test_options_flow_rejects_connection_windows_between_one_and_twenty_nine():
         "lamp_profile": "auto",
         "ping_interval": 10,
         "active_time": 1,
+        "restore_previous_mode": False,
     }
 
     result = asyncio.run(flow.async_step_init(submitted))

@@ -1441,6 +1441,198 @@ async def _async_test_classic_zero_channels_switches_fixture_off():
     assert device.values["led_on_off"] is False
 
 
+def test_zero_channels_restore_previous_mode_after_quiet_period():
+    asyncio.run(_async_test_zero_channels_restore_previous_mode_after_quiet_period())
+
+
+async def _async_test_zero_channels_restore_previous_mode_after_quiet_period():
+    device = _make_device(
+        name="AquaSky2.0_Test",
+        model="AquaSky 2.0 Bluetooth LED",
+        product_id=328,
+        restore_previous_mode=True,
+    )
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update(
+        {
+            "mode": "automatic",
+            "led_on_off": True,
+            "channel_1": 25,
+            "channel_2": 0,
+            "channel_3": 0,
+            "channel_4": 0,
+        }
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_value("channel_1", 30)
+    assert device.values["mode"] == "manual"
+    assert device._channel_restore_mode == "automatic"
+
+    with patch("custom_components.fluvalble.core.device.PREVIOUS_MODE_RESTORE_DELAY", 0):
+        assert await device.async_set_value("channel_1", 0)
+        restore_task = device._channel_restore_task
+        assert restore_task is not None
+        await restore_task
+
+    assert device.values["led_on_off"] is False
+    assert device.values["mode"] == "automatic"
+    assert device._channel_restore_mode is None
+    assert device._async_send_packet.await_args_list == [
+        call(protocol.old_mode_packet(0)),
+        call(protocol.old_all_zone_packet([30, 0, 0, 0])),
+        call(protocol.old_all_zone_packet([0, 0, 0, 0])),
+        call(protocol.old_switch_packet(False)),
+        call(protocol.old_mode_packet(1)),
+    ]
+
+
+def test_zero_channels_do_not_restore_mode_when_option_is_disabled():
+    asyncio.run(_async_test_zero_channels_do_not_restore_mode_when_option_is_disabled())
+
+
+async def _async_test_zero_channels_do_not_restore_mode_when_option_is_disabled():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "automatic", "led_on_off": True, "channel_1": 25})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_value("channel_1", 0)
+
+    assert device.values["mode"] == "manual"
+    assert device._channel_restore_mode is None
+    assert device._channel_restore_task is None
+
+
+def test_non_slider_channel_write_does_not_capture_or_schedule_mode_restore():
+    asyncio.run(_async_test_non_slider_channel_write_does_not_capture_or_schedule_mode_restore())
+
+
+async def _async_test_non_slider_channel_write_does_not_capture_or_schedule_mode_restore():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328, restore_previous_mode=True)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "automatic", "led_on_off": True, "channel_1": 25})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_channels({"channel_1": 0})
+
+    assert device.values["mode"] == "manual"
+    assert device._channel_restore_mode is None
+    assert device._channel_restore_task is None
+
+
+def test_non_slider_channel_write_cancels_pending_restore_session():
+    asyncio.run(_async_test_non_slider_channel_write_cancels_pending_restore_session())
+
+
+async def _async_test_non_slider_channel_write_cancels_pending_restore_session():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328, restore_previous_mode=True)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "automatic", "led_on_off": True, "channel_1": 25})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_value("channel_1", 0)
+    restore_task = device._channel_restore_task
+    assert restore_task is not None
+    assert await device.async_set_channels({"channel_1": 40})
+    await asyncio.sleep(0)
+
+    assert restore_task.done()
+    assert device._channel_restore_task is None
+    assert device._channel_restore_mode is None
+
+
+def test_new_channel_action_cancels_pending_mode_restore():
+    asyncio.run(_async_test_new_channel_action_cancels_pending_mode_restore())
+
+
+async def _async_test_new_channel_action_cancels_pending_mode_restore():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328, restore_previous_mode=True)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "automatic", "led_on_off": True, "channel_1": 25})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_value("channel_1", 0)
+    restore_task = device._channel_restore_task
+    assert restore_task is not None
+    assert await device.async_set_value("channel_1", 40)
+    await asyncio.sleep(0)
+
+    assert restore_task.done()
+    assert device._channel_restore_task is None
+    assert device._channel_restore_mode == "automatic"
+    assert device.values["mode"] == "manual"
+
+
+def test_explicit_mode_action_cancels_pending_restore_and_saved_mode():
+    asyncio.run(_async_test_explicit_mode_action_cancels_pending_restore_and_saved_mode())
+
+
+async def _async_test_explicit_mode_action_cancels_pending_restore_and_saved_mode():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328, restore_previous_mode=True)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "professional", "led_on_off": True, "channel_1": 25})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_value("channel_1", 0)
+    restore_task = device._channel_restore_task
+    assert restore_task is not None
+    assert await device.async_select_option("mode", "automatic")
+    await asyncio.sleep(0)
+
+    assert restore_task.done()
+    assert device._channel_restore_task is None
+    assert device._channel_restore_mode is None
+    assert device.values["mode"] == "automatic"
+
+
+def test_explicit_power_action_cancels_pending_restore_and_saved_mode():
+    asyncio.run(_async_test_explicit_power_action_cancels_pending_restore_and_saved_mode())
+
+
+async def _async_test_explicit_power_action_cancels_pending_restore_and_saved_mode():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328, restore_previous_mode=True)
+    device.client = SimpleNamespace(plant_pro_spp=False, wifi_facebd=False)
+    device.values.update({"mode": "automatic", "led_on_off": True, "channel_1": 25})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_set_value("channel_1", 0)
+    restore_task = device._channel_restore_task
+    assert restore_task is not None
+    assert await device.async_set_switch("led_on_off", True)
+    await asyncio.sleep(0)
+
+    assert restore_task.done()
+    assert device._channel_restore_task is None
+    assert device._channel_restore_mode is None
+    assert device.values["mode"] == "manual"
+
+
+def test_unload_cleanup_cancels_pending_mode_restore():
+    asyncio.run(_async_test_unload_cleanup_cancels_pending_mode_restore())
+
+
+async def _async_test_unload_cleanup_cancels_pending_mode_restore():
+    device = _make_device(name="AquaSky2.0_Test", product_id=328, restore_previous_mode=True)
+    device._channel_restore_mode = "automatic"
+    device._schedule_channel_mode_restore()
+    restore_task = device._channel_restore_task
+    assert restore_task is not None
+
+    await device.async_cancel_channel_mode_restore()
+
+    assert restore_task.done()
+    assert device._channel_restore_task is None
+    assert device._channel_restore_mode is None
+
+
 def test_classic_manual_preset_actions_use_apk_packets():
     asyncio.run(_async_test_classic_manual_preset_actions_use_apk_packets())
 

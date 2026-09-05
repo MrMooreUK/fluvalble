@@ -36,16 +36,18 @@
     },
     "step": {
       "init": {
-        "title": "Connection options",
+        "title": "Fluval BLE options",
         "data": {
           "lamp_profile": "Lamp type",
           "ping_interval": "Keep-alive interval (seconds)",
-          "active_time": "Active connection window (seconds)"
+          "active_time": "Active connection window (seconds)",
+          "restore_previous_mode": "Restore previous mode after channels reach zero"
         },
         "data_description": {
           "lamp_profile": "Override auto-detection when the wrong model or channel count is shown. Plant and Marine/Reef use their distinct five-channel spectral layouts.",
           "ping_interval": "How often Home Assistant reads from the light to keep the BLE connection alive. Lower values improve reliability at the cost of slightly more radio traffic. Default: 10 s.",
-          "active_time": "How long to maintain the BLE connection after the last command. Use 0 for a persistent connection with the lowest command latency, or 30–600 seconds to disconnect when idle. Persistent connections consume a Bluetooth connection slot and can prevent the Fluval app or gateway from connecting. Default: 120 s."
+          "active_time": "How long to maintain the BLE connection after the last command. Use 0 for a persistent connection with the lowest command latency, or 30–600 seconds to disconnect when idle. Persistent connections consume a Bluetooth connection slot and can prevent the Fluval app or gateway from connecting. Default: 120 s.",
+          "restore_previous_mode": "After all exact channel sliders reach zero, wait three seconds and restore the mode used before channel adjustment. Any new channel, power, or mode control cancels the restoration. This may allow the fixture's Auto or Professional schedule to turn the light back on. Default: off."
         }
       }
     }
