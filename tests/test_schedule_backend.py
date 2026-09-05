@@ -139,7 +139,7 @@ async def _async_test_set_channels_service_reports_ble_write_failure():
     hass = _FakeHass(device)
     _register_services(hass)
 
-    with pytest.raises(HomeAssistantError, match="BLE write failed"):
+    with pytest.raises(HomeAssistantError, match="BLE write failed") as raised:
         await hass.services.handlers[(DOMAIN, SERVICE_SET_CHANNELS)](
             SimpleNamespace(
                 data={
@@ -151,6 +151,9 @@ async def _async_test_set_channels_service_reports_ble_write_failure():
             )
         )
 
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "command_failed"
+    assert raised.value.translation_placeholders == {"error": "BLE write failed"}
     device.async_set_channels.assert_awaited_once_with(
         {"channel_1": 50},
         transition=0,
@@ -271,7 +274,7 @@ def test_service_without_target_rejects_ambiguous_fixtures():
 
 
 async def _async_test_service_without_target_rejects_ambiguous_fixtures():
-    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.exceptions import ServiceValidationError
 
     first = _make_device()
     second = Device(
@@ -283,8 +286,88 @@ async def _async_test_service_without_target_rejects_ambiguous_fixtures():
     hass.data[DOMAIN]["entry_2"] = FluvalRuntimeData(device=second)
     _register_services(hass)
 
-    with pytest.raises(HomeAssistantError, match="Select one Fluval light"):
+    with pytest.raises(ServiceValidationError) as raised:
         await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](SimpleNamespace(data={"slot": 1}))
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "select_one_light"
+    assert raised.value.translation_placeholders is None
+
+
+@pytest.mark.parametrize(
+    ("registry_entry", "translation_key"),
+    [
+        (None, "selected_device_missing"),
+        (SimpleNamespace(config_entries=set()), "device_not_managed"),
+    ],
+)
+def test_service_device_target_errors_are_translated_validation_errors(registry_entry, translation_key):
+    asyncio.run(_async_test_service_device_target_error(registry_entry, translation_key))
+
+
+async def _async_test_service_device_target_error(registry_entry, translation_key):
+    from unittest.mock import patch
+
+    from homeassistant.exceptions import ServiceValidationError
+
+    device = _make_device()
+    hass = _FakeHass(device)
+    registry = SimpleNamespace(async_get=lambda _device_id: registry_entry)
+
+    with patch("custom_components.fluvalble.dr.async_get", return_value=registry, create=True):
+        _register_services(hass)
+        with pytest.raises(ServiceValidationError) as raised:
+            await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](
+                SimpleNamespace(data={"device_id": "missing-device", "slot": 1})
+            )
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == translation_key
+
+
+def test_set_channels_requires_a_channel_as_translated_validation_error():
+    asyncio.run(_async_test_set_channels_requires_a_channel())
+
+
+async def _async_test_set_channels_requires_a_channel():
+    from homeassistant.exceptions import ServiceValidationError
+
+    hass = _FakeHass(_make_device())
+    _register_services(hass)
+
+    with pytest.raises(ServiceValidationError) as raised:
+        await hass.services.handlers[(DOMAIN, SERVICE_SET_CHANNELS)](
+            SimpleNamespace(
+                data={
+                    "entry_id": "entry_1",
+                    "transition": 0,
+                    "step_seconds": 0.1,
+                }
+            )
+        )
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "channels_required"
+
+
+def test_unloaded_light_is_a_translated_operational_error():
+    asyncio.run(_async_test_unloaded_light_is_a_translated_operational_error())
+
+
+async def _async_test_unloaded_light_is_a_translated_operational_error():
+    from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+
+    hass = _FakeHass()
+    _register_services(hass)
+
+    with pytest.raises(HomeAssistantError) as raised:
+        await hass.services.handlers[(DOMAIN, SERVICE_RECALL_MANUAL_PRESET)](
+            SimpleNamespace(data={"entry_id": "entry_1", "slot": 1})
+        )
+
+    assert not isinstance(raised.value, ServiceValidationError)
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "light_unavailable"
 
 
 def test_service_descriptions_use_device_picker_and_fixture_language():
@@ -543,15 +626,19 @@ def test_control_schedule_mode_updates_the_saved_schedule(monkeypatch):
 
 async def _async_test_removed_ha_auto_mode_is_rejected(monkeypatch):
     import custom_components.fluvalble as integration
-    from homeassistant.exceptions import HomeAssistantError
+    from homeassistant.exceptions import ServiceValidationError
 
     device = _make_device()
     hass = _FakeHass(device)
     _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "manual"}}}
     monkeypatch.setattr(integration, "Store", _MemoryStore)
 
-    with pytest.raises(HomeAssistantError, match="Unsupported fixture schedule mode"):
+    with pytest.raises(ServiceValidationError) as raised:
         await async_set_schedule_mode(hass, "entry_1", "auto")
+
+    assert raised.value.translation_domain == DOMAIN
+    assert raised.value.translation_key == "unsupported_schedule_mode"
+    assert raised.value.translation_placeholders == {"mode": "auto"}
 
 
 def test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch):

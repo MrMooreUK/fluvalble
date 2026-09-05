@@ -81,8 +81,12 @@ def _stub_homeassistant():
                 message = translation_placeholders.get("error")
             super().__init__(message)
 
+    class ServiceValidationError(HomeAssistantError):
+        """Stub Home Assistant's user-input service error."""
+
     ha_exc = types.ModuleType("homeassistant.exceptions")
     ha_exc.HomeAssistantError = HomeAssistantError
+    ha_exc.ServiceValidationError = ServiceValidationError
 
     # ---- homeassistant.const ----
     class Platform(str, enum.Enum):

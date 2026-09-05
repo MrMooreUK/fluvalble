@@ -21,6 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   downgrade by Home Assistant.
 
 ### Changed
+- Classified invalid action input and targeting as translated Home Assistant
+  validation errors while keeping Bluetooth and fixture failures as translated
+  operational errors.
 - Separated concise, user-facing GitHub release notes from the detailed
   changelog. Release tags now require a reviewed, versioned notes file instead
   of publishing an entire changelog section automatically.

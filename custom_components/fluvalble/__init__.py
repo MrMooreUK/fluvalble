@@ -19,7 +19,7 @@ from homeassistant.components import websocket_api
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import ATTR_DEVICE_ID, CONF_MAC, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import CoreState, HomeAssistant, ServiceCall, callback
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import CONNECTION_BLUETOOTH, format_mac
 from homeassistant.helpers.storage import Store
@@ -41,6 +41,35 @@ except ImportError:  # pragma: no cover - stubbed test environments
     ConfigEntryState = None  # type: ignore[misc, assignment]
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _action_validation_error(
+    translation_key: str,
+    **translation_placeholders: object,
+) -> ServiceValidationError:
+    """Return a translated error for invalid action input or targeting."""
+    return ServiceValidationError(
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+        translation_placeholders={key: str(value) for key, value in translation_placeholders.items()} or None,
+    )
+
+
+def _action_error(
+    translation_key: str,
+    **translation_placeholders: object,
+) -> HomeAssistantError:
+    """Return a translated error for an action that could not be completed."""
+    return HomeAssistantError(
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+        translation_placeholders={key: str(value) for key, value in translation_placeholders.items()} or None,
+    )
+
+
+def _command_error(message: str) -> HomeAssistantError:
+    """Return the shared translated fixture-command failure."""
+    return _action_error("command_failed", error=message)
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -776,10 +805,10 @@ def _register_services(hass: HomeAssistant) -> None:
             return None
         device_entry = dr.async_get(hass).async_get(device_id)
         if device_entry is None:
-            raise HomeAssistantError("The selected Home Assistant device no longer exists")
+            raise _action_validation_error("selected_device_missing")
         entry_ids = set(getattr(device_entry, "config_entries", set()) or set())
         if not entry_ids:
-            raise HomeAssistantError("The selected device is not managed by Fluval BLE")
+            raise _action_validation_error("device_not_managed")
         return entry_ids
 
     def loaded_device_candidates(data: dict, device_entry_ids: set[str] | None = None) -> list[tuple[str, Device]]:
@@ -813,8 +842,8 @@ def _register_services(hass: HomeAssistant) -> None:
         if len(candidates) == 1:
             return candidates[0][1]
         if len(candidates) > 1:
-            raise HomeAssistantError("Select one Fluval light for this action")
-        raise HomeAssistantError("The selected Fluval light is not loaded or available")
+            raise _action_validation_error("select_one_light")
+        raise _action_error("light_unavailable")
 
     def get_entry_id(data: dict) -> str:
         entry_id = data.get("entry_id")
@@ -839,8 +868,8 @@ def _register_services(hass: HomeAssistant) -> None:
         if len(candidates) == 1:
             return candidates.pop()
         if len(candidates) > 1:
-            raise HomeAssistantError("Select one Fluval light for this action")
-        raise HomeAssistantError("No matching Fluval BLE config entry was found")
+            raise _action_validation_error("select_one_light")
+        raise _action_validation_error("config_entry_not_found")
 
     async def async_set_channels(call: ServiceCall) -> None:
         device = get_device(call)
@@ -856,13 +885,13 @@ def _register_services(hass: HomeAssistant) -> None:
             if color in call.data
         }
         if not values:
-            raise HomeAssistantError("At least one channel value is required")
+            raise _action_validation_error("channels_required")
         if not await device.async_set_channels(
             values,
             transition=call.data["transition"],
             step_seconds=call.data["step_seconds"],
         ):
-            raise HomeAssistantError(device.command_error_message())
+            raise _command_error(device.command_error_message())
 
     async def async_preview_schedule(call: ServiceCall) -> None:
         device = get_device(call)
@@ -871,31 +900,31 @@ def _register_services(hass: HomeAssistant) -> None:
             duration=call.data["duration"],
             step_seconds=call.data["step_seconds"],
         ):
-            raise HomeAssistantError(device.command_error_message())
+            raise _command_error(device.command_error_message())
 
     async def async_preview_native_schedule(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_preview_native_schedule(call.data["minute"], call.data["schedule_type"]):
-            raise HomeAssistantError(device.command_error_message())
+            raise _command_error(device.command_error_message())
 
     async def async_stop_preview(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_stop_preview():
-            raise HomeAssistantError(device.command_error_message())
+            raise _command_error(device.command_error_message())
 
     async def async_save_schedule(call: ServiceCall) -> None:
         entry_id = get_entry_id(call.data)
         mode = call.data.get("mode")
         if mode == "native" and not await _async_upload_native_schedule(hass, entry_id, call.data["points"]):
             device = _device_for_entry(hass, entry_id)
-            raise HomeAssistantError(
-                device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
-            )
+            if device is None:
+                raise _action_error("light_unavailable")
+            raise _command_error(device.command_error_message())
         if mode == "manual" and not await _async_set_fixture_manual(hass, entry_id):
             device = _device_for_entry(hass, entry_id)
-            raise HomeAssistantError(
-                device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
-            )
+            if device is None:
+                raise _action_error("light_unavailable")
+            raise _command_error(device.command_error_message())
         await _async_save_schedule(
             hass,
             entry_id,
@@ -906,21 +935,19 @@ def _register_services(hass: HomeAssistant) -> None:
     async def async_set_native_auto_schedule(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_set_native_auto_schedule(call.data["schedule"]):
-            raise HomeAssistantError(device.diagnostics.get("last_error") or "Unable to store the native Auto schedule")
+            raise _command_error(device.diagnostics.get("last_error") or "Unable to store the native Auto schedule")
 
     async def async_set_native_pro_schedule(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_set_native_pro_schedule(call.data["points"]):
-            raise HomeAssistantError(
+            raise _command_error(
                 device.diagnostics.get("last_error") or "Unable to store the native Professional schedule"
             )
 
     async def async_set_native_effect_schedule(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_set_native_effect_schedule(call.data["windows"]):
-            raise HomeAssistantError(
-                device.diagnostics.get("last_error") or "Unable to store the native effect schedule"
-            )
+            raise _command_error(device.diagnostics.get("last_error") or "Unable to store the native effect schedule")
         await _async_save_effect_schedule(
             hass,
             get_entry_id(call.data),
@@ -930,12 +957,12 @@ def _register_services(hass: HomeAssistant) -> None:
     async def async_recall_manual_preset(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_recall_manual_preset(call.data["slot"]):
-            raise HomeAssistantError(device.command_error_message())
+            raise _command_error(device.command_error_message())
 
     async def async_save_manual_preset(call: ServiceCall) -> None:
         device = get_device(call)
         if not await device.async_save_manual_preset(call.data["slot"]):
-            raise HomeAssistantError(device.command_error_message())
+            raise _command_error(device.command_error_message())
 
     hass.services.async_register(
         DOMAIN,
@@ -1337,7 +1364,7 @@ async def _async_save_effect_schedule(
     """Save the user-authored timed-effect windows without replacing channel schedules."""
     normalized = _normalize_effect_schedule(windows)
     if normalized is None:
-        raise HomeAssistantError("Unable to normalize the timed-effect schedule")
+        raise _action_error("effect_schedule_normalization_failed")
     store = Store(hass, STORAGE_VERSION, STORAGE_KEY)
     data = await store.async_load() or {}
     schedules = data.setdefault("schedules", {})
@@ -1363,20 +1390,20 @@ def _device_for_entry(hass: HomeAssistant, entry_id: str) -> Device | None:
 async def async_set_schedule_mode(hass: HomeAssistant, entry_id: str, mode: str) -> None:
     """Set whether the saved curve is inactive or stored in the fixture."""
     if mode not in {"manual", "native"}:
-        raise HomeAssistantError(f"Unsupported fixture schedule mode: {mode}")
+        raise _action_validation_error("unsupported_schedule_mode", mode=mode)
 
     saved = await _async_load_schedule_data(hass, entry_id)
     points = saved.get("points") or []
     if mode == "native" and not await _async_upload_native_schedule(hass, entry_id, points):
         device = _device_for_entry(hass, entry_id)
-        raise HomeAssistantError(
-            device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
-        )
+        if device is None:
+            raise _action_error("light_unavailable")
+        raise _command_error(device.command_error_message())
     if mode == "manual" and not await _async_set_fixture_manual(hass, entry_id):
         device = _device_for_entry(hass, entry_id)
-        raise HomeAssistantError(
-            device.command_error_message() if device is not None else "Fluval BLE device is not loaded"
-        )
+        if device is None:
+            raise _action_error("light_unavailable")
+        raise _command_error(device.command_error_message())
     await _async_save_schedule(hass, entry_id, points, mode=mode)
 
 
