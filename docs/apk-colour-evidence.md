@@ -28,10 +28,10 @@ The decompiled `ManFragment.initBar()` switch selects these exact assets:
 | Integration profile | APK light type | FluvalConnect asset | APK channel order |
 |---|---:|---|---|
 | `reef_current` | 1 | `540_reef.txt` | Pink, Cyan, Blue, Purple, Cold White |
-| `plant_current` | 2 | `540_plant.txt` | Pink, Blue, Cold White, White, Warm White |
+| `plant_current` | 2 | `540_plant.txt` | Pink, Blue, Cold White, Pure White, Warm White |
 | `aquasky_current` | 3 | `532_new.txt` | Red, Green, Blue, White |
 | `reef_legacy` | 4 | `540_reef_old.txt` | Pink, Cyan, Blue, Purple, Cold White |
-| `plant_legacy` | 5 | `540_plant_old.txt` | Pink, Blue, Cold White, White, Warm White |
+| `plant_legacy` | 5 | `540_plant_old.txt` | Pink, Blue, Cold White, Pure White, Warm White |
 | `aquasky_legacy` | 6 | `532_old_new.txt` | Red, Green, Blue, White |
 
 The product-to-profile table in `core/products.py` mirrors

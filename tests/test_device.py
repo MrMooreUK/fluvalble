@@ -29,6 +29,10 @@ from custom_components.fluvalble.core.effects import PLANT_PRO_EFFECTS, WEATHER_
 from custom_components.fluvalble.core.products import PRODUCTS
 
 
+SPP_PRODUCT_IDS = {385, 386, 545, 546, 547, 548, 563, 564}
+FACEBD_PRODUCT_IDS = {532}
+
+
 def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config):
     return Device(
         name,
@@ -37,6 +41,30 @@ def _make_device(name="AquaSky3.0_Test", model="AquaSky Bluetooth LED", **config
             "model": model,
             **config,
         },
+    )
+
+
+def _apk_controller_client(product_id):
+    """Return the controller route selected for this product by FluvalConnect."""
+    if product_id in SPP_PRODUCT_IDS:
+        return SimpleNamespace(
+            command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
+            spp_transport=True,
+            plant_pro_spp=False,
+            wifi_facebd=False,
+        )
+    if product_id in FACEBD_PRODUCT_IDS:
+        return SimpleNamespace(
+            command_write_uuid="facebd02-7261-6262-6974-696f74626c65",
+            spp_transport=False,
+            plant_pro_spp=False,
+            wifi_facebd=True,
+        )
+    return SimpleNamespace(
+        command_write_uuid="00001001-0000-1000-8000-00805f9b34fb",
+        spp_transport=False,
+        plant_pro_spp=False,
+        wifi_facebd=False,
     )
 
 
@@ -79,12 +107,201 @@ def test_every_apk_product_drives_all_fixture_capabilities():
         assert [device.entity_name(channel) for channel in device.numbers()] == [
             channel_names[product.spectrum][channel] for channel in device.numbers()
         ]
+        assert device.light_mode() == ("rgb_white" if product.spectrum == "rgbw" else "rgb")
+        assert device.supports_manual_presets() is (product.manual_preset_count == 4)
+
+        device.values.update({channel: 0 for channel in device.numbers()})
+        fallback = device._channels_after_effect()
+        assert fallback == {
+            channel: 100 if channel == f"channel_{product.neutral_channel}" else 0 for channel in device.numbers()
+        }
+
+        if product.spectrum == "rgbw":
+            chromatic = device.channels_from_aquasky_rgb((255, 0, 255), 255)
+            neutral = device.channels_from_aquasky_rgb((255, 255, 255), 255)
+            assert len(chromatic) == product.channel_count
+            assert chromatic["channel_4"] == 0
+            assert neutral == {
+                "channel_1": 0,
+                "channel_2": 0,
+                "channel_3": 0,
+                "channel_4": 100,
+            }
+        else:
+            assert len(device.channels_from_rgb((255, 0, 255), 255)) == product.channel_count
+
         if product.native_effect_count == 11:
             assert device.effect_list() == ["off", *WEATHER_EFFECTS]
         elif product.native_effect_count == 4:
             assert device.effect_list() == ["off", *PLANT_PRO_EFFECTS]
         else:
             assert device.effect_list() == []
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_uses_exact_channel_width_on_its_controller_family(product_id):
+    asyncio.run(_async_test_product_channel_width_on_controller_family(product_id))
+
+
+async def _async_test_product_channel_width_on_controller_family(product_id):
+    """Exercise all APK products through their app-selected controller path."""
+    device = _make_device(product_id=product_id)
+    device.client = _apk_controller_client(product_id)
+    if product_id in SPP_PRODUCT_IDS:
+        packet_builder = protocol.spp_all_zone_packet
+    elif product_id in FACEBD_PRODUCT_IDS:
+        packet_builder = protocol.wifi_all_zone_packet
+    else:
+        packet_builder = protocol.old_all_zone_packet
+
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    targets = {channel: (index + 1) * 10 for index, channel in enumerate(device.numbers())}
+
+    assert await device.async_set_channels(targets)
+    device._async_send_packet.assert_awaited_once_with(packet_builder(list(targets.values())))
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_decodes_exact_channel_width_from_its_controller_family(product_id):
+    product = PRODUCTS[product_id]
+    device = _make_device(product_id=product_id)
+    device.client = _apk_controller_client(product_id)
+    levels = [(index + 1) * 10 for index in range(product.channel_count)]
+
+    if product_id in SPP_PRODUCT_IDS:
+        packet = bytes((protocol.SPP_STATUS_HEADER,)) + protocol.cbor_map(
+            {key: value for key, value in zip(protocol.SPP_CHANNEL_KEYS, levels, strict=False)}
+        )
+    elif product_id in FACEBD_PRODUCT_IDS:
+        packet = protocol.cbor_map({key: value for key, value in zip(protocol.WIFI_CHANNEL_KEYS, levels, strict=False)})
+    else:
+        packet = _old_manual_status([value * 10 for value in levels])
+
+    assert device.decode_update_packet(packet)
+    assert [device.values[channel] for channel in device.numbers()] == levels
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_encodes_auto_and_professional_schedules_at_exact_width(product_id):
+    asyncio.run(_async_test_product_schedule_width(product_id))
+
+
+async def _async_test_product_schedule_width(product_id):
+    product = PRODUCTS[product_id]
+    device = _make_device(product_id=product_id)
+    device.client = _apk_controller_client(product_id)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    day = [(index + 1) * 10 for index in range(product.channel_count)]
+    night = list(reversed(day))
+    auto = {
+        "sunrise": (8, 0, 60),
+        "sunset": (20, 0, 60),
+        "sleep": (23, 0),
+        "day_levels": day,
+        "night_levels": night,
+    }
+    points = [{"hour": hour, "minute": 0, "levels": [level // 2 for level in day]} for hour in (0, 8, 16, 23)]
+
+    assert await device.async_set_native_auto_schedule(auto, activate=False)
+    auto_packet = device._async_send_packet.await_args.args[0]
+    device._async_send_packet.reset_mock()
+    assert await device.async_set_native_pro_schedule(points, activate=False)
+    pro_packet = device._async_send_packet.await_args.args[0]
+
+    if product_id in SPP_PRODUCT_IDS:
+        assert auto_packet == protocol.spp_auto_schedule_packet(
+            **auto,
+            channel_count=product.channel_count,
+        )
+        assert pro_packet == protocol.spp_pro_schedule_packet(
+            points,
+            channel_count=product.channel_count,
+        )
+    elif product_id in FACEBD_PRODUCT_IDS:
+        assert auto_packet == protocol.wifi_auto_schedule_packet(
+            **auto,
+            channel_count=product.channel_count,
+        )
+        normalized = [
+            {
+                "minute": point["hour"] * 60,
+                **{f"channel_{index}": value for index, value in enumerate(point["levels"], start=1)},
+            }
+            for point in points
+        ]
+        assert pro_packet == protocol.wifi_pro_schedule_packet(
+            normalized,
+            channel_count=product.channel_count,
+        )
+    else:
+        assert auto_packet == protocol.old_auto_schedule_packet(
+            **auto,
+            channel_count=product.channel_count,
+        )
+        normalized = [
+            {
+                "minute": point["hour"] * 60,
+                **{f"channel_{index}": value for index, value in enumerate(point["levels"], start=1)},
+            }
+            for point in points
+        ]
+        assert pro_packet == protocol.old_pro_schedule_packet(
+            normalized,
+            channel_count=product.channel_count,
+        )
+
+
+@pytest.mark.parametrize("product_id", PRODUCTS)
+def test_every_apk_product_enforces_its_effect_catalogue_on_its_controller_family(product_id):
+    asyncio.run(_async_test_product_effect_catalogue(product_id))
+
+
+async def _async_test_product_effect_catalogue(product_id):
+    product = PRODUCTS[product_id]
+    device = _make_device(product_id=product_id)
+    device.client = _apk_controller_client(product_id)
+    device.values.update({"mode": "manual", "led_on_off": True})
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    if product.native_effect_count == 4:
+        effect, effect_id = "Crescent moon", 4
+    elif product.native_effect_count == 11:
+        effect, effect_id = "Crescent moon", 11
+    else:
+        assert not await device.async_set_effect("Lightning")
+        device._async_send_packet.assert_not_awaited()
+        return
+
+    assert await device.async_set_effect(effect)
+    if product_id in SPP_PRODUCT_IDS:
+        expected = protocol.spp_effect_packet(
+            effect_id,
+            maximum_effect_id=product.native_effect_count,
+        )
+    elif product_id in FACEBD_PRODUCT_IDS:
+        expected = protocol.wifi_effect_packet(effect_id)
+    else:
+        expected = protocol.old_weather_effect_packet(effect_id)
+    device._async_send_packet.assert_awaited_once_with(expected)
+
+
+def test_diagnostics_report_resolved_apk_product_capabilities():
+    device = _make_device(product_id=547, lamp_profile=LAMP_PROFILE_PLANT)
+
+    report = asyncio.run(device.async_collect_diagnostics())
+
+    assert report["product_id"] == 547
+    assert report["spectrum_profile"] == "reef_current"
+    assert report["product_capabilities"] == {
+        "channel_family": "marine",
+        "neutral_channel": 5,
+        "native_effect_count": 4,
+        "manual_preset_count": 0,
+    }
 
 
 def test_apk_product_identity_drives_auto_model_and_channel_count():
@@ -825,27 +1042,24 @@ def test_plant_pro_exposes_apk_five_channel_plant_spectrum():
     assert device.entity_name("channel_5") == CHANNEL_NAMES_PLANT_PRO["channel_5"]
 
 
-def test_plant_pro_and_plant_4_keep_separate_models_with_same_apk_channel_order():
-    plant_pro = _make_device(product_id=386)
-    plant_4 = _make_device(product_id=545)
+def test_current_plant_products_keep_separate_models_with_same_apk_channel_order():
+    products = {
+        386: "Fluval Plant PRO LED",
+        545: "Fluval Plant 4.0 LED",
+        548: "Fluval Plant Nano 4.0 LED",
+        563: "Fluval Siena 2.0",
+    }
 
-    assert plant_pro.model_name == "Fluval Plant PRO LED"
-    assert plant_4.model_name == "Fluval Plant 4.0 LED"
-    assert plant_pro.model_name != plant_4.model_name
-    assert [plant_pro.entity_name(channel) for channel in NUMBERS] == [
-        "Pink",
-        "Blue",
-        "Cold White",
-        "White",
-        "Warm White",
-    ]
-    assert [plant_4.entity_name(channel) for channel in NUMBERS] == [
-        "Pink",
-        "Blue",
-        "Cold White",
-        "White",
-        "Warm White",
-    ]
+    for product_id, model in products.items():
+        device = _make_device(product_id=product_id)
+        assert device.model_name == model
+        assert [device.entity_name(channel) for channel in NUMBERS] == [
+            "Pink",
+            "Blue",
+            "Cold White",
+            "Pure White",
+            "Warm White",
+        ]
 
 
 def test_apk_marine_products_use_five_channel_rgb_translation():
@@ -942,6 +1156,24 @@ def test_current_reef_effect_stop_defaults_to_apk_cold_white_channel(product_id)
         "channel_3": 0,
         "channel_4": 0,
         "channel_5": 100,
+    }
+
+
+@pytest.mark.parametrize("product_id", [386, 545, 548, 563])
+def test_current_plant_family_uses_apk_pure_white_channel(product_id):
+    device = _make_device(product_id=product_id)
+    device.values.update({channel: 0 for channel in NUMBERS})
+    device._effect_restore_channels = None
+
+    assert device.numbers() == NUMBERS
+    assert device.entity_name("channel_4") == "Pure White"
+    assert device.effect_list() == ["off", *PLANT_PRO_EFFECTS]
+    assert device._channels_after_effect() == {
+        "channel_1": 0,
+        "channel_2": 0,
+        "channel_3": 0,
+        "channel_4": 100,
+        "channel_5": 0,
     }
 
 

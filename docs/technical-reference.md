@@ -8,28 +8,40 @@ controller commands.
 ## Product identity and capabilities
 
 The advertised product ID selects the FluvalConnect model, physical channel
-layout, spectrum profile, schedule support, and native-effect catalogue.
-Bluetooth names are display data, not capability evidence.
+layout, spectrum profile, neutral emitter, manual-preset support, and native
+effect catalogue. Bluetooth names are display data, not capability evidence.
+The following table is the integration's complete APK-recognized light matrix.
 
-Plant PRO (product 386) and Plant 4.0 (product 545) are distinct products even
-though both use five-channel Plant spectra and may expose the same FFF0/SPP
-transport. If an advertisement has no APK-known product ID, the integration
-uses a generic layout until an explicit fixture profile or decoded controller
-response supplies the missing capability information.
+| APK family | Product IDs | Spectrum profile | Channels | Neutral | Effects | P1-P4 | APK controller path |
+|---|---|---|---:|---:|---:|---:|---|
+| Current Reef-type | 385, 546, 547 | `reef_current` | 5 | 5 | 4 | 0 | FFF0/SPP |
+| Current Plant | 386, 545, 548, 563 | `plant_current` | 5 | 4 | 4 | 0 | FFF0/SPP |
+| AquaSky 3.0 | 532 | `aquasky_current` | 4 | 4 | 11 | 0 | FACEBD |
+| Current RGBW | 564 | `aquasky_current` | 4 | 4 | 11 | 0 | FFF0/SPP |
+| Legacy Reef | 289-294, 337, 536, 640 | `reef_legacy` | 5 | 5 | 0 | 4 | Classic |
+| Legacy Plant | 305-311, 338, 373-377, 387-388, 537, 641, 29058 | `plant_legacy` | 5 | 4 | 0 | 4 | Classic |
+| Legacy AquaSky/RGBW | 321-329, 336, 369-372, 384, 609, 29057 | `aquasky_legacy` | 4 | 4 | 11 | 4 | Classic |
+| APK default-routed product | 281 | `reef_current` | 5 | 5 | 0 | 4 | Classic |
 
-Reef 4.0 (product 546) and Reef Nano 4.0 (product 547) are current, non-OLD
-fixtures in `LightDeviceUtils`. The APK assigns both light type 1, five channels
-in Pink, Cyan, Blue, Purple, Cold White order, and the four-effect catalogue.
-Their product identity selects the Reef spectrum and channel semantics while
-their connected GATT characteristics select the shared FFF0/SPP command path.
+The channel orders are Pink, Cyan, Blue, Purple, Cold White for Reef;
+Pink, Blue, Cold White, Pure White, Warm White for Plant; and Red, Green,
+Blue, White for RGBW. Product 385 retains the APK's unusual current Reef-type
+classification even though its older device name is A-Sky Aqua. Product 281
+likewise retains the APK's default current Reef spectrum while remaining an
+OLD/classic controller. Neither exception is normalized from its display name.
+
+If an advertisement has no APK-known product ID, the integration uses a
+generic layout until an explicit fixture profile or decoded controller response
+supplies the missing capability information.
 
 See [APK colour-control evidence](apk-colour-evidence.md) for colour conversion
 details and their source locations in the decompiled APK.
 
 ## Controller transports
 
-Product identity and BLE transport are separate. Transport selection comes
-from the services exposed by the connected fixture. The integration supports
+Product identity and BLE transport are separate. The table records the route
+selected by FluvalConnect, while runtime transport selection comes from the
+services exposed by the connected fixture. The integration supports
 legacy encrypted controllers, AquaSky 3.0/FACEBD controllers, and FFF0/SPP
 controllers using D1 command and D2 status CBOR frames.
 

@@ -69,7 +69,7 @@ CHANNEL_NAMES_PLANT = {
     "channel_1": "Pink",
     "channel_2": "Blue",
     "channel_3": "Cold White",
-    "channel_4": "White",
+    "channel_4": "Pure White",
     "channel_5": "Warm White",
 }
 CHANNEL_NAMES_MARINE = {
@@ -85,7 +85,7 @@ CHANNEL_NAMES_PLANT_PRO = {
     "channel_1": "Pink",
     "channel_2": "Blue",
     "channel_3": "Cold White",
-    "channel_4": "White",
+    "channel_4": "Pure White",
     "channel_5": "Warm White",
 }
 # Back-compat alias used by tests / schedule helpers
@@ -907,19 +907,17 @@ class Device:
         if any(targets.values()):
             return dict(targets)
         targets = {channel: 0 for channel in self.numbers()}
-        # FluvalConnect's APK channel tables put the neutral White bank at
-        # channel 4 on Plant/AquaSky fixtures but Cold White at channel 5 on
-        # Reef fixtures. Never fall back to Reef channel 4, which is Purple.
-        labels = self._channel_labels()
-        fallback = next(
-            (
-                channel
-                for wanted in ("White", "Cold White", "Warm White")
-                for channel in self.numbers()
-                if labels.get(channel) == wanted
-            ),
-            "channel_4",
-        )
+        # Use the APK product profile directly. Channel labels are presentation
+        # strings and must not decide which physical emitter receives power.
+        product = product_from_id(self.product_id)
+        if product is not None:
+            fallback = f"channel_{product.neutral_channel}"
+        elif self.uses_marine_spectrum():
+            fallback = "channel_5"
+        else:
+            # Both explicit Plant and AquaSky profiles place their neutral
+            # emitter at channel 4 in LightDeviceUtils.getLightChannel().
+            fallback = "channel_4"
         targets[fallback] = 100
         return targets
 
@@ -2330,7 +2328,9 @@ class Device:
             "configured_mac": self.address,
             "name": self.name,
             "model": self.model_name,
+            "product_id": self.product_id,
             "lamp_profile": self.lamp_profile,
+            "spectrum_profile": self.spectrum_profile(),
             "channel_count": self._resolved_channel_count(),
             "facebd": self.facebd,
             "connected": self.connected,
@@ -2360,6 +2360,13 @@ class Device:
                 "received_at": self.conn_info.get("advertisement_updated_at"),
             },
         }
+        if (product := product_from_id(self.product_id)) is not None:
+            report["product_capabilities"] = {
+                "channel_family": product.spectrum,
+                "neutral_channel": product.neutral_channel,
+                "native_effect_count": product.native_effect_count,
+                "manual_preset_count": product.manual_preset_count,
+            }
 
         if self.client is not None:
             report["gatt"] = {

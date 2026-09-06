@@ -233,6 +233,16 @@ def test_catalog_matches_apk_channel_groups_and_excludes_firmware_0103():
     assert 259 not in PRODUCTS
 
 
+def test_catalog_matches_apk_neutral_emitter_for_every_family():
+    """Keep effect exit tied to physical channels, not translated labels."""
+    assert {product_id for product_id, product in PRODUCTS.items() if product.neutral_channel == 5} == {
+        product_id for product_id, product in PRODUCTS.items() if product.spectrum == "marine"
+    }
+    assert {product_id for product_id, product in PRODUCTS.items() if product.neutral_channel == 4} == {
+        product_id for product_id, product in PRODUCTS.items() if product.spectrum in {"plant", "rgbw"}
+    }
+
+
 @pytest.mark.parametrize("product_id", PRODUCTS)
 def test_every_apk_product_id_decodes_from_classic_advertisement(product_id):
     encoded = f"{product_id:04X}".encode("ascii")

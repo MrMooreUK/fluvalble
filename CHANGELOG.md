@@ -30,6 +30,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Complete an APK-backed capability audit across all current and legacy light
+  families. Plant channel 4 is now labelled Pure White, and effect restoration
+  uses each product's explicit neutral-emitter metadata instead of translated
+  channel names. Diagnostics report the resolved spectrum and product
+  capabilities for future hardware validation without changing entity IDs.
 - Complete Roma & Shaker 2.0 current-controller handling using the APK's
   four-channel RGBW payload width and eleven-effect catalogue for direct
   effects, Auto and Professional schedules, timed effects, and readback.

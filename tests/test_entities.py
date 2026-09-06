@@ -198,7 +198,7 @@ async def _async_test_manual_preset_scene_surfaces_command_failure():
     ("product_id", "expected_names"),
     [
         (532, ["Red", "Green", "Blue", "White"]),
-        (305, ["Pink", "Blue", "Cold White", "White", "Warm White"]),
+        (305, ["Pink", "Blue", "Cold White", "Pure White", "Warm White"]),
         (546, ["Pink", "Cyan", "Blue", "Purple", "Cold White"]),
     ],
 )

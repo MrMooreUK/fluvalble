@@ -20,6 +20,7 @@ class FluvalProduct:
     spectrum: str
     spectrum_profile: str
     channel_count: int
+    neutral_channel: int
     native_effect_count: int
     manual_preset_count: int
 
@@ -29,6 +30,7 @@ def _products(
     spectrum: str,
     spectrum_profile: str,
     channel_count: int,
+    neutral_channel: int,
     native_effect_count: int,
     manual_preset_count: int,
 ) -> dict[int, FluvalProduct]:
@@ -38,6 +40,7 @@ def _products(
             spectrum,
             spectrum_profile,
             channel_count,
+            neutral_channel,
             native_effect_count,
             manual_preset_count,
         )
@@ -59,6 +62,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         "marine",
         "reef_current",
         5,
+        5,
         0,
         4,
     ),
@@ -77,6 +81,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         "marine",
         "reef_legacy",
         5,
+        5,
         0,
         4,
     ),
@@ -88,6 +93,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         },
         "marine",
         "reef_current",
+        5,
         5,
         4,
         0,
@@ -116,6 +122,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         "plant",
         "plant_legacy",
         5,
+        4,
         0,
         4,
     ),
@@ -132,6 +139,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         "plant",
         "plant_current",
         5,
+        4,
         4,
         0,
     ),
@@ -158,6 +166,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         "rgbw",
         "aquasky_legacy",
         4,
+        4,
         11,
         4,
     ),
@@ -168,6 +177,7 @@ PRODUCTS: dict[int, FluvalProduct] = {
         },
         "rgbw",
         "aquasky_current",
+        4,
         4,
         11,
         0,
