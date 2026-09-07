@@ -287,15 +287,17 @@ def _validate_time(value: object, label: str) -> tuple[int, int]:
 
 
 def _validate_native_levels(value: object, label: str) -> list[int]:
-    """Validate canonical levels or the previous Plant-specific aliases."""
+    """Validate four- or five-channel levels in APK fixture order."""
     if not isinstance(value, dict):
-        raise vol.Invalid(f"{label} must contain all five fixture channels")
-    if set(value) == set(NATIVE_SCHEDULE_CHANNELS):
+        raise vol.Invalid(f"{label} must contain all fixture channels")
+    if set(value) == set(NATIVE_SCHEDULE_CHANNELS[:4]):
+        source_channels = NATIVE_SCHEDULE_CHANNELS[:4]
+    elif set(value) == set(NATIVE_SCHEDULE_CHANNELS):
         source_channels = NATIVE_SCHEDULE_CHANNELS
     elif set(value) == set(LEGACY_PLANT_PRO_CHANNELS):
         source_channels = LEGACY_PLANT_PRO_CHANNELS
     else:
-        raise vol.Invalid(f"{label} must contain exactly {', '.join(NATIVE_SCHEDULE_CHANNELS)}")
+        raise vol.Invalid(f"{label} must contain exactly channel_1 through channel_4, or channel_1 through channel_5")
     levels = []
     for channel in source_channels:
         level = value[channel]

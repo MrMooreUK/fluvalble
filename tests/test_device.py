@@ -1270,6 +1270,17 @@ async def _async_test_roma_shaker_uses_apk_current_rgbw_commands_and_schedules()
     assert await device.async_set_native_auto_schedule(auto, activate=False)
     device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
 
+    # Previously saved/card-generated payloads always contained five values.
+    # The four-channel current controller must receive only its physical width.
+    device._async_send_packet.reset_mock()
+    five_channel_auto = {
+        **auto,
+        "day_levels": [80, 70, 60, 50, 99],
+        "night_levels": [0, 5, 0, 0, 99],
+    }
+    assert await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
+
     device._async_send_packet.reset_mock()
     points = [
         {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0]},

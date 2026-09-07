@@ -1009,14 +1009,30 @@ class Device:
         if not await self._async_prepare_command():
             return False
 
+        channel_count = self._resolved_channel_count()
+        day_levels = list(schedule["day_levels"])
+        night_levels = list(schedule["night_levels"])
+        if len(day_levels) < channel_count or len(night_levels) < channel_count:
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                f"This fixture requires {channel_count} day and night channel levels",
+            )
+            return False
+        # The service schema remains backward compatible with previously saved
+        # five-channel payloads.  Send only the physical channels assigned to
+        # this APK product profile, particularly the four-channel current SPP
+        # profile used by Roma & Shaker 2.0.
+        day_levels = day_levels[:channel_count]
+        night_levels = night_levels[:channel_count]
+
         if self._uses_wifi_protocol():
             packet = protocol.wifi_auto_schedule_packet(
                 sunrise=schedule["sunrise"],
                 sunset=schedule["sunset"],
                 sleep=schedule.get("sleep"),
-                day_levels=schedule["day_levels"],
-                night_levels=schedule["night_levels"],
-                channel_count=self._resolved_channel_count(),
+                day_levels=day_levels,
+                night_levels=night_levels,
+                channel_count=channel_count,
             )
             native_protocol = "facebd"
         elif self._uses_spp_protocol():
@@ -1024,9 +1040,9 @@ class Device:
                 sunrise=schedule["sunrise"],
                 sunset=schedule["sunset"],
                 sleep=schedule.get("sleep"),
-                day_levels=schedule["day_levels"],
-                night_levels=schedule["night_levels"],
-                channel_count=self._resolved_channel_count(),
+                day_levels=day_levels,
+                night_levels=night_levels,
+                channel_count=channel_count,
             )
             native_protocol = "spp"
         else:
@@ -1034,9 +1050,9 @@ class Device:
                 sunrise=schedule["sunrise"],
                 sunset=schedule["sunset"],
                 sleep=schedule.get("sleep"),
-                day_levels=schedule["day_levels"],
-                night_levels=schedule["night_levels"],
-                channel_count=self._resolved_channel_count(),
+                day_levels=day_levels,
+                night_levels=night_levels,
+                channel_count=channel_count,
             )
             native_protocol = "classic"
 
