@@ -1295,6 +1295,14 @@ async def _async_test_roma_shaker_uses_apk_current_rgbw_commands_and_schedules()
     assert await device.async_set_native_auto_schedule(auto, activate=False)
     device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
 
+    invalid_auto = {**auto, "sunrise": (24, 0, 60)}
+    device._async_prepare_command.reset_mock()
+    device._async_send_packet.reset_mock()
+    assert not await device.async_set_native_auto_schedule(invalid_auto, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == ("Auto sunrise and sunset require a valid time and a 0-240 minute ramp")
+
     # Previously saved/card-generated payloads always contained five values.
     # The four-channel current controller must receive only its physical width.
     device._async_send_packet.reset_mock()
@@ -2572,6 +2580,58 @@ async def _async_test_native_pro_schedule_uses_apk_sorted_unique_time_points():
     device._async_prepare_command.assert_not_awaited()
     device._async_send_packet.assert_not_awaited()
     assert device.diagnostics["last_error"] == "Professional schedule points require unique times within one day"
+
+
+def test_native_pro_schedule_enforces_detected_fixture_channel_width():
+    asyncio.run(_async_test_native_pro_schedule_enforces_detected_fixture_channel_width())
+
+
+async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_width():
+    five_channel = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+    five_channel._async_prepare_command = AsyncMock(return_value=True)
+    five_channel._async_send_packet = AsyncMock(return_value=True)
+    four_levels = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour]} for hour in (8, 10, 12, 20)]
+
+    assert not await five_channel.async_set_native_pro_schedule(four_levels, activate=False)
+    five_channel._async_prepare_command.assert_not_awaited()
+    five_channel._async_send_packet.assert_not_awaited()
+    assert five_channel.diagnostics["last_error"] == (
+        "This fixture requires 5 channel levels at every Professional point"
+    )
+
+    four_channel = _make_device(name="Roma_Test", model="Fluval Roma & Shaker 2.0", product_id=564)
+    four_channel.client = SimpleNamespace(
+        spp_transport=True,
+        plant_pro_spp=True,
+        wifi_facebd=False,
+        command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
+    )
+    four_channel._async_prepare_command = AsyncMock(return_value=True)
+    four_channel._async_send_packet = AsyncMock(return_value=True)
+    five_levels = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour, 99]} for hour in (8, 10, 12, 20)]
+
+    assert await four_channel.async_set_native_pro_schedule(five_levels, activate=False)
+    packet = four_channel._async_send_packet.await_args.args[0]
+    decoded = protocol.decode_cbor_update(packet)
+    assert protocol.decode_spp_pro_schedule(decoded, channel_count=4)[0]["levels"] == [8, 8, 8, 8]
+
+    invalid_time = [*five_levels[:3], {**five_levels[3], "hour": 24}]
+    four_channel._async_prepare_command.reset_mock()
+    four_channel._async_send_packet.reset_mock()
+    assert not await four_channel.async_set_native_pro_schedule(invalid_time, activate=False)
+    four_channel._async_prepare_command.assert_not_awaited()
+    four_channel._async_send_packet.assert_not_awaited()
+    assert four_channel.diagnostics["last_error"] == (
+        "Professional schedule points contain a time outside the 24-hour range"
+    )
+
+    mixed_widths = [*five_levels[:3], {**five_levels[3], "levels": five_levels[3]["levels"][:4]}]
+    four_channel._async_prepare_command.reset_mock()
+    four_channel._async_send_packet.reset_mock()
+    assert not await four_channel.async_set_native_pro_schedule(mixed_widths, activate=False)
+    four_channel._async_prepare_command.assert_not_awaited()
+    four_channel._async_send_packet.assert_not_awaited()
+    assert four_channel.diagnostics["last_error"] == ("All Professional points must use the same fixture channel count")
 
 
 def test_plant_pro_expected_state_uses_spp_keys():

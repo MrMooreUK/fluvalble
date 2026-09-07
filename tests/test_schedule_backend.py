@@ -482,6 +482,20 @@ def test_native_auto_schedule_validator_accepts_four_channel_fixture_order():
     assert schedule["night_levels"] == [0, 0, 0, 0]
 
 
+def test_native_auto_schedule_validator_rejects_mixed_fixture_channel_counts():
+    schedule = {
+        "sunrise": "08:00",
+        "sunrise_ramp": 60,
+        "sunset": "20:30",
+        "sunset_ramp": 45,
+        "day": {f"channel_{index}": 0 for index in range(1, 5)},
+        "night": {f"channel_{index}": 0 for index in range(1, 6)},
+    }
+
+    with pytest.raises(vol.Invalid, match="same fixture channel count"):
+        _validate_native_auto_schedule(schedule)
+
+
 def test_native_pro_and_effect_validators_normalize_service_objects():
     points = _validate_native_pro_points(
         [
@@ -552,6 +566,19 @@ def test_native_pro_validator_accepts_canonical_channel_order():
     )
 
     assert points[0] == {"hour": 8, "minute": 0, "levels": [9, 10, 11, 12, 13]}
+
+
+def test_native_pro_validator_rejects_mixed_fixture_channel_counts():
+    points = [
+        {
+            "time": f"{hour:02d}:00",
+            **{f"channel_{index}": 0 for index in range(1, count + 1)},
+        }
+        for hour, count in ((8, 4), (12, 5), (20, 4), (22, 4))
+    ]
+
+    with pytest.raises(vol.Invalid, match="same fixture channel count"):
+        _validate_native_pro_points(points)
 
 
 def test_native_effect_validator_accepts_classic_and_facebd_weather_catalog():

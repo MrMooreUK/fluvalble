@@ -1005,16 +1005,44 @@ class Device:
         activate: bool = True,
     ) -> bool:
         """Store a protocol-native Auto schedule in the fixture."""
-        if not await self._async_prepare_command():
-            return False
-
         channel_count = self._resolved_channel_count()
-        day_levels = list(schedule["day_levels"])
-        night_levels = list(schedule["night_levels"])
-        if len(day_levels) < channel_count or len(night_levels) < channel_count:
+        try:
+            day_levels = list(schedule["day_levels"])
+            night_levels = list(schedule["night_levels"])
+            sunrise = tuple(schedule["sunrise"])
+            sunset = tuple(schedule["sunset"])
+            raw_sleep = schedule.get("sleep")
+            sleep = None if raw_sleep is None else tuple(raw_sleep)
+        except (KeyError, TypeError):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Auto schedule fields are incomplete or invalid",
+            )
+            return False
+        if (
+            len(day_levels) != len(night_levels)
+            or len(day_levels) < channel_count
+            or len(day_levels) > len(NUMBERS)
+            or any(
+                isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100
+                for level in (*day_levels, *night_levels)
+            )
+        ):
             self._set_diagnostic_error(
                 "invalid_native_schedule",
                 f"This fixture requires {channel_count} day and night channel levels",
+            )
+            return False
+        if not self._valid_schedule_time_with_ramp(sunrise) or not self._valid_schedule_time_with_ramp(sunset):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Auto sunrise and sunset require a valid time and a 0-240 minute ramp",
+            )
+            return False
+        if sleep is not None and not self._valid_schedule_time(sleep):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Auto sleep time is outside the 24-hour range",
             )
             return False
         # The service schema remains backward compatible with previously saved
@@ -1024,11 +1052,14 @@ class Device:
         day_levels = day_levels[:channel_count]
         night_levels = night_levels[:channel_count]
 
+        if not await self._async_prepare_command():
+            return False
+
         if self._uses_wifi_protocol():
             packet = protocol.wifi_auto_schedule_packet(
-                sunrise=schedule["sunrise"],
-                sunset=schedule["sunset"],
-                sleep=schedule.get("sleep"),
+                sunrise=sunrise,
+                sunset=sunset,
+                sleep=sleep,
                 day_levels=day_levels,
                 night_levels=night_levels,
                 channel_count=channel_count,
@@ -1036,9 +1067,9 @@ class Device:
             native_protocol = "facebd"
         elif self._uses_spp_protocol():
             packet = protocol.spp_auto_schedule_packet(
-                sunrise=schedule["sunrise"],
-                sunset=schedule["sunset"],
-                sleep=schedule.get("sleep"),
+                sunrise=sunrise,
+                sunset=sunset,
+                sleep=sleep,
                 day_levels=day_levels,
                 night_levels=night_levels,
                 channel_count=channel_count,
@@ -1046,9 +1077,9 @@ class Device:
             native_protocol = "spp"
         else:
             packet = protocol.old_auto_schedule_packet(
-                sunrise=schedule["sunrise"],
-                sunset=schedule["sunset"],
-                sleep=schedule.get("sleep"),
+                sunrise=sunrise,
+                sunset=sunset,
+                sleep=sleep,
                 day_levels=day_levels,
                 night_levels=night_levels,
                 channel_count=channel_count,
@@ -1074,6 +1105,30 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
+    @staticmethod
+    def _valid_schedule_time(value: tuple[Any, ...]) -> bool:
+        """Return whether a schedule tuple is an APK-valid hour and minute."""
+        return (
+            len(value) == 2
+            and not isinstance(value[0], bool)
+            and isinstance(value[0], int)
+            and not isinstance(value[1], bool)
+            and isinstance(value[1], int)
+            and 0 <= value[0] <= 23
+            and 0 <= value[1] <= 59
+        )
+
+    @classmethod
+    def _valid_schedule_time_with_ramp(cls, value: tuple[Any, ...]) -> bool:
+        """Return whether a schedule tuple also has an APK-valid ramp."""
+        return (
+            len(value) == 3
+            and cls._valid_schedule_time(value[:2])
+            and not isinstance(value[2], bool)
+            and isinstance(value[2], int)
+            and 0 <= value[2] <= 240
+        )
+
     def native_pro_schedule_limits(self) -> tuple[str, int, int]:
         """Return the APK-defined Professional-schedule limits for this fixture."""
         if self._uses_wifi_protocol():
@@ -1090,16 +1145,64 @@ class Device:
         activate: bool = True,
     ) -> bool:
         """Store a protocol-native Professional schedule in the fixture."""
-        if points and all("time" not in point and "levels" in point for point in points):
-            normalized = [
-                {
-                    "minute": (int(point["hour"]) * 60) + int(point["minute"]),
-                    **{f"channel_{index}": int(level) for index, level in enumerate(point["levels"], start=1)},
-                }
-                for point in points
-            ]
-        else:
-            normalized = self._normalize_schedule_points(points)
+        channel_count = self._resolved_channel_count()
+        try:
+            if points and all("time" not in point and "levels" in point for point in points):
+                raw_levels = [list(point["levels"]) for point in points]
+                level_widths = {len(levels) for levels in raw_levels}
+                if any(
+                    len(levels) < channel_count
+                    or len(levels) > len(NUMBERS)
+                    or any(
+                        isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100
+                        for level in levels
+                    )
+                    for levels in raw_levels
+                ):
+                    self._set_diagnostic_error(
+                        "invalid_native_schedule",
+                        f"This fixture requires {channel_count} channel levels at every Professional point",
+                    )
+                    return False
+                if len(level_widths) != 1:
+                    self._set_diagnostic_error(
+                        "invalid_native_schedule",
+                        "All Professional points must use the same fixture channel count",
+                    )
+                    return False
+                raw_times = [(point["hour"], point["minute"]) for point in points]
+                if any(
+                    isinstance(hour, bool)
+                    or not isinstance(hour, int)
+                    or isinstance(minute, bool)
+                    or not isinstance(minute, int)
+                    or not 0 <= hour <= 23
+                    or not 0 <= minute <= 59
+                    for hour, minute in raw_times
+                ):
+                    self._set_diagnostic_error(
+                        "invalid_native_schedule",
+                        "Professional schedule points contain a time outside the 24-hour range",
+                    )
+                    return False
+                normalized = [
+                    {
+                        "minute": (hour * 60) + minute,
+                        **{
+                            f"channel_{index}": int(level)
+                            for index, level in enumerate(levels[:channel_count], start=1)
+                        },
+                    }
+                    for (hour, minute), levels in zip(raw_times, raw_levels, strict=True)
+                ]
+            else:
+                normalized = self._normalize_schedule_points(points)
+        except (KeyError, TypeError, ValueError):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Professional schedule points contain an invalid time or channel value",
+            )
+            return False
 
         minutes = [int(point["minute"]) for point in normalized]
         if any(not 0 <= minute < DAY_MINUTES for minute in minutes) or len(set(minutes)) != len(minutes):
@@ -1134,7 +1237,6 @@ class Device:
                 channel_count=self._resolved_channel_count(),
             )
         elif native_protocol == "spp":
-            channel_count = self._resolved_channel_count()
             spp_points = [
                 {
                     "hour": point["minute"] // 60,
@@ -1757,16 +1859,18 @@ class Device:
         normalized = []
         for point in points:
             minute = self._parse_time_to_minute(str(point["time"]))
-            channels = {
-                channel: max(0, min(100, int(point.get(channel, point.get(color, 0)))))
-                for channel, color in (
-                    ("channel_1", "red"),
-                    ("channel_2", "green"),
-                    ("channel_3", "blue"),
-                    ("channel_4", "white"),
-                    ("channel_5", "channel_5"),
-                )
-            }
+            channels = {}
+            for channel, color in (
+                ("channel_1", "red"),
+                ("channel_2", "green"),
+                ("channel_3", "blue"),
+                ("channel_4", "white"),
+                ("channel_5", "channel_5"),
+            ):
+                value = point.get(channel, point.get(color, 0))
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                    raise ValueError(f"{channel} must be an integer from 0 to 100")
+                channels[channel] = value
             normalized.append({"minute": minute, "time": self._format_minute(minute), **channels})
 
         return sorted(normalized, key=lambda item: item["minute"])
@@ -1887,7 +1991,11 @@ class Device:
     def _parse_time_to_minute(self, value: str) -> int:
         """Parse HH:MM into minutes from midnight."""
         hour, minute = value.split(":", 1)
-        return ((int(hour) % 24) * 60) + int(minute)
+        hour_value = int(hour)
+        minute_value = int(minute)
+        if not 0 <= hour_value <= 23 or not 0 <= minute_value <= 59:
+            raise ValueError("Schedule time is outside the 24-hour range")
+        return (hour_value * 60) + minute_value
 
     def _format_minute(self, minute: int) -> str:
         """Format minutes from midnight as HH:MM."""
