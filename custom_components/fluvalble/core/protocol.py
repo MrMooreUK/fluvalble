@@ -170,9 +170,9 @@ def wifi_auto_schedule_packet(
     if channel_count not in (4, 5):
         raise ValueError("FACEBD Fluval schedules require four or five channels")
     sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
-    sunrise_end = min(1439, sunrise_start + _clamp_ramp(sunrise[2]))
+    sunrise_end = (sunrise_start + _clamp_ramp(sunrise[2])) % 1440
     sunset_end = _minute_of_day(sunset[0], sunset[1])
-    sunset_start = max(0, sunset_end - _clamp_ramp(sunset[2]))
+    sunset_start = (sunset_end - _clamp_ramp(sunset[2])) % 1440
     sleep_minute = 0xFFFF if sleep is None else _minute_of_day(sleep[0], sleep[1])
     return cbor_map(
         {
@@ -409,9 +409,9 @@ def old_auto_schedule_packet(
     if channel_count not in (4, 5):
         raise ValueError("Classic Fluval schedules require four or five channels")
     sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
-    sunrise_end = min(1439, sunrise_start + _clamp_ramp(sunrise[2]))
+    sunrise_end = (sunrise_start + _clamp_ramp(sunrise[2])) % 1440
     sunset_end = _minute_of_day(sunset[0], sunset[1])
-    sunset_start = max(0, sunset_end - _clamp_ramp(sunset[2]))
+    sunset_start = (sunset_end - _clamp_ramp(sunset[2])) % 1440
     payload = bytearray((*_hour_minute(sunrise_start), *_hour_minute(sunrise_end)))
     payload.extend(_level_bytes(day_levels, count=channel_count))
     payload.extend((*_hour_minute(sunset_start), *_hour_minute(sunset_end)))
@@ -544,8 +544,8 @@ def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, An
             return None
         sleep = {"hour": sleep_minute // 60, "minute": sleep_minute % 60}
     return {
-        "sunrise": _ramp_dict(sunrise_start, max(0, sunrise_end - sunrise_start)),
-        "sunset": _ramp_dict(sunset_end, max(0, sunset_end - sunset_start)),
+        "sunrise": _ramp_dict(sunrise_start, (sunrise_end - sunrise_start) % 1440),
+        "sunset": _ramp_dict(sunset_end, (sunset_end - sunset_start) % 1440),
         "sleep": sleep,
         "day_levels": day_levels,
         "night_levels": night_levels,
@@ -941,9 +941,14 @@ def _decode_minute_pair(value: Any, *, sunrise: bool) -> dict[str, int] | None:
     if not isinstance(value, list) or len(value) != 2:
         return None
     start, end = value
-    if not isinstance(start, int) or not isinstance(end, int) or not 0 <= start <= end < 1440:
+    if (
+        not isinstance(start, int)
+        or not isinstance(end, int)
+        or not 0 <= start < 1440
+        or not 0 <= end < 1440
+    ):
         return None
-    return _ramp_dict(start if sunrise else end, end - start)
+    return _ramp_dict(start if sunrise else end, (end - start) % 1440)
 
 
 def _normalized_points(points: Iterable[dict[str, Any]], *, channel_count: int) -> list[tuple[int, list[int]]]:

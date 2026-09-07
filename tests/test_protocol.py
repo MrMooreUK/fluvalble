@@ -320,6 +320,28 @@ def test_wifi_five_channel_auto_schedule_preserves_apk_level_arrays():
     assert protocol.decode_wifi_auto_schedule(decoded)["day_levels"] == [80, 70, 60, 50, 40]
 
 
+def test_wifi_auto_schedule_preserves_apk_midnight_wrapping():
+    packet = protocol.wifi_auto_schedule_packet(
+        sunrise=(23, 30, 60),
+        sunset=(0, 30, 60),
+        sleep=None,
+        day_levels=[80, 70, 60, 50],
+        night_levels=[0, 10, 0, 0],
+        channel_count=4,
+    )
+    decoded = protocol.decode_cbor_map(packet)
+
+    assert decoded[protocol.WIFI_AUTO_SUNRISE_KEY] == [1410, 30]
+    assert decoded[protocol.WIFI_AUTO_SUNSET_KEY] == [1410, 30]
+    assert protocol.decode_wifi_auto_schedule(decoded) == {
+        "sunrise": {"hour": 23, "minute": 30, "ramp": 60},
+        "sunset": {"hour": 0, "minute": 30, "ramp": 60},
+        "sleep": None,
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 10, 0, 0],
+    }
+
+
 def test_wifi_auto_schedule_rejects_non_apk_channel_count():
     with pytest.raises(ValueError, match="four or five channels"):
         protocol.wifi_auto_schedule_packet(
@@ -457,6 +479,27 @@ def test_classic_native_auto_schedule_matches_apk_6807_shape():
         "sunrise": {"hour": 8, "minute": 0, "ramp": 60},
         "sunset": {"hour": 21, "minute": 0, "ramp": 45},
         "sleep": {"hour": 22, "minute": 30},
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 10, 0, 0],
+    }
+
+
+def test_classic_native_auto_schedule_preserves_apk_midnight_wrapping():
+    packet = protocol.old_auto_schedule_packet(
+        sunrise=(23, 30, 60),
+        sunset=(0, 30, 60),
+        sleep=None,
+        day_levels=[80, 70, 60, 50],
+        night_levels=[0, 10, 0, 0],
+        channel_count=4,
+    )
+
+    assert packet[2:6] == bytes((23, 30, 0, 30))
+    assert packet[10:14] == bytes((23, 30, 0, 30))
+    assert protocol.decode_old_auto_schedule(bytes((1,)) + packet[2:-1], channel_count=4) == {
+        "sunrise": {"hour": 23, "minute": 30, "ramp": 60},
+        "sunset": {"hour": 0, "minute": 30, "ramp": 60},
+        "sleep": None,
         "day_levels": [80, 70, 60, 50],
         "night_levels": [0, 10, 0, 0],
     }
