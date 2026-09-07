@@ -1546,16 +1546,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
     runtime = entry_runtime_data(hass, entry)
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
-        runtime.device.cancel_reachability_refresh()
-        await runtime.device.async_cancel_channel_mode_restore()
-        if runtime.device.preview_task is not None or runtime.device.native_preview_active:
-            await runtime.device.async_stop_preview()
         tasks = list(runtime.background_tasks)
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         runtime.background_tasks.clear()
+
+        runtime.device.cancel_reachability_refresh()
+        await runtime.device.async_cancel_channel_mode_restore()
+        if runtime.device.preview_task is not None or runtime.device.native_preview_active:
+            await runtime.device.async_stop_preview()
         client = runtime.device.client
         if client is not None:
             try:

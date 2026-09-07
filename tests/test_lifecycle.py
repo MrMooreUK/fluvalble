@@ -125,16 +125,22 @@ def test_unload_stops_software_preview_task():
 
 
 async def _async_test_unload_stops_software_preview_task():
+    background_task = asyncio.create_task(asyncio.Event().wait())
+
+    async def stop_preview_after_background_work():
+        assert background_task.done()
+        return True
+
     preview_task = MagicMock()
     device = SimpleNamespace(
         preview_task=preview_task,
         native_preview_active=False,
         cancel_reachability_refresh=MagicMock(),
         async_cancel_channel_mode_restore=AsyncMock(),
-        async_stop_preview=AsyncMock(return_value=True),
+        async_stop_preview=AsyncMock(side_effect=stop_preview_after_background_work),
         client=None,
     )
-    runtime = FluvalRuntimeData(device=device)
+    runtime = FluvalRuntimeData(device=device, background_tasks={background_task})
     entry = SimpleNamespace(entry_id="entry_1", runtime_data=runtime)
     hass = SimpleNamespace(
         data={DOMAIN: {entry.entry_id: runtime}},
@@ -146,6 +152,8 @@ async def _async_test_unload_stops_software_preview_task():
     device.cancel_reachability_refresh.assert_called_once_with()
     device.async_cancel_channel_mode_restore.assert_awaited_once_with()
     device.async_stop_preview.assert_awaited_once_with()
+    assert background_task.cancelled()
+    assert not runtime.background_tasks
     assert entry.entry_id not in hass.data[DOMAIN]
 
 

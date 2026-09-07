@@ -39,6 +39,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   longer duplicated after a successful GATT write, observable FACEBD and SPP
   writes use exact typed readback verification, and commands without readable
   state remain explicitly unverified.
+- Quiesce config-entry-owned migration work before preview and BLE-client
+  teardown so unload/reload cannot race an in-flight fixture command.
 - Removed two invented state transitions that are absent from FluvalConnect:
   explicit power-off no longer restores a preview colour first, and leaving an
   effect no longer substitutes a full-brightness neutral emitter when no prior
