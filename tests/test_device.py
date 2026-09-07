@@ -1657,6 +1657,55 @@ async def _async_test_facebd_dst_control_uses_apk_key_99_packet():
     }
 
 
+def test_facebd_expected_state_covers_apk_effect_and_schedule_fields():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = _facebd_client()
+
+    packets = (
+        protocol.wifi_effect_packet(4),
+        protocol.wifi_auto_schedule_packet(
+            sunrise=(7, 0, 30),
+            sunset=(19, 0, 45),
+            sleep=(23, 0),
+            day_levels=[80, 70, 60, 50],
+            night_levels=[0, 5, 0, 10],
+            channel_count=4,
+        ),
+        protocol.wifi_pro_schedule_packet(
+            [
+                {"time": "00:00", "levels": [0, 0, 0, 0]},
+                {"time": "08:00", "levels": [60, 50, 40, 30]},
+                {"time": "18:00", "levels": [20, 20, 20, 20]},
+                {"time": "23:00", "levels": [0, 0, 0, 0]},
+            ],
+            channel_count=4,
+        ),
+        protocol.wifi_effect_schedule_packet(
+            [
+                {
+                    "start_hour": 10,
+                    "start_minute": 0,
+                    "end_hour": 11,
+                    "end_minute": 0,
+                    "effect_id": 2,
+                    "weekdays": [True, True, True, True, True, True, True],
+                }
+            ]
+        ),
+    )
+
+    for packet in packets:
+        assert device._expected_state_for_packet(packet) == protocol.decode_cbor_update(packet)
+
+
+def test_facebd_transient_preview_and_find_commands_are_not_claimed_as_verified():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = _facebd_client()
+
+    assert device._expected_state_for_packet(protocol.wifi_auto_preview_packet(720)) is None
+    assert device._expected_state_for_packet(protocol.wifi_find_packet()) is None
+
+
 def test_classic_dst_control_is_rejected_without_a_write():
     asyncio.run(_async_test_classic_dst_control_is_rejected_without_a_write())
 
@@ -2861,6 +2910,7 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
 
     assert device._channel_values() == [10, 20, 30, 40]
     assert expected == {
+        protocol.WIFI_MANUAL_KEY: 0,
         protocol.WIFI_CHANNEL_KEYS[0]: 10,
         protocol.WIFI_CHANNEL_KEYS[1]: 20,
         protocol.WIFI_CHANNEL_KEYS[2]: 30,
@@ -2885,6 +2935,7 @@ def test_five_channel_facebd_packet_preserves_cold_white_channel():
     packet = protocol.wifi_all_zone_packet(device._channel_values())
 
     assert device._expected_state_for_packet(packet) == {
+        protocol.WIFI_MANUAL_KEY: 0,
         protocol.WIFI_CHANNEL_KEYS[0]: 10,
         protocol.WIFI_CHANNEL_KEYS[1]: 20,
         protocol.WIFI_CHANNEL_KEYS[2]: 30,

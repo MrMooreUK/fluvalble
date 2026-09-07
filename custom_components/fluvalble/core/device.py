@@ -2314,8 +2314,19 @@ class Device:
                 protocol.WIFI_SWITCH_KEY,
                 protocol.WIFI_DST_KEY,
                 *(protocol.WIFI_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
+                protocol.WIFI_MANUAL_KEY,
+                protocol.WIFI_AUTO_SUNRISE_KEY,
+                protocol.WIFI_AUTO_SUNSET_KEY,
+                protocol.WIFI_AUTO_SLEEP_KEY,
+                protocol.WIFI_AUTO_DAY_LEVELS_KEY,
+                protocol.WIFI_AUTO_NIGHT_LEVELS_KEY,
+                protocol.WIFI_PRO_COUNT_KEY,
+                protocol.WIFI_PRO_TIMES_KEY,
+                protocol.WIFI_PRO_LEVELS_KEY,
+                protocol.WIFI_SCHEDULED_EFFECT_KEY,
             }
-        return {key: value for key, value in decoded.items() if key in supported_keys}
+        expected = {key: value for key, value in decoded.items() if key in supported_keys}
+        return expected or None
 
     @serialized_device_command
     async def async_refresh_state(self) -> bool:
