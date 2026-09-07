@@ -897,6 +897,17 @@ class Device:
         """Resolve a wire effect ID using this product's APK catalogue."""
         return four_effect_name(effect_code) if self.uses_four_effect_catalogue() else effect_name(effect_code)
 
+    def _store_native_effect_code(self, effect_code: int) -> bool:
+        """Store only the APK's explicit off sentinel or a catalogued effect."""
+        if effect_code == 0:
+            self.values["effect"] = None
+            return True
+        effect = self._native_effect_name(effect_code)
+        if effect is None:
+            return False
+        self.values["effect"] = effect
+        return True
+
     def _channel_snapshot(self) -> dict[str, int]:
         """Return the current supported static channel values."""
         return {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
@@ -1234,7 +1245,7 @@ class Device:
 
     @serialized_device_command
     async def async_stop_effect(self) -> bool:
-        """Stop a native effect by restoring the preceding static channel mix."""
+        """Stop a native effect by returning to the last known static state."""
         if not self.values.get("effect"):
             return True
         return await self.async_set_channels(self._channels_after_effect(), force=True)
@@ -2588,7 +2599,7 @@ class Device:
         if self.values["mode"] == "manual":
             self.values["led_on_off"] = bool(decoded["power"])
             if self.supports_classic_effects():
-                self.values["effect"] = self._native_effect_name(int(decoded["effect_id"]))
+                self._store_native_effect_code(int(decoded["effect_id"]))
             presets = [list(preset) for preset in decoded["presets"]]
             self.values["native_manual_presets"] = presets
             self.diagnostics.update(
@@ -2662,16 +2673,17 @@ class Device:
             and not isinstance(data[protocol.WIFI_MANUAL_KEY], bool)
         ):
             effect_code = data[protocol.WIFI_MANUAL_KEY]
-            self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
-            updated = True
+            updated = self._store_native_effect_code(effect_code) or updated
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.WIFI_CHANNEL_KEYS, strict=False):
-            if key in data and isinstance(data[key], int) and not isinstance(data[key], bool):
-                self.values[channel] = max(0, min(100, int(data[key])))
+            value = data.get(key)
+            if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 100:
+                self.values[channel] = value
                 present += 1
                 updated = True
-        if isinstance(data.get(protocol.WIFI_CHANNEL_KEYS[4]), int):
+        fifth_channel = data.get(protocol.WIFI_CHANNEL_KEYS[4])
+        if not isinstance(fifth_channel, bool) and isinstance(fifth_channel, int) and 0 <= fifth_channel <= 100:
             self._channel_count_hint = 5
         elif present >= 4:
             self._channel_count_hint = 4
@@ -2730,8 +2742,9 @@ class Device:
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.SPP_CHANNEL_KEYS, strict=False):
-            if key in data and isinstance(data[key], int) and not isinstance(data[key], bool):
-                self.values[channel] = max(0, min(100, int(data[key])))
+            value = data.get(key)
+            if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 100:
+                self.values[channel] = value
                 present += 1
                 updated = True
         if present:
@@ -2743,8 +2756,7 @@ class Device:
             and not isinstance(data[protocol.SPP_EFFECT_KEY], bool)
         ):
             effect_code = data[protocol.SPP_EFFECT_KEY]
-            self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
-            updated = True
+            updated = self._store_native_effect_code(effect_code) or updated
 
         channel_count = self._resolved_channel_count()
         auto_schedule = protocol.decode_spp_auto_schedule(data, channel_count=channel_count)

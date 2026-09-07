@@ -1607,6 +1607,14 @@ def test_facebd_state_rejects_wrong_apk_scalar_types():
     assert not device._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[0]: True})
 
 
+@pytest.mark.parametrize("value", [-1, 101])
+def test_facebd_state_rejects_out_of_range_channel_levels(value):
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+
+    assert not device._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[0]: value})
+    assert device.values["channel_1"] == 0
+
+
 def test_spp_state_rejects_wrong_apk_scalar_types():
     device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
 
@@ -1614,6 +1622,32 @@ def test_spp_state_rejects_wrong_apk_scalar_types():
     assert not device._decode_spp_update({protocol.SPP_SWITCH_KEY: 1})
     assert not device._decode_spp_update({protocol.SPP_EFFECT_KEY: True})
     assert not device._decode_spp_update({protocol.SPP_CHANNEL_KEYS[0]: True})
+
+
+def test_current_state_rejects_unknown_effect_ids_instead_of_reporting_off():
+    facebd = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    facebd.client = _facebd_client()
+    facebd.values["effect"] = "Lightning"
+    spp = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+    spp.values["effect"] = "Moon"
+
+    assert not facebd._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 12})
+    assert not spp._decode_spp_update({protocol.SPP_EFFECT_KEY: 5})
+    assert facebd.values["effect"] == "Lightning"
+    assert spp.values["effect"] == "Moon"
+
+    assert facebd._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 0})
+    assert spp._decode_spp_update({protocol.SPP_EFFECT_KEY: 0})
+    assert facebd.values["effect"] is None
+    assert spp.values["effect"] is None
+
+
+@pytest.mark.parametrize("value", [-1, 101])
+def test_spp_state_rejects_out_of_range_channel_levels(value):
+    device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+
+    assert not device._decode_spp_update({protocol.SPP_CHANNEL_KEYS[0]: value})
+    assert device.values["channel_1"] == 0
 
 
 def test_plant_pro_status_decodes_effect_and_fixture_schedules():

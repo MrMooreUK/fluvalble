@@ -71,6 +71,21 @@ def test_decode_old_state_rejects_wrong_command_checksum_channel_count_and_mode(
     assert protocol.decode_old_state_packet(_old_state_packet(bytes((3, 0, 0))), channel_count=4) is None
 
 
+def test_decode_old_manual_state_rejects_out_of_range_fixture_values():
+    body = bytearray((0, 1, 0))
+    for value in (1000, 750, 500, 250):
+        body.extend((value & 0xFF, value >> 8))
+    body.extend(bytes(16))
+
+    invalid_channel = bytearray(body)
+    invalid_channel[3:5] = bytes((0xE9, 0x03))  # 1001 on the APK's 0-1000 wire scale.
+    assert protocol.decode_old_state_packet(_old_state_packet(invalid_channel), channel_count=4) is None
+
+    invalid_preset = bytearray(body)
+    invalid_preset[11] = 101
+    assert protocol.decode_old_state_packet(_old_state_packet(invalid_preset), channel_count=4) is None
+
+
 def test_wifi_five_channel_all_zone_packet_matches_apk_keys():
     packet = protocol.wifi_all_zone_packet([10, 20, 30, 40, 50])
 
@@ -505,6 +520,14 @@ def test_classic_native_auto_schedule_preserves_apk_midnight_wrapping():
     }
 
 
+def test_classic_native_auto_decoder_rejects_invalid_shapes_and_ramps():
+    valid = bytes((1, 8, 0, 9, 0, 80, 70, 60, 50, 20, 0, 21, 0, 0, 10, 0, 0))
+    excessive_ramp = bytes((1, 8, 0, 13, 0, 80, 70, 60, 50, 20, 0, 21, 0, 0, 10, 0, 0))
+
+    assert protocol.decode_old_auto_schedule(valid + b"\x00", channel_count=4) is None
+    assert protocol.decode_old_auto_schedule(excessive_ramp, channel_count=4) is None
+
+
 def test_classic_native_pro_schedule_matches_apk_6810_shape():
     packet = protocol.old_pro_schedule_packet(
         [
@@ -525,6 +548,14 @@ def test_classic_native_pro_schedule_matches_apk_6810_shape():
         {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
         {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
     ]
+
+
+def test_classic_native_pro_decoder_rejects_invalid_count_and_shape():
+    too_few = bytes((2, 3)) + bytes(3 * 6)
+    valid = bytes((2, 4)) + bytes(4 * 6)
+
+    assert protocol.decode_old_pro_schedule(too_few, channel_count=4) is None
+    assert protocol.decode_old_pro_schedule(valid + b"\x00", channel_count=4) is None
 
 
 def test_native_pro_schedule_builders_enforce_apk_point_limits():

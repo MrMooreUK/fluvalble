@@ -112,7 +112,7 @@ def wifi_find_packet() -> bytes:
 
 
 def wifi_all_zone_packet(values: Iterable[int]) -> bytes:
-    """Build the FACEBD WiFi-over-BLE packet for the five color channels."""
+    """Build a FACEBD WiFi-over-BLE all-channel packet."""
     packet = {WIFI_MANUAL_KEY: 0}
     packet.update({key: _clamp_percent(value) for key, value in zip(WIFI_CHANNEL_KEYS, values, strict=False)})
     return cbor_map(packet)
@@ -315,17 +315,17 @@ def decode_wifi_effect_schedule(data: Mapping[int, Any]) -> list[dict[str, Any]]
 
 
 def spp_switch_packet(is_on: bool) -> bytes:
-    """Build a current Plant/Reef FFF0/SPP power packet."""
+    """Build a current-controller FFF0/SPP power packet."""
     return spp_command({SPP_SWITCH_KEY: is_on})
 
 
 def spp_mode_packet(mode: int) -> bytes:
-    """Build a current Plant/Reef FFF0/SPP mode packet."""
+    """Build a current-controller FFF0/SPP mode packet."""
     return spp_command({SPP_MODE_KEY: mode})
 
 
 def spp_all_zone_packet(values: Iterable[int]) -> bytes:
-    """Build a current Plant/Reef FFF0/SPP five-channel packet."""
+    """Build a current-controller FFF0/SPP all-channel packet."""
     packet = {key: _clamp_percent(value) for key, value in zip(SPP_CHANNEL_KEYS, values, strict=False)}
     packet[SPP_MANUAL_KEY] = 0
     return spp_command(packet)
@@ -415,7 +415,7 @@ def spp_effect_schedule_packet(
 
 
 def spp_command(values: Mapping[int, Any]) -> bytes:
-    """Build an unencrypted current Plant/Reef FFF0/SPP command frame."""
+    """Build an unencrypted current-controller FFF0/SPP command frame."""
     return bytes((SPP_COMMAND_HEADER,)) + cbor_map(values)
 
 
@@ -514,15 +514,19 @@ def decode_old_state_packet(packet: bytes | bytearray, *, channel_count: int) ->
         if len(body) != channel_count * 6 + 3:
             return None
         preset_offset = 3 + channel_count * 2
+        channels = [body[offset] | (body[offset + 1] << 8) for offset in range(3, preset_offset, 2)]
+        presets = [
+            list(body[preset_offset + slot * channel_count : preset_offset + (slot + 1) * channel_count])
+            for slot in range(4)
+        ]
+        if any(value > 1000 for value in channels) or any(value > 100 for preset in presets for value in preset):
+            return None
         decoded.update(
             {
                 "power": bool(body[1] & 0x01),
                 "effect_id": body[2],
-                "channels": [body[offset] | (body[offset + 1] << 8) for offset in range(3, 3 + channel_count * 2, 2)],
-                "presets": [
-                    list(body[preset_offset + slot * channel_count : preset_offset + (slot + 1) * channel_count])
-                    for slot in range(4)
-                ],
+                "channels": channels,
+                "presets": presets,
             }
         )
         return decoded
@@ -550,7 +554,11 @@ def old_receive_frame_ready(payload: bytes | bytearray) -> bool:
 def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, Any] | None:
     """Decode the body of a classic mode-1 ``6805`` response."""
     base_length = channel_count * 2 + 9
-    if channel_count not in (4, 5) or len(body) < base_length or body[0] != 1:
+    if (
+        channel_count not in (4, 5)
+        or len(body) not in {base_length, base_length + 3, base_length + 6, base_length + 9}
+        or body[0] != 1
+    ):
         return None
     offset = 1
     sunrise_start = _checked_minute(body[offset], body[offset + 1])
@@ -576,9 +584,13 @@ def decode_old_auto_schedule(body: bytes, *, channel_count: int) -> dict[str, An
         if sleep_minute is None:
             return None
         sleep = {"hour": sleep_minute // 60, "minute": sleep_minute % 60}
+    sunrise_ramp = (sunrise_end - sunrise_start) % 1440
+    sunset_ramp = (sunset_end - sunset_start) % 1440
+    if sunrise_ramp > 240 or sunset_ramp > 240:
+        return None
     return {
-        "sunrise": _ramp_dict(sunrise_start, (sunrise_end - sunrise_start) % 1440),
-        "sunset": _ramp_dict(sunset_end, (sunset_end - sunset_start) % 1440),
+        "sunrise": _ramp_dict(sunrise_start, sunrise_ramp),
+        "sunset": _ramp_dict(sunset_end, sunset_ramp),
         "sleep": sleep,
         "day_levels": day_levels,
         "night_levels": night_levels,
@@ -591,7 +603,11 @@ def decode_old_pro_schedule(body: bytes, *, channel_count: int) -> list[dict[str
         return None
     count = body[1]
     stride = channel_count + 2
-    if len(body) < 2 + count * stride:
+    schedule_length = 2 + count * stride
+    if not OLD_MIN_PRO_POINTS <= count <= OLD_MAX_PRO_POINTS or len(body) not in {
+        schedule_length,
+        schedule_length + 6,
+    }:
         return None
     points: list[dict[str, Any]] = []
     for index in range(count):
