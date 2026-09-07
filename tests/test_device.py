@@ -112,9 +112,7 @@ def test_every_apk_product_drives_all_fixture_capabilities():
 
         device.values.update({channel: 0 for channel in device.numbers()})
         fallback = device._channels_after_effect()
-        assert fallback == {
-            channel: 100 if channel == f"channel_{product.neutral_channel}" else 0 for channel in device.numbers()
-        }
+        assert fallback == {channel: 0 for channel in device.numbers()}
 
         if product.spectrum == "rgbw":
             chromatic = device.channels_from_aquasky_rgb((255, 0, 255), 255)
@@ -945,6 +943,33 @@ async def _async_test_stopping_effect_forces_static_channel_restore():
     assert device.values["effect"] is None
 
 
+def test_stopping_effect_without_static_state_writes_zero_channels_and_powers_off():
+    asyncio.run(_async_test_stopping_effect_without_static_state())
+
+
+async def _async_test_stopping_effect_without_static_state():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=True,
+    )
+    device.values.update({"mode": "manual", "led_on_off": True, "effect": "Lightning"})
+    device.values.update({channel: 0 for channel in device.numbers()})
+    device._effect_restore_channels = None
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_stop_effect()
+
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.wifi_all_zone_packet([0, 0, 0, 0]),
+        protocol.wifi_switch_packet(False),
+    ]
+    assert device.values["effect"] is None
+    assert device.values["led_on_off"] is False
+
+
 def test_effect_active_off_sends_only_switch_packet():
     asyncio.run(_async_test_effect_active_off_sends_only_switch_packet())
 
@@ -1145,7 +1170,7 @@ def test_marine_state_mix_uses_all_five_channels():
 
 
 @pytest.mark.parametrize("product_id", [546, 547])
-def test_current_reef_effect_stop_defaults_to_apk_cold_white_channel(product_id):
+def test_current_reef_effect_stop_does_not_invent_a_static_channel(product_id):
     device = _make_device(product_id=product_id)
     device.values.update({channel: 0 for channel in NUMBERS})
     device._effect_restore_channels = None
@@ -1155,12 +1180,12 @@ def test_current_reef_effect_stop_defaults_to_apk_cold_white_channel(product_id)
         "channel_2": 0,
         "channel_3": 0,
         "channel_4": 0,
-        "channel_5": 100,
+        "channel_5": 0,
     }
 
 
 @pytest.mark.parametrize("product_id", [386, 545, 548, 563])
-def test_current_plant_family_uses_apk_pure_white_channel(product_id):
+def test_current_plant_effect_stop_does_not_invent_a_static_channel(product_id):
     device = _make_device(product_id=product_id)
     device.values.update({channel: 0 for channel in NUMBERS})
     device._effect_restore_channels = None
@@ -1172,7 +1197,7 @@ def test_current_plant_family_uses_apk_pure_white_channel(product_id):
         "channel_1": 0,
         "channel_2": 0,
         "channel_3": 0,
-        "channel_4": 100,
+        "channel_4": 0,
         "channel_5": 0,
     }
 

@@ -902,24 +902,12 @@ class Device:
         return {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
 
     def _channels_after_effect(self) -> dict[str, int]:
-        """Return a useful static channel mix for leaving an effect."""
+        """Return the last known static channel mix for leaving an effect."""
         targets = self._effect_restore_channels or self._channel_snapshot()
-        if any(targets.values()):
-            return dict(targets)
-        targets = {channel: 0 for channel in self.numbers()}
-        # Use the APK product profile directly. Channel labels are presentation
-        # strings and must not decide which physical emitter receives power.
-        product = product_from_id(self.product_id)
-        if product is not None:
-            fallback = f"channel_{product.neutral_channel}"
-        elif self.uses_marine_spectrum():
-            fallback = "channel_5"
-        else:
-            # Both explicit Plant and AquaSky profiles place their neutral
-            # emitter at channel 4 in LightDeviceUtils.getLightChannel().
-            fallback = "channel_4"
-        targets[fallback] = 100
-        return targets
+        # The APK never invents a full-brightness neutral channel when no
+        # static state exists. Preserve an exact known snapshot, or write the
+        # exact all-zero manual state and let the normal power path switch off.
+        return dict(targets)
 
     def _clear_effect_state(self) -> None:
         """Clear controller-effect state after a successful static command."""
