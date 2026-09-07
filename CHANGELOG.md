@@ -30,6 +30,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Corrected the APK-backed native schedule path across all controller
+  families: four-channel current fixtures now receive four-channel Auto data,
+  overnight sunrise and sunset ramps wrap across midnight, Professional points
+  are ordered and require unique in-day times, and malformed schedule readback
+  is rejected instead of being published as fixture state.
+- Stopped treating an accepted BLE write as confirmed state. Commands are no
+  longer duplicated after a successful GATT write, observable FACEBD and SPP
+  writes use exact typed readback verification, and commands without readable
+  state remain explicitly unverified.
+- Removed two invented state transitions that are absent from FluvalConnect:
+  explicit power-off no longer restores a preview colour first, and leaving an
+  effect no longer substitutes a full-brightness neutral emitter when no prior
+  static channel state is known.
+- Reject malformed or out-of-range current-controller scalar state instead of
+  coercing it into a valid power, mode, effect, or channel reading.
 - Complete an APK-backed capability audit across all current and legacy light
   families. Plant channel 4 is now labelled Pure White, and effect restoration
   uses each product's explicit neutral-emitter metadata instead of translated

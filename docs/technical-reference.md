@@ -61,6 +61,14 @@ FFF0/SPP controllers accept 4–12 points. Schedule actions use positional
 detected product's APK-defined channel names. Earlier RGB-style and
 Plant-specific names remain accepted as compatibility aliases.
 
+Auto schedules preserve FluvalConnect's midnight wrapping for sunrise and
+sunset ramps. Four-channel product profiles send and accept exactly four day
+and night levels; five-channel profiles use five. Professional points are
+sorted into fixture time order and duplicate times are rejected, matching the
+APK editor's ordering and duplicate-time checks. Readback is accepted only
+when its packet shape, channel width, point limits, times, ramps, and levels
+fit the corresponding APK controller format.
+
 Timed-effect schedules support up to seven windows, with a weekday assigned to
 no more than one window. The product ID selects either the 11-effect catalogue
 or the four-effect subset. Classic status readback exposes only one embedded
@@ -118,3 +126,9 @@ their APK-defined order when different Home Assistant entities or actions are
 called concurrently. Long channel transitions release the transaction between
 frames, allowing a newer explicit command to stop the remaining transition
 without interleaving packet sequences.
+
+An accepted GATT write is not reported as fixture-confirmed state. FACEBD and
+FFF0/SPP commands whose written keys are observable use exact typed state
+readback; commands without an observable state key remain explicitly
+unverified. A successful GATT write is sent once, while only an actual write
+exception enters the bounded retry path.
