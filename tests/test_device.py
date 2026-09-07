@@ -1597,6 +1597,25 @@ def test_firmware_version_rejects_non_integer_values():
     assert "firmware_version" not in device.diagnostics
 
 
+def test_facebd_state_rejects_wrong_apk_scalar_types():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = _facebd_client()
+
+    assert not device._decode_wifi_update({protocol.WIFI_MODE_KEY: True})
+    assert not device._decode_wifi_update({protocol.WIFI_SWITCH_KEY: 1})
+    assert not device._decode_wifi_update({protocol.WIFI_MANUAL_KEY: True})
+    assert not device._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[0]: True})
+
+
+def test_spp_state_rejects_wrong_apk_scalar_types():
+    device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+
+    assert not device._decode_spp_update({protocol.SPP_MODE_KEY: True})
+    assert not device._decode_spp_update({protocol.SPP_SWITCH_KEY: 1})
+    assert not device._decode_spp_update({protocol.SPP_EFFECT_KEY: True})
+    assert not device._decode_spp_update({protocol.SPP_CHANNEL_KEYS[0]: True})
+
+
 def test_plant_pro_status_decodes_effect_and_fixture_schedules():
     device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
     windows = [
@@ -2484,6 +2503,41 @@ async def _async_test_invalid_classic_pro_schedule_is_rejected_after_transport_d
     device._async_prepare_command.assert_awaited_once()
     device._async_send_packet.assert_not_awaited()
     assert device.diagnostics["last_error"] == "classic Professional schedules require 4 to 10 points"
+
+
+def test_native_pro_schedule_uses_apk_sorted_unique_time_points():
+    asyncio.run(_async_test_native_pro_schedule_uses_apk_sorted_unique_time_points())
+
+
+async def _async_test_native_pro_schedule_uses_apk_sorted_unique_time_points():
+    device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+    device.client = SimpleNamespace(
+        spp_transport=True,
+        plant_pro_spp=True,
+        wifi_facebd=False,
+        command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    points = [
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+        {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
+    ]
+
+    assert await device.async_set_native_pro_schedule(points, activate=False)
+    device._async_send_packet.assert_awaited_once_with(
+        protocol.spp_pro_schedule_packet([points[1], points[3], points[2], points[0]])
+    )
+
+    device._async_prepare_command.reset_mock()
+    device._async_send_packet.reset_mock()
+    duplicate = [*points[:3], {**points[2], "levels": [0, 0, 0, 0, 0]}]
+    assert not await device.async_set_native_pro_schedule(duplicate, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == "Professional schedule points require unique times within one day"
 
 
 def test_plant_pro_expected_state_uses_spp_keys():

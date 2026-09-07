@@ -229,14 +229,36 @@ def wifi_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
     )
 
 
-def decode_wifi_auto_schedule(data: Mapping[int, Any]) -> dict[str, Any] | None:
+def decode_wifi_auto_schedule(
+    data: Mapping[int, Any],
+    *,
+    channel_count: int = 4,
+) -> dict[str, Any] | None:
     """Decode FACEBD native Auto fields into the integration schedule shape."""
+    if channel_count not in (4, 5) or not all(
+        key in data
+        for key in (
+            WIFI_AUTO_SUNRISE_KEY,
+            WIFI_AUTO_SUNSET_KEY,
+            WIFI_AUTO_SLEEP_KEY,
+            WIFI_AUTO_DAY_LEVELS_KEY,
+            WIFI_AUTO_NIGHT_LEVELS_KEY,
+        )
+    ):
+        return None
     sunrise = _decode_minute_pair(data.get(WIFI_AUTO_SUNRISE_KEY), sunrise=True)
     sunset = _decode_minute_pair(data.get(WIFI_AUTO_SUNSET_KEY), sunrise=False)
-    sleep = _decode_minute(data.get(WIFI_AUTO_SLEEP_KEY))
-    day_levels = _decode_levels(data.get(WIFI_AUTO_DAY_LEVELS_KEY), minimum=4)
-    night_levels = _decode_levels(data.get(WIFI_AUTO_NIGHT_LEVELS_KEY), minimum=4)
-    if all(value is None for value in (sunrise, sunset, sleep, day_levels, night_levels)):
+    raw_sleep = data.get(WIFI_AUTO_SLEEP_KEY)
+    sleep = _decode_minute(raw_sleep)
+    day_levels = _decode_levels(data.get(WIFI_AUTO_DAY_LEVELS_KEY), exact=channel_count)
+    night_levels = _decode_levels(data.get(WIFI_AUTO_NIGHT_LEVELS_KEY), exact=channel_count)
+    if (
+        sunrise is None
+        or sunset is None
+        or (raw_sleep != 0xFFFF and sleep is None)
+        or day_levels is None
+        or night_levels is None
+    ):
         return None
     return {
         "sunrise": sunrise,
@@ -249,16 +271,27 @@ def decode_wifi_auto_schedule(data: Mapping[int, Any]) -> dict[str, Any] | None:
 
 def decode_wifi_pro_schedule(data: Mapping[int, Any], *, channel_count: int = 4) -> list[dict[str, Any]] | None:
     """Decode FACEBD count/times/levels fields into normalized Pro points."""
+    if channel_count not in (4, 5):
+        return None
     count = data.get(WIFI_PRO_COUNT_KEY)
     times = data.get(WIFI_PRO_TIMES_KEY)
     levels = data.get(WIFI_PRO_LEVELS_KEY)
-    if not isinstance(count, int) or not isinstance(times, list) or not isinstance(levels, bytes):
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or not isinstance(times, list)
+        or not isinstance(levels, bytes)
+    ):
         return None
-    if count < 0 or len(times) != count or len(levels) != count * channel_count:
+    if (
+        not WIFI_MIN_PRO_POINTS <= count <= WIFI_MAX_PRO_POINTS
+        or len(times) != count
+        or len(levels) != count * channel_count
+    ):
         return None
     points: list[dict[str, Any]] = []
     for index, minute in enumerate(times):
-        if not isinstance(minute, int) or not 0 <= minute < 1440:
+        if isinstance(minute, bool) or not isinstance(minute, int) or not 0 <= minute < 1440:
             return None
         values = levels[index * channel_count : (index + 1) * channel_count]
         if any(value > 100 for value in values):
@@ -704,6 +737,8 @@ def cbor_map(values: Mapping[int, Any]) -> bytes:
 
 def decode_spp_auto_schedule(data: dict[int, Any], *, channel_count: int = 5) -> dict[str, Any] | None:
     """Decode current FFF0/SPP Auto schedule keys 8-12 from D2 state."""
+    if channel_count not in (4, 5):
+        return None
     sunrise = data.get(SPP_AUTO_SUNRISE_KEY)
     sunset = data.get(SPP_AUTO_SUNSET_KEY)
     sleep = data.get(SPP_AUTO_SLEEP_KEY)
@@ -711,15 +746,27 @@ def decode_spp_auto_schedule(data: dict[int, Any], *, channel_count: int = 5) ->
     night_levels = data.get(SPP_AUTO_NIGHT_LEVELS_KEY)
     if not (
         isinstance(sunrise, bytes)
-        and len(sunrise) >= 3
+        and len(sunrise) == 3
         and isinstance(sunset, bytes)
-        and len(sunset) >= 3
+        and len(sunset) == 3
         and isinstance(sleep, bytes)
-        and len(sleep) >= 2
+        and len(sleep) == 2
         and isinstance(day_levels, bytes)
-        and len(day_levels) >= channel_count
+        and len(day_levels) == channel_count
         and isinstance(night_levels, bytes)
-        and len(night_levels) >= channel_count
+        and len(night_levels) == channel_count
+    ):
+        return None
+    if (
+        sunrise[0] > 23
+        or sunrise[1] > 59
+        or sunrise[2] > 240
+        or sunset[0] > 23
+        or sunset[1] > 59
+        or sunset[2] > 240
+        or (sleep != b"\xff\xff" and (sleep[0] > 23 or sleep[1] > 59))
+        or any(level > 100 for level in day_levels)
+        or any(level > 100 for level in night_levels)
     ):
         return None
     return {
@@ -739,20 +786,25 @@ def decode_spp_pro_schedule(
     channel_count: int = 5,
 ) -> list[dict[str, Any]] | None:
     """Decode the current FFF0/SPP key-13 Pro schedule."""
+    if channel_count not in (4, 5):
+        return None
     blob = data.get(SPP_PRO_SCHEDULE_KEY)
     if not isinstance(blob, bytes) or not blob:
         return None
     count = blob[0]
     record_size = 2 + channel_count
-    if count > SPP_MAX_PRO_POINTS or len(blob) < 1 + (count * record_size):
+    if not SPP_MIN_PRO_POINTS <= count <= SPP_MAX_PRO_POINTS or len(blob) != 1 + (count * record_size):
         return None
-    return [
-        {
-            "time": f"{blob[1 + index * record_size]:02d}:{blob[2 + index * record_size]:02d}",
-            "levels": list(blob[3 + index * record_size : 3 + index * record_size + channel_count]),
-        }
-        for index in range(count)
-    ]
+    points = []
+    for index in range(count):
+        offset = 1 + index * record_size
+        hour = blob[offset]
+        minute = blob[offset + 1]
+        levels = blob[offset + 2 : offset + record_size]
+        if hour > 23 or minute > 59 or any(level > 100 for level in levels):
+            return None
+        points.append({"time": f"{hour:02d}:{minute:02d}", "levels": list(levels)})
+    return points
 
 
 def decode_spp_effect_schedule(
@@ -930,7 +982,7 @@ def _ramp_dict(minute: int, ramp: int) -> dict[str, int]:
 
 
 def _decode_minute(value: Any) -> dict[str, int] | None:
-    if not isinstance(value, int) or value == 0xFFFF:
+    if isinstance(value, bool) or not isinstance(value, int) or value == 0xFFFF:
         return None
     if not 0 <= value < 1440:
         return None
@@ -942,13 +994,18 @@ def _decode_minute_pair(value: Any, *, sunrise: bool) -> dict[str, int] | None:
         return None
     start, end = value
     if (
-        not isinstance(start, int)
+        isinstance(start, bool)
+        or not isinstance(start, int)
+        or isinstance(end, bool)
         or not isinstance(end, int)
         or not 0 <= start < 1440
         or not 0 <= end < 1440
     ):
         return None
-    return _ramp_dict(start if sunrise else end, (end - start) % 1440)
+    ramp = (end - start) % 1440
+    if ramp > 240:
+        return None
+    return _ramp_dict(start if sunrise else end, ramp)
 
 
 def _normalized_points(points: Iterable[dict[str, Any]], *, channel_count: int) -> list[tuple[int, list[int]]]:
@@ -988,8 +1045,8 @@ def _decode_sleep_time(value: Any) -> dict[str, int] | None:
     return {"hour": hour, "minute": minute}
 
 
-def _decode_levels(value: Any, *, minimum: int = 5) -> list[int] | None:
-    if not isinstance(value, bytes) or len(value) < minimum:
+def _decode_levels(value: Any, *, exact: int) -> list[int] | None:
+    if not isinstance(value, bytes) or len(value) != exact:
         return None
     levels = list(value)
     if any(level > 100 for level in levels):

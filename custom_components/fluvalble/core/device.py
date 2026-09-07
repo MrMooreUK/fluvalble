@@ -1090,6 +1090,15 @@ class Device:
         else:
             normalized = self._normalize_schedule_points(points)
 
+        minutes = [int(point["minute"]) for point in normalized]
+        if any(not 0 <= minute < DAY_MINUTES for minute in minutes) or len(set(minutes)) != len(minutes):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Professional schedule points require unique times within one day",
+            )
+            return False
+        normalized.sort(key=lambda point: point["minute"])
+
         if not protocol.SPP_MIN_PRO_POINTS <= len(normalized) <= protocol.SPP_MAX_PRO_POINTS:
             self._set_diagnostic_error(
                 "invalid_native_schedule",
@@ -2633,12 +2642,12 @@ class Device:
 
         if protocol.WIFI_MODE_KEY in data:
             mode = data[protocol.WIFI_MODE_KEY]
-            if isinstance(mode, int) and 0 <= mode < len(MODES):
+            if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
                 updated = True
 
-        if protocol.WIFI_SWITCH_KEY in data:
-            self.values["led_on_off"] = bool(data[protocol.WIFI_SWITCH_KEY])
+        if protocol.WIFI_SWITCH_KEY in data and isinstance(data[protocol.WIFI_SWITCH_KEY], bool):
+            self.values["led_on_off"] = data[protocol.WIFI_SWITCH_KEY]
             updated = True
 
         if protocol.WIFI_DST_KEY in data and isinstance(data[protocol.WIFI_DST_KEY], bool):
@@ -2650,6 +2659,7 @@ class Device:
             self.supports_facebd_effects()
             and protocol.WIFI_MANUAL_KEY in data
             and isinstance(data[protocol.WIFI_MANUAL_KEY], int)
+            and not isinstance(data[protocol.WIFI_MANUAL_KEY], bool)
         ):
             effect_code = data[protocol.WIFI_MANUAL_KEY]
             self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
@@ -2657,7 +2667,7 @@ class Device:
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.WIFI_CHANNEL_KEYS, strict=False):
-            if key in data and isinstance(data[key], int):
+            if key in data and isinstance(data[key], int) and not isinstance(data[key], bool):
                 self.values[channel] = max(0, min(100, int(data[key])))
                 present += 1
                 updated = True
@@ -2678,8 +2688,9 @@ class Device:
         )
         has_auto_sunrise = isinstance(data.get(protocol.WIFI_AUTO_SUNRISE_KEY), list)
         if has_auto_sunrise or any(key in data for key in unambiguous_facebd_schedule_keys):
-            auto_schedule = protocol.decode_wifi_auto_schedule(data)
-            pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=self._resolved_channel_count())
+            channel_count = self._resolved_channel_count()
+            auto_schedule = protocol.decode_wifi_auto_schedule(data, channel_count=channel_count)
+            pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=channel_count)
             updated = (
                 self._record_native_schedule_readback(
                     protocol_name="facebd",
@@ -2709,24 +2720,28 @@ class Device:
 
         if protocol.SPP_MODE_KEY in data:
             mode = data[protocol.SPP_MODE_KEY]
-            if isinstance(mode, int) and 0 <= mode < len(MODES):
+            if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
                 updated = True
 
-        if protocol.SPP_SWITCH_KEY in data:
-            self.values["led_on_off"] = bool(data[protocol.SPP_SWITCH_KEY])
+        if protocol.SPP_SWITCH_KEY in data and isinstance(data[protocol.SPP_SWITCH_KEY], bool):
+            self.values["led_on_off"] = data[protocol.SPP_SWITCH_KEY]
             updated = True
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.SPP_CHANNEL_KEYS, strict=False):
-            if key in data and isinstance(data[key], int):
+            if key in data and isinstance(data[key], int) and not isinstance(data[key], bool):
                 self.values[channel] = max(0, min(100, int(data[key])))
                 present += 1
                 updated = True
         if present:
             self._channel_count_hint = 5 if present >= 5 else 4
 
-        if protocol.SPP_EFFECT_KEY in data and isinstance(data[protocol.SPP_EFFECT_KEY], int):
+        if (
+            protocol.SPP_EFFECT_KEY in data
+            and isinstance(data[protocol.SPP_EFFECT_KEY], int)
+            and not isinstance(data[protocol.SPP_EFFECT_KEY], bool)
+        ):
             effect_code = data[protocol.SPP_EFFECT_KEY]
             self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
             updated = True
