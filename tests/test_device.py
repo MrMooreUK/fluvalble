@@ -2629,12 +2629,21 @@ async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_widt
     four_channel._async_send_packet = AsyncMock(return_value=True)
     five_levels = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour, 99]} for hour in (8, 10, 12, 20)]
 
-    assert await four_channel.async_set_native_pro_schedule(five_levels, activate=False)
+    # Width mismatch must reject — never silently slice five onto four.
+    assert not await four_channel.async_set_native_pro_schedule(five_levels, activate=False)
+    four_channel._async_prepare_command.assert_not_awaited()
+    four_channel._async_send_packet.assert_not_awaited()
+    assert four_channel.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 channel levels at every Professional point"
+    )
+
+    four_levels_ok = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour]} for hour in (8, 10, 12, 20)]
+    assert await four_channel.async_set_native_pro_schedule(four_levels_ok, activate=False)
     packet = four_channel._async_send_packet.await_args.args[0]
     decoded = protocol.decode_cbor_update(packet)
     assert protocol.decode_spp_pro_schedule(decoded, channel_count=4)[0]["levels"] == [8, 8, 8, 8]
 
-    invalid_time = [*five_levels[:3], {**five_levels[3], "hour": 24}]
+    invalid_time = [*four_levels_ok[:3], {**four_levels_ok[3], "hour": 24}]
     four_channel._async_prepare_command.reset_mock()
     four_channel._async_send_packet.reset_mock()
     assert not await four_channel.async_set_native_pro_schedule(invalid_time, activate=False)
@@ -2644,13 +2653,16 @@ async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_widt
         "Professional schedule points contain a time outside the 24-hour range"
     )
 
-    mixed_widths = [*five_levels[:3], {**five_levels[3], "levels": five_levels[3]["levels"][:4]}]
+    # One point wider than the fixture still fails closed (exact-width first).
+    mixed_widths = [*four_levels_ok[:3], {**four_levels_ok[3], "levels": [*four_levels_ok[3]["levels"], 99]}]
     four_channel._async_prepare_command.reset_mock()
     four_channel._async_send_packet.reset_mock()
     assert not await four_channel.async_set_native_pro_schedule(mixed_widths, activate=False)
     four_channel._async_prepare_command.assert_not_awaited()
     four_channel._async_send_packet.assert_not_awaited()
-    assert four_channel.diagnostics["last_error"] == ("All Professional points must use the same fixture channel count")
+    assert four_channel.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 channel levels at every Professional point"
+    )
 
 
 def test_plant_pro_expected_state_uses_spp_keys():
