@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from custom_components.fluvalble.core import protocol
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -224,6 +225,125 @@ def test_channel_controls_follow_apk_product_layout(product_id, expected_names):
 
 def test_channel_control_writes_exact_emitter_percentage():
     asyncio.run(_async_test_channel_control_writes_exact_emitter_percentage())
+
+
+@pytest.mark.parametrize("stop_ok", [False, True])
+def test_channel_control_stops_preview_before_writing(stop_ok):
+    async def run():
+        device = _make_device()
+        device.client = SimpleNamespace(last_error="preview stop failed")
+        events = []
+
+        async def stop(*, restore):
+            events.append(("stop", restore))
+            return stop_ok
+
+        async def write(attr, value):
+            events.append((attr, value))
+            return True
+
+        device.async_stop_preview = AsyncMock(side_effect=stop)
+        device.async_set_value = AsyncMock(side_effect=write)
+        entity = number.FluvalChannelNumber(device, "channel_2")
+        if stop_ok:
+            await entity.async_set_native_value(37)
+            assert events == [("stop", False), ("channel_2", 37)]
+        else:
+            with pytest.raises(HomeAssistantError, match="preview stop failed"):
+                await entity.async_set_native_value(37)
+            assert events == [("stop", False)]
+            device.async_set_value.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_channel_preview_stop_and_write_are_atomic():
+    async def run():
+        device = _make_device()
+        started = asyncio.Event()
+        release = asyncio.Event()
+        events = []
+
+        async def stop(*, restore):
+            events.append("stop")
+            if len(events) == 1:
+                started.set()
+                await release.wait()
+            return True
+
+        async def write(attr, value):
+            events.append(attr)
+            return True
+
+        device.async_stop_preview = AsyncMock(side_effect=stop)
+        device.async_set_value = AsyncMock(side_effect=write)
+        first = number.FluvalChannelNumber(device, "channel_1")
+        second = number.FluvalChannelNumber(device, "channel_2")
+        task1 = asyncio.create_task(first.async_set_native_value(25))
+        task2 = None
+        try:
+            await asyncio.wait_for(started.wait(), 1)
+            task2 = asyncio.create_task(second.async_set_native_value(50))
+            await asyncio.sleep(0)
+            assert events == ["stop"]
+            release.set()
+            await asyncio.wait_for(asyncio.gather(task1, task2), 1)
+            assert events == ["stop", "channel_1", "stop", "channel_2"]
+        finally:
+            release.set()
+            for task in (task1, task2):
+                if task is not None:
+                    task.cancel()
+            await asyncio.gather(*(task for task in (task1, task2) if task is not None), return_exceptions=True)
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp", "host"])
+def test_channel_control_cancels_real_preview_state(transport):
+    async def run():
+        device = _make_device()
+        device._uses_wifi_protocol = lambda: transport == "facebd"
+        device._uses_spp_protocol = lambda: transport == "spp"
+        device._async_prepare_command = AsyncMock(return_value=True)
+        device._async_send_packet = AsyncMock(return_value=True)
+        pending = None
+        if transport == "host":
+            pending = asyncio.create_task(asyncio.sleep(100))
+            device.preview_task = pending
+            device.preview_restore_mode = "automatic"
+        else:
+            device.native_preview_active = True
+            device.native_preview_restore_mode = "automatic"
+        device.async_select_option = AsyncMock(return_value=True)
+
+        async def write(attr, value):
+            assert device.preview_task is None
+            assert not device.native_preview_active
+            assert (attr, value) == ("channel_2", 37)
+            return True
+
+        device.async_set_value = AsyncMock(side_effect=write)
+        try:
+            await number.FluvalChannelNumber(device, "channel_2").async_set_native_value(37)
+            device.async_set_value.assert_awaited_once()
+            device.async_select_option.assert_not_awaited()
+            if pending is not None:
+                assert pending.cancelled()
+                device._async_send_packet.assert_not_awaited()
+            else:
+                expected = {
+                    "classic": protocol.old_auto_preview_packet(None),
+                    "facebd": protocol.wifi_auto_preview_packet(None),
+                    "spp": protocol.spp_schedule_preview_packet(None),
+                }[transport]
+                device._async_send_packet.assert_awaited_once_with(expected)
+        finally:
+            if pending is not None:
+                pending.cancel()
+                await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(run())
 
 
 async def _async_test_channel_control_writes_exact_emitter_percentage():
