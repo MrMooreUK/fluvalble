@@ -1021,8 +1021,7 @@ class Device:
             return False
         if (
             len(day_levels) != len(night_levels)
-            or len(day_levels) < channel_count
-            or len(day_levels) > len(NUMBERS)
+            or len(day_levels) != channel_count
             or any(
                 isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100
                 for level in (*day_levels, *night_levels)
@@ -1030,7 +1029,7 @@ class Device:
         ):
             self._set_diagnostic_error(
                 "invalid_native_schedule",
-                f"This fixture requires {channel_count} day and night channel levels",
+                f"This fixture requires exactly {channel_count} day and night channel levels",
             )
             return False
         if not self._valid_schedule_time_with_ramp(sunrise) or not self._valid_schedule_time_with_ramp(sunset):
@@ -1045,12 +1044,6 @@ class Device:
                 "Auto sleep time is outside the 24-hour range",
             )
             return False
-        # The service schema remains backward compatible with previously saved
-        # five-channel payloads.  Send only the physical channels assigned to
-        # this APK product profile, particularly the four-channel current SPP
-        # profile used by Roma & Shaker 2.0.
-        day_levels = day_levels[:channel_count]
-        night_levels = night_levels[:channel_count]
 
         if not await self._async_prepare_command():
             return False
@@ -1151,8 +1144,7 @@ class Device:
                 raw_levels = [list(point["levels"]) for point in points]
                 level_widths = {len(levels) for levels in raw_levels}
                 if any(
-                    len(levels) < channel_count
-                    or len(levels) > len(NUMBERS)
+                    len(levels) != channel_count
                     or any(
                         isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100
                         for level in levels
@@ -1161,7 +1153,7 @@ class Device:
                 ):
                     self._set_diagnostic_error(
                         "invalid_native_schedule",
-                        f"This fixture requires {channel_count} channel levels at every Professional point",
+                        f"This fixture requires exactly {channel_count} channel levels at every Professional point",
                     )
                     return False
                 if len(level_widths) != 1:
@@ -1190,7 +1182,7 @@ class Device:
                         "minute": (hour * 60) + minute,
                         **{
                             f"channel_{index}": int(level)
-                            for index, level in enumerate(levels[:channel_count], start=1)
+                            for index, level in enumerate(levels, start=1)
                         },
                     }
                     for (hour, minute), levels in zip(raw_times, raw_levels, strict=True)
