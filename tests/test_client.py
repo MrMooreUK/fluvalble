@@ -460,7 +460,7 @@ async def _async_test_send_now_writes_only_facebd01(monkeypatch):
     assert client.last_write_verified is True
 
 
-def test_unverified_facebd_command_is_retried_and_reports_mismatch(monkeypatch):
+def test_unverified_facebd_command_is_not_duplicated_and_reports_mismatch(monkeypatch):
     asyncio.run(_async_test_unverified_facebd_command(monkeypatch))
 
 
@@ -481,7 +481,7 @@ async def _async_test_unverified_facebd_command(monkeypatch):
         expected_state={protocol.WIFI_SWITCH_KEY: True},
     )
 
-    assert len(gatt.writes) == client_module.UNVERIFIED_WRITE_COPIES
+    assert len(gatt.writes) == 1
     assert client.last_write_verified is False
     assert client.last_verification_mismatches == {
         protocol.WIFI_SWITCH_KEY: {
@@ -489,6 +489,34 @@ async def _async_test_unverified_facebd_command(monkeypatch):
             "confirmed": False,
         }
     }
+
+
+def test_facebd_command_without_observable_state_is_not_duplicated(monkeypatch):
+    asyncio.run(_async_test_facebd_command_without_observable_state(monkeypatch))
+
+
+async def _async_test_facebd_command_without_observable_state(monkeypatch):
+    monkeypatch.setattr(client_module, "POST_WRITE_STATE_DELAY", 0)
+    gatt = _FakeGattClient(_facebd_characteristics())
+    client = _make_client()
+    client.client = gatt
+    client.update_callback = lambda data: protocol.decode_cbor_map(data) is not None
+    client.ping = MagicMock()
+    await client._resolve_characteristics()
+
+    assert await client.send_now(protocol.wifi_find_packet(), expected_state=None)
+
+    assert len(gatt.writes) == 1
+    assert client.last_write_verified is False
+    assert client.last_expected_state == {}
+
+
+def test_state_verification_does_not_treat_boolean_as_integer():
+    client = _make_client()
+    client._observed_state = {protocol.WIFI_SWITCH_KEY: 1}
+
+    assert not client._state_matches({protocol.WIFI_SWITCH_KEY: True})
+    assert client.last_verification_mismatches == {protocol.WIFI_SWITCH_KEY: {"expected": True, "confirmed": 1}}
 
 
 def test_send_now_writes_raw_plant_pro_command_and_verifies_status(monkeypatch):

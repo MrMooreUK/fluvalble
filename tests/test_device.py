@@ -112,9 +112,7 @@ def test_every_apk_product_drives_all_fixture_capabilities():
 
         device.values.update({channel: 0 for channel in device.numbers()})
         fallback = device._channels_after_effect()
-        assert fallback == {
-            channel: 100 if channel == f"channel_{product.neutral_channel}" else 0 for channel in device.numbers()
-        }
+        assert fallback == {channel: 0 for channel in device.numbers()}
 
         if product.spectrum == "rgbw":
             chromatic = device.channels_from_aquasky_rgb((255, 0, 255), 255)
@@ -945,6 +943,33 @@ async def _async_test_stopping_effect_forces_static_channel_restore():
     assert device.values["effect"] is None
 
 
+def test_stopping_effect_without_static_state_writes_zero_channels_and_powers_off():
+    asyncio.run(_async_test_stopping_effect_without_static_state())
+
+
+async def _async_test_stopping_effect_without_static_state():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd01-0000-1000-8000-00805f9b34fb",
+        plant_pro_spp=False,
+        wifi_facebd=True,
+    )
+    device.values.update({"mode": "manual", "led_on_off": True, "effect": "Lightning"})
+    device.values.update({channel: 0 for channel in device.numbers()})
+    device._effect_restore_channels = None
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    assert await device.async_stop_effect()
+
+    assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+        protocol.wifi_all_zone_packet([0, 0, 0, 0]),
+        protocol.wifi_switch_packet(False),
+    ]
+    assert device.values["effect"] is None
+    assert device.values["led_on_off"] is False
+
+
 def test_effect_active_off_sends_only_switch_packet():
     asyncio.run(_async_test_effect_active_off_sends_only_switch_packet())
 
@@ -1145,7 +1170,7 @@ def test_marine_state_mix_uses_all_five_channels():
 
 
 @pytest.mark.parametrize("product_id", [546, 547])
-def test_current_reef_effect_stop_defaults_to_apk_cold_white_channel(product_id):
+def test_current_reef_effect_stop_does_not_invent_a_static_channel(product_id):
     device = _make_device(product_id=product_id)
     device.values.update({channel: 0 for channel in NUMBERS})
     device._effect_restore_channels = None
@@ -1155,12 +1180,12 @@ def test_current_reef_effect_stop_defaults_to_apk_cold_white_channel(product_id)
         "channel_2": 0,
         "channel_3": 0,
         "channel_4": 0,
-        "channel_5": 100,
+        "channel_5": 0,
     }
 
 
 @pytest.mark.parametrize("product_id", [386, 545, 548, 563])
-def test_current_plant_family_uses_apk_pure_white_channel(product_id):
+def test_current_plant_effect_stop_does_not_invent_a_static_channel(product_id):
     device = _make_device(product_id=product_id)
     device.values.update({channel: 0 for channel in NUMBERS})
     device._effect_restore_channels = None
@@ -1172,7 +1197,7 @@ def test_current_plant_family_uses_apk_pure_white_channel(product_id):
         "channel_1": 0,
         "channel_2": 0,
         "channel_3": 0,
-        "channel_4": 100,
+        "channel_4": 0,
         "channel_5": 0,
     }
 
@@ -1268,6 +1293,25 @@ async def _async_test_roma_shaker_uses_apk_current_rgbw_commands_and_schedules()
         "night_levels": [0, 5, 0, 0],
     }
     assert await device.async_set_native_auto_schedule(auto, activate=False)
+    device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
+
+    invalid_auto = {**auto, "sunrise": (24, 0, 60)}
+    device._async_prepare_command.reset_mock()
+    device._async_send_packet.reset_mock()
+    assert not await device.async_set_native_auto_schedule(invalid_auto, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == ("Auto sunrise and sunset require a valid time and a 0-240 minute ramp")
+
+    # Previously saved/card-generated payloads always contained five values.
+    # The four-channel current controller must receive only its physical width.
+    device._async_send_packet.reset_mock()
+    five_channel_auto = {
+        **auto,
+        "day_levels": [80, 70, 60, 50, 99],
+        "night_levels": [0, 5, 0, 0, 99],
+    }
+    assert await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
     device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
 
     device._async_send_packet.reset_mock()
@@ -1561,6 +1605,59 @@ def test_firmware_version_rejects_non_integer_values():
     assert "firmware_version" not in device.diagnostics
 
 
+def test_facebd_state_rejects_wrong_apk_scalar_types():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = _facebd_client()
+
+    assert not device._decode_wifi_update({protocol.WIFI_MODE_KEY: True})
+    assert not device._decode_wifi_update({protocol.WIFI_SWITCH_KEY: 1})
+    assert not device._decode_wifi_update({protocol.WIFI_MANUAL_KEY: True})
+    assert not device._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[0]: True})
+
+
+@pytest.mark.parametrize("value", [-1, 101])
+def test_facebd_state_rejects_out_of_range_channel_levels(value):
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+
+    assert not device._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[0]: value})
+    assert device.values["channel_1"] == 0
+
+
+def test_spp_state_rejects_wrong_apk_scalar_types():
+    device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+
+    assert not device._decode_spp_update({protocol.SPP_MODE_KEY: True})
+    assert not device._decode_spp_update({protocol.SPP_SWITCH_KEY: 1})
+    assert not device._decode_spp_update({protocol.SPP_EFFECT_KEY: True})
+    assert not device._decode_spp_update({protocol.SPP_CHANNEL_KEYS[0]: True})
+
+
+def test_current_state_rejects_unknown_effect_ids_instead_of_reporting_off():
+    facebd = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    facebd.client = _facebd_client()
+    facebd.values["effect"] = "Lightning"
+    spp = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+    spp.values["effect"] = "Moon"
+
+    assert not facebd._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 12})
+    assert not spp._decode_spp_update({protocol.SPP_EFFECT_KEY: 5})
+    assert facebd.values["effect"] == "Lightning"
+    assert spp.values["effect"] == "Moon"
+
+    assert facebd._decode_wifi_update({protocol.WIFI_MANUAL_KEY: 0})
+    assert spp._decode_spp_update({protocol.SPP_EFFECT_KEY: 0})
+    assert facebd.values["effect"] is None
+    assert spp.values["effect"] is None
+
+
+@pytest.mark.parametrize("value", [-1, 101])
+def test_spp_state_rejects_out_of_range_channel_levels(value):
+    device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+
+    assert not device._decode_spp_update({protocol.SPP_CHANNEL_KEYS[0]: value})
+    assert device.values["channel_1"] == 0
+
+
 def test_plant_pro_status_decodes_effect_and_fixture_schedules():
     device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
     windows = [
@@ -1644,6 +1741,55 @@ async def _async_test_facebd_dst_control_uses_apk_key_99_packet():
     assert device._expected_state_for_packet(protocol.wifi_dst_packet(True)) == {
         protocol.WIFI_DST_KEY: True,
     }
+
+
+def test_facebd_expected_state_covers_apk_effect_and_schedule_fields():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = _facebd_client()
+
+    packets = (
+        protocol.wifi_effect_packet(4),
+        protocol.wifi_auto_schedule_packet(
+            sunrise=(7, 0, 30),
+            sunset=(19, 0, 45),
+            sleep=(23, 0),
+            day_levels=[80, 70, 60, 50],
+            night_levels=[0, 5, 0, 10],
+            channel_count=4,
+        ),
+        protocol.wifi_pro_schedule_packet(
+            [
+                {"time": "00:00", "levels": [0, 0, 0, 0]},
+                {"time": "08:00", "levels": [60, 50, 40, 30]},
+                {"time": "18:00", "levels": [20, 20, 20, 20]},
+                {"time": "23:00", "levels": [0, 0, 0, 0]},
+            ],
+            channel_count=4,
+        ),
+        protocol.wifi_effect_schedule_packet(
+            [
+                {
+                    "start_hour": 10,
+                    "start_minute": 0,
+                    "end_hour": 11,
+                    "end_minute": 0,
+                    "effect_id": 2,
+                    "weekdays": [True, True, True, True, True, True, True],
+                }
+            ]
+        ),
+    )
+
+    for packet in packets:
+        assert device._expected_state_for_packet(packet) == protocol.decode_cbor_update(packet)
+
+
+def test_facebd_transient_preview_and_find_commands_are_not_claimed_as_verified():
+    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
+    device.client = _facebd_client()
+
+    assert device._expected_state_for_packet(protocol.wifi_auto_preview_packet(720)) is None
+    assert device._expected_state_for_packet(protocol.wifi_find_packet()) is None
 
 
 def test_classic_dst_control_is_rejected_without_a_write():
@@ -2401,6 +2547,93 @@ async def _async_test_invalid_classic_pro_schedule_is_rejected_after_transport_d
     assert device.diagnostics["last_error"] == "classic Professional schedules require 4 to 10 points"
 
 
+def test_native_pro_schedule_uses_apk_sorted_unique_time_points():
+    asyncio.run(_async_test_native_pro_schedule_uses_apk_sorted_unique_time_points())
+
+
+async def _async_test_native_pro_schedule_uses_apk_sorted_unique_time_points():
+    device = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+    device.client = SimpleNamespace(
+        spp_transport=True,
+        plant_pro_spp=True,
+        wifi_facebd=False,
+        command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    points = [
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+        {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
+    ]
+
+    assert await device.async_set_native_pro_schedule(points, activate=False)
+    device._async_send_packet.assert_awaited_once_with(
+        protocol.spp_pro_schedule_packet([points[1], points[3], points[2], points[0]])
+    )
+
+    device._async_prepare_command.reset_mock()
+    device._async_send_packet.reset_mock()
+    duplicate = [*points[:3], {**points[2], "levels": [0, 0, 0, 0, 0]}]
+    assert not await device.async_set_native_pro_schedule(duplicate, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == "Professional schedule points require unique times within one day"
+
+
+def test_native_pro_schedule_enforces_detected_fixture_channel_width():
+    asyncio.run(_async_test_native_pro_schedule_enforces_detected_fixture_channel_width())
+
+
+async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_width():
+    five_channel = _make_device(name="PlantPro_Test", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
+    five_channel._async_prepare_command = AsyncMock(return_value=True)
+    five_channel._async_send_packet = AsyncMock(return_value=True)
+    four_levels = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour]} for hour in (8, 10, 12, 20)]
+
+    assert not await five_channel.async_set_native_pro_schedule(four_levels, activate=False)
+    five_channel._async_prepare_command.assert_not_awaited()
+    five_channel._async_send_packet.assert_not_awaited()
+    assert five_channel.diagnostics["last_error"] == (
+        "This fixture requires 5 channel levels at every Professional point"
+    )
+
+    four_channel = _make_device(name="Roma_Test", model="Fluval Roma & Shaker 2.0", product_id=564)
+    four_channel.client = SimpleNamespace(
+        spp_transport=True,
+        plant_pro_spp=True,
+        wifi_facebd=False,
+        command_write_uuid="0000fff2-0000-1000-8000-00805f9b34fb",
+    )
+    four_channel._async_prepare_command = AsyncMock(return_value=True)
+    four_channel._async_send_packet = AsyncMock(return_value=True)
+    five_levels = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour, 99]} for hour in (8, 10, 12, 20)]
+
+    assert await four_channel.async_set_native_pro_schedule(five_levels, activate=False)
+    packet = four_channel._async_send_packet.await_args.args[0]
+    decoded = protocol.decode_cbor_update(packet)
+    assert protocol.decode_spp_pro_schedule(decoded, channel_count=4)[0]["levels"] == [8, 8, 8, 8]
+
+    invalid_time = [*five_levels[:3], {**five_levels[3], "hour": 24}]
+    four_channel._async_prepare_command.reset_mock()
+    four_channel._async_send_packet.reset_mock()
+    assert not await four_channel.async_set_native_pro_schedule(invalid_time, activate=False)
+    four_channel._async_prepare_command.assert_not_awaited()
+    four_channel._async_send_packet.assert_not_awaited()
+    assert four_channel.diagnostics["last_error"] == (
+        "Professional schedule points contain a time outside the 24-hour range"
+    )
+
+    mixed_widths = [*five_levels[:3], {**five_levels[3], "levels": five_levels[3]["levels"][:4]}]
+    four_channel._async_prepare_command.reset_mock()
+    four_channel._async_send_packet.reset_mock()
+    assert not await four_channel.async_set_native_pro_schedule(mixed_widths, activate=False)
+    four_channel._async_prepare_command.assert_not_awaited()
+    four_channel._async_send_packet.assert_not_awaited()
+    assert four_channel.diagnostics["last_error"] == ("All Professional points must use the same fixture channel count")
+
+
 def test_plant_pro_expected_state_uses_spp_keys():
     device = _make_device(
         name="PlantPro_AABBCC",
@@ -2850,6 +3083,7 @@ def test_aquasky_facebd_packet_excludes_violet_channel():
 
     assert device._channel_values() == [10, 20, 30, 40]
     assert expected == {
+        protocol.WIFI_MANUAL_KEY: 0,
         protocol.WIFI_CHANNEL_KEYS[0]: 10,
         protocol.WIFI_CHANNEL_KEYS[1]: 20,
         protocol.WIFI_CHANNEL_KEYS[2]: 30,
@@ -2874,6 +3108,7 @@ def test_five_channel_facebd_packet_preserves_cold_white_channel():
     packet = protocol.wifi_all_zone_packet(device._channel_values())
 
     assert device._expected_state_for_packet(packet) == {
+        protocol.WIFI_MANUAL_KEY: 0,
         protocol.WIFI_CHANNEL_KEYS[0]: 10,
         protocol.WIFI_CHANNEL_KEYS[1]: 20,
         protocol.WIFI_CHANNEL_KEYS[2]: 30,

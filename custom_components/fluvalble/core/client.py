@@ -26,7 +26,6 @@ WRITE_DELAY = 0.3
 COMMAND_GAP = 0.2
 POST_WRITE_STATE_DELAY = 0.8
 STATE_NOTIFY_TIMEOUT = 0.75
-UNVERIFIED_WRITE_COPIES = 2
 # BleKxt configures a 5 ms delay between MTU-sized GATT write packages.
 CHUNK_WRITE_GAP = 0.005
 MAX_RAW_RECEIVE_BUFFER = 4096
@@ -693,7 +692,7 @@ class Client:
         mismatches = {}
         for key, expected in expected_state.items():
             confirmed = self._observed_state.get(key)
-            if confirmed != expected:
+            if type(confirmed) is not type(expected) or confirmed != expected:
                 mismatches[key] = {
                     "expected": expected,
                     "confirmed": confirmed,
@@ -733,47 +732,40 @@ class Client:
 
                 await self._wait_for_command_gap()
 
-                write_copies = UNVERIFIED_WRITE_COPIES if verify and self.raw_facebd else 1
-                for copy_attempt in range(1, write_copies + 1):
-                    self._state_update_event.clear()
-                    self._observed_state = {}
-                    wrote_target = False
-                    for attempt in range(1, WRITE_RETRIES + 1):
-                        try:
-                            await self._write_packet(self.command_write_uuid, data)
-                        except (TimeoutError, BleakError, EOFError) as err:
-                            self.last_error = (
-                                f"write {self.command_write_uuid} attempt {attempt} failed: {type(err).__name__}: {err}"
-                            )
-                            _LOGGER.debug(
-                                "Fluval BLE write target failed: %s attempt %s",
-                                self.command_write_uuid,
-                                attempt,
-                                exc_info=err,
-                            )
-                            if attempt < WRITE_RETRIES:
-                                await asyncio.sleep(WRITE_DELAY)
-                        else:
-                            wrote_target = True
-                            self.last_write_targets.append(self.command_write_uuid)
-                            break
-
-                    if not wrote_target:
-                        raise BleakError("No Fluval BLE write target accepted the command")
-
-                    self.last_command_at = time.time()
-                    if not verify or not self.raw_facebd:
+                self._state_update_event.clear()
+                self._observed_state = {}
+                wrote_target = False
+                for attempt in range(1, WRITE_RETRIES + 1):
+                    try:
+                        await self._write_packet(self.command_write_uuid, data)
+                    except (TimeoutError, BleakError, EOFError) as err:
+                        self.last_error = (
+                            f"write {self.command_write_uuid} attempt {attempt} failed: {type(err).__name__}: {err}"
+                        )
+                        _LOGGER.debug(
+                            "Fluval BLE write target failed: %s attempt %s",
+                            self.command_write_uuid,
+                            attempt,
+                            exc_info=err,
+                        )
+                        if attempt < WRITE_RETRIES:
+                            await asyncio.sleep(WRITE_DELAY)
+                    else:
+                        wrote_target = True
+                        self.last_write_targets.append(self.command_write_uuid)
                         break
+
+                if not wrote_target:
+                    raise BleakError("No Fluval BLE write target accepted the command")
+
+                self.last_command_at = time.time()
+                if verify and self.raw_facebd and expected_state:
                     await asyncio.sleep(POST_WRITE_STATE_DELAY)
                     self.last_write_verified = bool(
                         self._state_update_event.is_set() and self._state_matches(expected_state)
                     )
                     if not self.last_write_verified:
                         self.last_write_verified = await self.request_state(expected_state)
-                    if self.last_write_verified:
-                        break
-                    if copy_attempt < write_copies:
-                        await asyncio.sleep(WRITE_DELAY)
 
                 _LOGGER.debug(
                     "Fluval write completed on targets=%s verified=%s",

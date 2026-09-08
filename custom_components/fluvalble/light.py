@@ -266,7 +266,10 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def _async_turn_off(self, **kwargs) -> None:
         """Apply one complete turn-off transaction."""
-        preview_stopped = await self.device.async_stop_preview()
+        # Power-off must not restore the preview's saved colour first. The APK
+        # sends the power command directly; replaying channels here creates a
+        # visible colour flash before the fixture fades out.
+        preview_stopped = await self.device.async_stop_preview(restore=False)
         powered_off = await self.device.async_set_switch("led_on_off", False)
         if not preview_stopped or not powered_off:
             self.internal_update()

@@ -6,7 +6,8 @@ from collections.abc import Mapping
 
 # Home Assistant's standard sentinel for a light that supports effects but is
 # currently rendering none. The Fluval APK has no wire-level "off effect"
-# command; selecting this value restores the preceding static channel mix.
+# command; selecting this value writes the last known static channel mix, or
+# an all-zero manual state when no static state has been observed.
 EFFECT_NONE = "off"
 
 # FluvalConnect maps these names to classic command 0x0A effect IDs. The APK

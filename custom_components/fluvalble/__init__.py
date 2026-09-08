@@ -287,15 +287,17 @@ def _validate_time(value: object, label: str) -> tuple[int, int]:
 
 
 def _validate_native_levels(value: object, label: str) -> list[int]:
-    """Validate canonical levels or the previous Plant-specific aliases."""
+    """Validate four- or five-channel levels in APK fixture order."""
     if not isinstance(value, dict):
-        raise vol.Invalid(f"{label} must contain all five fixture channels")
-    if set(value) == set(NATIVE_SCHEDULE_CHANNELS):
+        raise vol.Invalid(f"{label} must contain all fixture channels")
+    if set(value) == set(NATIVE_SCHEDULE_CHANNELS[:4]):
+        source_channels = NATIVE_SCHEDULE_CHANNELS[:4]
+    elif set(value) == set(NATIVE_SCHEDULE_CHANNELS):
         source_channels = NATIVE_SCHEDULE_CHANNELS
     elif set(value) == set(LEGACY_PLANT_PRO_CHANNELS):
         source_channels = LEGACY_PLANT_PRO_CHANNELS
     else:
-        raise vol.Invalid(f"{label} must contain exactly {', '.join(NATIVE_SCHEDULE_CHANNELS)}")
+        raise vol.Invalid(f"{label} must contain exactly channel_1 through channel_4, or channel_1 through channel_5")
     levels = []
     for channel in source_channels:
         level = value[channel]
@@ -320,12 +322,16 @@ def _validate_native_auto_schedule(value: object) -> dict[str, Any]:
         if isinstance(ramp, bool) or not isinstance(ramp, int) or not 0 <= ramp <= 240:
             raise vol.Invalid(f"{label} must be an integer from 0 to 240 minutes")
         ramps.append(ramp)
+    day_levels = _validate_native_levels(value["day"], "day")
+    night_levels = _validate_native_levels(value["night"], "night")
+    if len(day_levels) != len(night_levels):
+        raise vol.Invalid("Auto day and night levels must use the same fixture channel count")
     return {
         "sunrise": (*sunrise, ramps[0]),
         "sunset": (*sunset, ramps[1]),
         "sleep": sleep,
-        "day_levels": _validate_native_levels(value["day"], "day"),
-        "night_levels": _validate_native_levels(value["night"], "night"),
+        "day_levels": day_levels,
+        "night_levels": night_levels,
     }
 
 
@@ -340,11 +346,16 @@ def _validate_native_pro_points(value: object) -> list[dict[str, Any]]:
             f"{MIN_NATIVE_PRO_SCHEDULE_POINTS} to {MAX_NATIVE_PRO_SCHEDULE_POINTS} points"
         )
     points = []
+    channel_count: int | None = None
     for point in value:
         if not isinstance(point, dict) or "time" not in point:
-            raise vol.Invalid("Each Professional point must contain time and all five channels")
+            raise vol.Invalid("Each Professional point must contain time and all fixture channels")
         hour, minute = _validate_time(point["time"], "point time")
         levels = _validate_native_levels({key: item for key, item in point.items() if key != "time"}, "point")
+        if channel_count is None:
+            channel_count = len(levels)
+        elif len(levels) != channel_count:
+            raise vol.Invalid("All Professional points must use the same fixture channel count")
         points.append({"hour": hour, "minute": minute, "levels": levels})
     return points
 
@@ -1535,16 +1546,17 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
     runtime = entry_runtime_data(hass, entry)
 
     if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
-        runtime.device.cancel_reachability_refresh()
-        await runtime.device.async_cancel_channel_mode_restore()
-        if runtime.device.preview_task is not None or runtime.device.native_preview_active:
-            await runtime.device.async_stop_preview()
         tasks = list(runtime.background_tasks)
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         runtime.background_tasks.clear()
+
+        runtime.device.cancel_reachability_refresh()
+        await runtime.device.async_cancel_channel_mode_restore()
+        if runtime.device.preview_task is not None or runtime.device.native_preview_active:
+            await runtime.device.async_stop_preview()
         client = runtime.device.client
         if client is not None:
             try:

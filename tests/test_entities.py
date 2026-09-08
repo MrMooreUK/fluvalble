@@ -691,8 +691,8 @@ async def _async_test_normal_light_and_mode_controls_stop_active_previews_first(
     device.async_stop_preview.reset_mock()
     events.clear()
     await light_entity.async_turn_off()
-    device.async_stop_preview.assert_awaited_once_with()
-    assert events == [("stop_preview", True), ("set_switch", None)]
+    device.async_stop_preview.assert_awaited_once_with(restore=False)
+    assert events == [("stop_preview", False), ("set_switch", None)]
 
     device.async_stop_preview.reset_mock()
     events.clear()
@@ -742,14 +742,14 @@ async def _async_test_preview_stop_and_replacement_entity_command_are_atomic():
     mode_task = asyncio.create_task(mode_entity.async_select_option("automatic"))
     await asyncio.sleep(0)
 
-    assert events == [("stop_preview", True)]
+    assert events == [("stop_preview", False)]
     assert not mode_task.done()
 
     release_first_stop.set()
     await power_task
     await mode_task
     assert events == [
-        ("stop_preview", True),
+        ("stop_preview", False),
         ("set_switch", None),
         ("stop_preview", False),
         ("set_option", None),
@@ -773,7 +773,7 @@ async def _async_test_turn_off_is_attempted_when_preview_stop_fails():
     with pytest.raises(HomeAssistantError, match="preview stop failed"):
         await entity.async_turn_off()
 
-    device.async_stop_preview.assert_awaited_once_with()
+    device.async_stop_preview.assert_awaited_once_with(restore=False)
     device.async_set_switch.assert_awaited_once_with("led_on_off", False)
 
 

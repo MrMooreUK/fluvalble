@@ -897,29 +897,28 @@ class Device:
         """Resolve a wire effect ID using this product's APK catalogue."""
         return four_effect_name(effect_code) if self.uses_four_effect_catalogue() else effect_name(effect_code)
 
+    def _store_native_effect_code(self, effect_code: int) -> bool:
+        """Store only the APK's explicit off sentinel or a catalogued effect."""
+        if effect_code == 0:
+            self.values["effect"] = None
+            return True
+        effect = self._native_effect_name(effect_code)
+        if effect is None:
+            return False
+        self.values["effect"] = effect
+        return True
+
     def _channel_snapshot(self) -> dict[str, int]:
         """Return the current supported static channel values."""
         return {channel: int(self.values.get(channel, 0)) for channel in self.numbers()}
 
     def _channels_after_effect(self) -> dict[str, int]:
-        """Return a useful static channel mix for leaving an effect."""
+        """Return the last known static channel mix for leaving an effect."""
         targets = self._effect_restore_channels or self._channel_snapshot()
-        if any(targets.values()):
-            return dict(targets)
-        targets = {channel: 0 for channel in self.numbers()}
-        # Use the APK product profile directly. Channel labels are presentation
-        # strings and must not decide which physical emitter receives power.
-        product = product_from_id(self.product_id)
-        if product is not None:
-            fallback = f"channel_{product.neutral_channel}"
-        elif self.uses_marine_spectrum():
-            fallback = "channel_5"
-        else:
-            # Both explicit Plant and AquaSky profiles place their neutral
-            # emitter at channel 4 in LightDeviceUtils.getLightChannel().
-            fallback = "channel_4"
-        targets[fallback] = 100
-        return targets
+        # The APK never invents a full-brightness neutral channel when no
+        # static state exists. Preserve an exact known snapshot, or write the
+        # exact all-zero manual state and let the normal power path switch off.
+        return dict(targets)
 
     def _clear_effect_state(self) -> None:
         """Clear controller-effect state after a successful static command."""
@@ -1006,37 +1005,84 @@ class Device:
         activate: bool = True,
     ) -> bool:
         """Store a protocol-native Auto schedule in the fixture."""
+        channel_count = self._resolved_channel_count()
+        try:
+            day_levels = list(schedule["day_levels"])
+            night_levels = list(schedule["night_levels"])
+            sunrise = tuple(schedule["sunrise"])
+            sunset = tuple(schedule["sunset"])
+            raw_sleep = schedule.get("sleep")
+            sleep = None if raw_sleep is None else tuple(raw_sleep)
+        except (KeyError, TypeError):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Auto schedule fields are incomplete or invalid",
+            )
+            return False
+        if (
+            len(day_levels) != len(night_levels)
+            or len(day_levels) < channel_count
+            or len(day_levels) > len(NUMBERS)
+            or any(
+                isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100
+                for level in (*day_levels, *night_levels)
+            )
+        ):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                f"This fixture requires {channel_count} day and night channel levels",
+            )
+            return False
+        if not self._valid_schedule_time_with_ramp(sunrise) or not self._valid_schedule_time_with_ramp(sunset):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Auto sunrise and sunset require a valid time and a 0-240 minute ramp",
+            )
+            return False
+        if sleep is not None and not self._valid_schedule_time(sleep):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Auto sleep time is outside the 24-hour range",
+            )
+            return False
+        # The service schema remains backward compatible with previously saved
+        # five-channel payloads.  Send only the physical channels assigned to
+        # this APK product profile, particularly the four-channel current SPP
+        # profile used by Roma & Shaker 2.0.
+        day_levels = day_levels[:channel_count]
+        night_levels = night_levels[:channel_count]
+
         if not await self._async_prepare_command():
             return False
 
         if self._uses_wifi_protocol():
             packet = protocol.wifi_auto_schedule_packet(
-                sunrise=schedule["sunrise"],
-                sunset=schedule["sunset"],
-                sleep=schedule.get("sleep"),
-                day_levels=schedule["day_levels"],
-                night_levels=schedule["night_levels"],
-                channel_count=self._resolved_channel_count(),
+                sunrise=sunrise,
+                sunset=sunset,
+                sleep=sleep,
+                day_levels=day_levels,
+                night_levels=night_levels,
+                channel_count=channel_count,
             )
             native_protocol = "facebd"
         elif self._uses_spp_protocol():
             packet = protocol.spp_auto_schedule_packet(
-                sunrise=schedule["sunrise"],
-                sunset=schedule["sunset"],
-                sleep=schedule.get("sleep"),
-                day_levels=schedule["day_levels"],
-                night_levels=schedule["night_levels"],
-                channel_count=self._resolved_channel_count(),
+                sunrise=sunrise,
+                sunset=sunset,
+                sleep=sleep,
+                day_levels=day_levels,
+                night_levels=night_levels,
+                channel_count=channel_count,
             )
             native_protocol = "spp"
         else:
             packet = protocol.old_auto_schedule_packet(
-                sunrise=schedule["sunrise"],
-                sunset=schedule["sunset"],
-                sleep=schedule.get("sleep"),
-                day_levels=schedule["day_levels"],
-                night_levels=schedule["night_levels"],
-                channel_count=self._resolved_channel_count(),
+                sunrise=sunrise,
+                sunset=sunset,
+                sleep=sleep,
+                day_levels=day_levels,
+                night_levels=night_levels,
+                channel_count=channel_count,
             )
             native_protocol = "classic"
 
@@ -1059,6 +1105,30 @@ class Device:
         self._notify_diagnostics_throttled()
         return True
 
+    @staticmethod
+    def _valid_schedule_time(value: tuple[Any, ...]) -> bool:
+        """Return whether a schedule tuple is an APK-valid hour and minute."""
+        return (
+            len(value) == 2
+            and not isinstance(value[0], bool)
+            and isinstance(value[0], int)
+            and not isinstance(value[1], bool)
+            and isinstance(value[1], int)
+            and 0 <= value[0] <= 23
+            and 0 <= value[1] <= 59
+        )
+
+    @classmethod
+    def _valid_schedule_time_with_ramp(cls, value: tuple[Any, ...]) -> bool:
+        """Return whether a schedule tuple also has an APK-valid ramp."""
+        return (
+            len(value) == 3
+            and cls._valid_schedule_time(value[:2])
+            and not isinstance(value[2], bool)
+            and isinstance(value[2], int)
+            and 0 <= value[2] <= 240
+        )
+
     def native_pro_schedule_limits(self) -> tuple[str, int, int]:
         """Return the APK-defined Professional-schedule limits for this fixture."""
         if self._uses_wifi_protocol():
@@ -1075,16 +1145,73 @@ class Device:
         activate: bool = True,
     ) -> bool:
         """Store a protocol-native Professional schedule in the fixture."""
-        if points and all("time" not in point and "levels" in point for point in points):
-            normalized = [
-                {
-                    "minute": (int(point["hour"]) * 60) + int(point["minute"]),
-                    **{f"channel_{index}": int(level) for index, level in enumerate(point["levels"], start=1)},
-                }
-                for point in points
-            ]
-        else:
-            normalized = self._normalize_schedule_points(points)
+        channel_count = self._resolved_channel_count()
+        try:
+            if points and all("time" not in point and "levels" in point for point in points):
+                raw_levels = [list(point["levels"]) for point in points]
+                level_widths = {len(levels) for levels in raw_levels}
+                if any(
+                    len(levels) < channel_count
+                    or len(levels) > len(NUMBERS)
+                    or any(
+                        isinstance(level, bool) or not isinstance(level, int) or not 0 <= level <= 100
+                        for level in levels
+                    )
+                    for levels in raw_levels
+                ):
+                    self._set_diagnostic_error(
+                        "invalid_native_schedule",
+                        f"This fixture requires {channel_count} channel levels at every Professional point",
+                    )
+                    return False
+                if len(level_widths) != 1:
+                    self._set_diagnostic_error(
+                        "invalid_native_schedule",
+                        "All Professional points must use the same fixture channel count",
+                    )
+                    return False
+                raw_times = [(point["hour"], point["minute"]) for point in points]
+                if any(
+                    isinstance(hour, bool)
+                    or not isinstance(hour, int)
+                    or isinstance(minute, bool)
+                    or not isinstance(minute, int)
+                    or not 0 <= hour <= 23
+                    or not 0 <= minute <= 59
+                    for hour, minute in raw_times
+                ):
+                    self._set_diagnostic_error(
+                        "invalid_native_schedule",
+                        "Professional schedule points contain a time outside the 24-hour range",
+                    )
+                    return False
+                normalized = [
+                    {
+                        "minute": (hour * 60) + minute,
+                        **{
+                            f"channel_{index}": int(level)
+                            for index, level in enumerate(levels[:channel_count], start=1)
+                        },
+                    }
+                    for (hour, minute), levels in zip(raw_times, raw_levels, strict=True)
+                ]
+            else:
+                normalized = self._normalize_schedule_points(points)
+        except (KeyError, TypeError, ValueError):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Professional schedule points contain an invalid time or channel value",
+            )
+            return False
+
+        minutes = [int(point["minute"]) for point in normalized]
+        if any(not 0 <= minute < DAY_MINUTES for minute in minutes) or len(set(minutes)) != len(minutes):
+            self._set_diagnostic_error(
+                "invalid_native_schedule",
+                "Professional schedule points require unique times within one day",
+            )
+            return False
+        normalized.sort(key=lambda point: point["minute"])
 
         if not protocol.SPP_MIN_PRO_POINTS <= len(normalized) <= protocol.SPP_MAX_PRO_POINTS:
             self._set_diagnostic_error(
@@ -1110,7 +1237,6 @@ class Device:
                 channel_count=self._resolved_channel_count(),
             )
         elif native_protocol == "spp":
-            channel_count = self._resolved_channel_count()
             spp_points = [
                 {
                     "hour": point["minute"] // 60,
@@ -1221,7 +1347,7 @@ class Device:
 
     @serialized_device_command
     async def async_stop_effect(self) -> bool:
-        """Stop a native effect by restoring the preceding static channel mix."""
+        """Stop a native effect by returning to the last known static state."""
         if not self.values.get("effect"):
             return True
         return await self.async_set_channels(self._channels_after_effect(), force=True)
@@ -1733,16 +1859,18 @@ class Device:
         normalized = []
         for point in points:
             minute = self._parse_time_to_minute(str(point["time"]))
-            channels = {
-                channel: max(0, min(100, int(point.get(channel, point.get(color, 0)))))
-                for channel, color in (
-                    ("channel_1", "red"),
-                    ("channel_2", "green"),
-                    ("channel_3", "blue"),
-                    ("channel_4", "white"),
-                    ("channel_5", "channel_5"),
-                )
-            }
+            channels = {}
+            for channel, color in (
+                ("channel_1", "red"),
+                ("channel_2", "green"),
+                ("channel_3", "blue"),
+                ("channel_4", "white"),
+                ("channel_5", "channel_5"),
+            ):
+                value = point.get(channel, point.get(color, 0))
+                if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 100:
+                    raise ValueError(f"{channel} must be an integer from 0 to 100")
+                channels[channel] = value
             normalized.append({"minute": minute, "time": self._format_minute(minute), **channels})
 
         return sorted(normalized, key=lambda item: item["minute"])
@@ -1863,7 +1991,11 @@ class Device:
     def _parse_time_to_minute(self, value: str) -> int:
         """Parse HH:MM into minutes from midnight."""
         hour, minute = value.split(":", 1)
-        return ((int(hour) % 24) * 60) + int(minute)
+        hour_value = int(hour)
+        minute_value = int(minute)
+        if not 0 <= hour_value <= 23 or not 0 <= minute_value <= 59:
+            raise ValueError("Schedule time is outside the 24-hour range")
+        return (hour_value * 60) + minute_value
 
     def _format_minute(self, minute: int) -> str:
         """Format minutes from midnight as HH:MM."""
@@ -2298,8 +2430,19 @@ class Device:
                 protocol.WIFI_SWITCH_KEY,
                 protocol.WIFI_DST_KEY,
                 *(protocol.WIFI_CHANNEL_KEYS[index] for index, _channel in enumerate(self.numbers())),
+                protocol.WIFI_MANUAL_KEY,
+                protocol.WIFI_AUTO_SUNRISE_KEY,
+                protocol.WIFI_AUTO_SUNSET_KEY,
+                protocol.WIFI_AUTO_SLEEP_KEY,
+                protocol.WIFI_AUTO_DAY_LEVELS_KEY,
+                protocol.WIFI_AUTO_NIGHT_LEVELS_KEY,
+                protocol.WIFI_PRO_COUNT_KEY,
+                protocol.WIFI_PRO_TIMES_KEY,
+                protocol.WIFI_PRO_LEVELS_KEY,
+                protocol.WIFI_SCHEDULED_EFFECT_KEY,
             }
-        return {key: value for key, value in decoded.items() if key in supported_keys}
+        expected = {key: value for key, value in decoded.items() if key in supported_keys}
+        return expected or None
 
     @serialized_device_command
     async def async_refresh_state(self) -> bool:
@@ -2564,7 +2707,7 @@ class Device:
         if self.values["mode"] == "manual":
             self.values["led_on_off"] = bool(decoded["power"])
             if self.supports_classic_effects():
-                self.values["effect"] = self._native_effect_name(int(decoded["effect_id"]))
+                self._store_native_effect_code(int(decoded["effect_id"]))
             presets = [list(preset) for preset in decoded["presets"]]
             self.values["native_manual_presets"] = presets
             self.diagnostics.update(
@@ -2618,12 +2761,12 @@ class Device:
 
         if protocol.WIFI_MODE_KEY in data:
             mode = data[protocol.WIFI_MODE_KEY]
-            if isinstance(mode, int) and 0 <= mode < len(MODES):
+            if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
                 updated = True
 
-        if protocol.WIFI_SWITCH_KEY in data:
-            self.values["led_on_off"] = bool(data[protocol.WIFI_SWITCH_KEY])
+        if protocol.WIFI_SWITCH_KEY in data and isinstance(data[protocol.WIFI_SWITCH_KEY], bool):
+            self.values["led_on_off"] = data[protocol.WIFI_SWITCH_KEY]
             updated = True
 
         if protocol.WIFI_DST_KEY in data and isinstance(data[protocol.WIFI_DST_KEY], bool):
@@ -2635,18 +2778,20 @@ class Device:
             self.supports_facebd_effects()
             and protocol.WIFI_MANUAL_KEY in data
             and isinstance(data[protocol.WIFI_MANUAL_KEY], int)
+            and not isinstance(data[protocol.WIFI_MANUAL_KEY], bool)
         ):
             effect_code = data[protocol.WIFI_MANUAL_KEY]
-            self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
-            updated = True
+            updated = self._store_native_effect_code(effect_code) or updated
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.WIFI_CHANNEL_KEYS, strict=False):
-            if key in data and isinstance(data[key], int):
-                self.values[channel] = max(0, min(100, int(data[key])))
+            value = data.get(key)
+            if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 100:
+                self.values[channel] = value
                 present += 1
                 updated = True
-        if isinstance(data.get(protocol.WIFI_CHANNEL_KEYS[4]), int):
+        fifth_channel = data.get(protocol.WIFI_CHANNEL_KEYS[4])
+        if not isinstance(fifth_channel, bool) and isinstance(fifth_channel, int) and 0 <= fifth_channel <= 100:
             self._channel_count_hint = 5
         elif present >= 4:
             self._channel_count_hint = 4
@@ -2663,8 +2808,9 @@ class Device:
         )
         has_auto_sunrise = isinstance(data.get(protocol.WIFI_AUTO_SUNRISE_KEY), list)
         if has_auto_sunrise or any(key in data for key in unambiguous_facebd_schedule_keys):
-            auto_schedule = protocol.decode_wifi_auto_schedule(data)
-            pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=self._resolved_channel_count())
+            channel_count = self._resolved_channel_count()
+            auto_schedule = protocol.decode_wifi_auto_schedule(data, channel_count=channel_count)
+            pro_schedule = protocol.decode_wifi_pro_schedule(data, channel_count=channel_count)
             updated = (
                 self._record_native_schedule_readback(
                     protocol_name="facebd",
@@ -2694,27 +2840,31 @@ class Device:
 
         if protocol.SPP_MODE_KEY in data:
             mode = data[protocol.SPP_MODE_KEY]
-            if isinstance(mode, int) and 0 <= mode < len(MODES):
+            if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
                 updated = True
 
-        if protocol.SPP_SWITCH_KEY in data:
-            self.values["led_on_off"] = bool(data[protocol.SPP_SWITCH_KEY])
+        if protocol.SPP_SWITCH_KEY in data and isinstance(data[protocol.SPP_SWITCH_KEY], bool):
+            self.values["led_on_off"] = data[protocol.SPP_SWITCH_KEY]
             updated = True
 
         present = 0
         for channel, key in zip(NUMBERS, protocol.SPP_CHANNEL_KEYS, strict=False):
-            if key in data and isinstance(data[key], int):
-                self.values[channel] = max(0, min(100, int(data[key])))
+            value = data.get(key)
+            if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 100:
+                self.values[channel] = value
                 present += 1
                 updated = True
         if present:
             self._channel_count_hint = 5 if present >= 5 else 4
 
-        if protocol.SPP_EFFECT_KEY in data and isinstance(data[protocol.SPP_EFFECT_KEY], int):
+        if (
+            protocol.SPP_EFFECT_KEY in data
+            and isinstance(data[protocol.SPP_EFFECT_KEY], int)
+            and not isinstance(data[protocol.SPP_EFFECT_KEY], bool)
+        ):
             effect_code = data[protocol.SPP_EFFECT_KEY]
-            self.values["effect"] = self._native_effect_name(effect_code) if effect_code else None
-            updated = True
+            updated = self._store_native_effect_code(effect_code) or updated
 
         channel_count = self._resolved_channel_count()
         auto_schedule = protocol.decode_spp_auto_schedule(data, channel_count=channel_count)

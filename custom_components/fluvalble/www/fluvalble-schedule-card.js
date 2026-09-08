@@ -366,7 +366,8 @@ class FluvalbleScheduleCard extends HTMLElement {
   }
 
   async saveAutoSchedule() {
-    const error = validateAutoSchedule(this.store.autoSchedule);
+    const channelCount = autoChannelLabels(this.store).length;
+    const error = validateAutoSchedule(this.store.autoSchedule, channelCount);
     if (error) {
       this.toast(error);
       return;
@@ -374,7 +375,7 @@ class FluvalbleScheduleCard extends HTMLElement {
     try {
       await this.callService("set_native_auto_schedule", {
         ...targetData(this.config),
-        schedule: autoSchedulePayload(this.store.autoSchedule),
+        schedule: autoSchedulePayload(this.store.autoSchedule, channelCount),
       });
       this.store.autoSource = "uploaded";
       this.store.fixture = { ...(this.store.fixture || {}), auto: null };
@@ -1479,9 +1480,10 @@ function buildAutoLevelRows(period, levels, labels) {
   `).join("");
 }
 
-function autoSchedulePayload(schedule) {
+function autoSchedulePayload(schedule, channelCount) {
   const levelMap = (levels) => Object.fromEntries(
-    NATIVE_SERVICE_CHANNELS.map((channel, index) => [channel, clampPercent(levels[index])]),
+    NATIVE_SERVICE_CHANNELS.slice(0, channelCount)
+      .map((channel, index) => [channel, clampPercent(levels[index])]),
   );
   return {
     sunrise: schedule.sunrise,
@@ -1494,13 +1496,15 @@ function autoSchedulePayload(schedule) {
   };
 }
 
-function validateAutoSchedule(schedule) {
+function validateAutoSchedule(schedule, channelCount) {
   if (!validTime(schedule.sunrise) || !validTime(schedule.sunset)) return "Choose valid sunrise and sunset times";
   if (schedule.sleep && !validTime(schedule.sleep)) return "Choose a valid sleep time or disable it";
   if (![schedule.sunrise_ramp, schedule.sunset_ramp].every((value) => Number.isInteger(Number(value)) && Number(value) >= 0 && Number(value) <= 240)) {
     return "Sunrise and sunset ramps must be between 0 and 240 minutes";
   }
-  if (![schedule.day_levels, schedule.night_levels].every((levels) => Array.isArray(levels) && levels.length === 5)) {
+  if (![schedule.day_levels, schedule.night_levels].every(
+    (levels) => Array.isArray(levels) && levels.length >= channelCount,
+  )) {
     return "Day and night schedules require all fixture channel levels";
   }
   return null;

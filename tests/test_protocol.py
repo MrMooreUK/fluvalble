@@ -71,6 +71,21 @@ def test_decode_old_state_rejects_wrong_command_checksum_channel_count_and_mode(
     assert protocol.decode_old_state_packet(_old_state_packet(bytes((3, 0, 0))), channel_count=4) is None
 
 
+def test_decode_old_manual_state_rejects_out_of_range_fixture_values():
+    body = bytearray((0, 1, 0))
+    for value in (1000, 750, 500, 250):
+        body.extend((value & 0xFF, value >> 8))
+    body.extend(bytes(16))
+
+    invalid_channel = bytearray(body)
+    invalid_channel[3:5] = bytes((0xE9, 0x03))  # 1001 on the APK's 0-1000 wire scale.
+    assert protocol.decode_old_state_packet(_old_state_packet(invalid_channel), channel_count=4) is None
+
+    invalid_preset = bytearray(body)
+    invalid_preset[11] = 101
+    assert protocol.decode_old_state_packet(_old_state_packet(invalid_preset), channel_count=4) is None
+
+
 def test_wifi_five_channel_all_zone_packet_matches_apk_keys():
     packet = protocol.wifi_all_zone_packet([10, 20, 30, 40, 50])
 
@@ -317,7 +332,29 @@ def test_wifi_five_channel_auto_schedule_preserves_apk_level_arrays():
 
     assert decoded[protocol.WIFI_AUTO_DAY_LEVELS_KEY] == bytes([80, 70, 60, 50, 40])
     assert decoded[protocol.WIFI_AUTO_NIGHT_LEVELS_KEY] == bytes([0, 10, 0, 0, 5])
-    assert protocol.decode_wifi_auto_schedule(decoded)["day_levels"] == [80, 70, 60, 50, 40]
+    assert protocol.decode_wifi_auto_schedule(decoded, channel_count=5)["day_levels"] == [80, 70, 60, 50, 40]
+
+
+def test_wifi_auto_schedule_preserves_apk_midnight_wrapping():
+    packet = protocol.wifi_auto_schedule_packet(
+        sunrise=(23, 30, 60),
+        sunset=(0, 30, 60),
+        sleep=None,
+        day_levels=[80, 70, 60, 50],
+        night_levels=[0, 10, 0, 0],
+        channel_count=4,
+    )
+    decoded = protocol.decode_cbor_map(packet)
+
+    assert decoded[protocol.WIFI_AUTO_SUNRISE_KEY] == [1410, 30]
+    assert decoded[protocol.WIFI_AUTO_SUNSET_KEY] == [1410, 30]
+    assert protocol.decode_wifi_auto_schedule(decoded) == {
+        "sunrise": {"hour": 23, "minute": 30, "ramp": 60},
+        "sunset": {"hour": 0, "minute": 30, "ramp": 60},
+        "sleep": None,
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 10, 0, 0],
+    }
 
 
 def test_wifi_auto_schedule_rejects_non_apk_channel_count():
@@ -462,6 +499,35 @@ def test_classic_native_auto_schedule_matches_apk_6807_shape():
     }
 
 
+def test_classic_native_auto_schedule_preserves_apk_midnight_wrapping():
+    packet = protocol.old_auto_schedule_packet(
+        sunrise=(23, 30, 60),
+        sunset=(0, 30, 60),
+        sleep=None,
+        day_levels=[80, 70, 60, 50],
+        night_levels=[0, 10, 0, 0],
+        channel_count=4,
+    )
+
+    assert packet[2:6] == bytes((23, 30, 0, 30))
+    assert packet[10:14] == bytes((23, 30, 0, 30))
+    assert protocol.decode_old_auto_schedule(bytes((1,)) + packet[2:-1], channel_count=4) == {
+        "sunrise": {"hour": 23, "minute": 30, "ramp": 60},
+        "sunset": {"hour": 0, "minute": 30, "ramp": 60},
+        "sleep": None,
+        "day_levels": [80, 70, 60, 50],
+        "night_levels": [0, 10, 0, 0],
+    }
+
+
+def test_classic_native_auto_decoder_rejects_invalid_shapes_and_ramps():
+    valid = bytes((1, 8, 0, 9, 0, 80, 70, 60, 50, 20, 0, 21, 0, 0, 10, 0, 0))
+    excessive_ramp = bytes((1, 8, 0, 13, 0, 80, 70, 60, 50, 20, 0, 21, 0, 0, 10, 0, 0))
+
+    assert protocol.decode_old_auto_schedule(valid + b"\x00", channel_count=4) is None
+    assert protocol.decode_old_auto_schedule(excessive_ramp, channel_count=4) is None
+
+
 def test_classic_native_pro_schedule_matches_apk_6810_shape():
     packet = protocol.old_pro_schedule_packet(
         [
@@ -482,6 +548,14 @@ def test_classic_native_pro_schedule_matches_apk_6810_shape():
         {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
         {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
     ]
+
+
+def test_classic_native_pro_decoder_rejects_invalid_count_and_shape():
+    too_few = bytes((2, 3)) + bytes(3 * 6)
+    valid = bytes((2, 4)) + bytes(4 * 6)
+
+    assert protocol.decode_old_pro_schedule(too_few, channel_count=4) is None
+    assert protocol.decode_old_pro_schedule(valid + b"\x00", channel_count=4) is None
 
 
 def test_native_pro_schedule_builders_enforce_apk_point_limits():
@@ -660,6 +734,152 @@ def test_plant_pro_pro_schedule_round_trip():
         {"time": "12:30", "levels": [80, 70, 60, 50, 40]},
         {"time": "20:00", "levels": [0, 0, 0, 0, 0]},
     ]
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {protocol.WIFI_AUTO_SUNRISE_KEY: [1440, 60]},
+        {protocol.WIFI_AUTO_SUNRISE_KEY: [0, 241]},
+        {protocol.WIFI_AUTO_SUNSET_KEY: [60]},
+        {protocol.WIFI_AUTO_SLEEP_KEY: 1440},
+        {protocol.WIFI_AUTO_DAY_LEVELS_KEY: bytes((80, 70, 60, 50, 40))},
+        {protocol.WIFI_AUTO_NIGHT_LEVELS_KEY: bytes((0, 0, 0, 101))},
+    ],
+)
+def test_wifi_auto_schedule_rejects_malformed_apk_fields(updates):
+    data = protocol.decode_cbor_map(
+        protocol.wifi_auto_schedule_packet(
+            sunrise=(8, 0, 60),
+            sunset=(20, 30, 45),
+            sleep=(23, 15),
+            day_levels=[80, 70, 60, 50],
+            night_levels=[0, 5, 0, 0],
+        )
+    )
+    data.update(updates)
+
+    assert protocol.decode_wifi_auto_schedule(data) is None
+
+
+def test_wifi_auto_schedule_requires_one_complete_apk_state_set():
+    assert protocol.decode_wifi_auto_schedule({protocol.WIFI_AUTO_SUNRISE_KEY: [480, 540]}) is None
+    assert protocol.decode_wifi_auto_schedule({}, channel_count=3) is None
+    data = {
+        protocol.WIFI_AUTO_SUNRISE_KEY: [True, 540],
+        protocol.WIFI_AUTO_SUNSET_KEY: [1200, 1260],
+        protocol.WIFI_AUTO_SLEEP_KEY: 1380,
+        protocol.WIFI_AUTO_DAY_LEVELS_KEY: bytes((80, 70, 60, 50)),
+        protocol.WIFI_AUTO_NIGHT_LEVELS_KEY: bytes((0, 5, 0, 0)),
+    }
+    assert protocol.decode_wifi_auto_schedule(data) is None
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {protocol.WIFI_PRO_COUNT_KEY: 3},
+        {protocol.WIFI_PRO_COUNT_KEY: 13},
+        {protocol.WIFI_PRO_TIMES_KEY: [480, 600, 750]},
+        {protocol.WIFI_PRO_TIMES_KEY: [480, 600, 750, 1440]},
+        {protocol.WIFI_PRO_LEVELS_KEY: bytes(15)},
+        {protocol.WIFI_PRO_LEVELS_KEY: bytes((101,)) + bytes(15)},
+    ],
+)
+def test_wifi_pro_schedule_rejects_malformed_apk_fields(updates):
+    data = protocol.decode_cbor_map(
+        protocol.wifi_pro_schedule_packet(
+            [
+                {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
+                {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
+                {"minute": 750, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+                {"minute": 1200, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
+            ]
+        )
+    )
+    data.update(updates)
+
+    assert protocol.decode_wifi_pro_schedule(data) is None
+
+
+def test_wifi_pro_schedule_rejects_non_apk_channel_width():
+    assert protocol.decode_wifi_pro_schedule({}, channel_count=3) is None
+    assert (
+        protocol.decode_wifi_pro_schedule(
+            {
+                protocol.WIFI_PRO_COUNT_KEY: True,
+                protocol.WIFI_PRO_TIMES_KEY: [0],
+                protocol.WIFI_PRO_LEVELS_KEY: bytes(4),
+            }
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {protocol.SPP_AUTO_SUNRISE_KEY: bytes((24, 0, 60))},
+        {protocol.SPP_AUTO_SUNRISE_KEY: bytes((8, 60, 60))},
+        {protocol.SPP_AUTO_SUNRISE_KEY: bytes((8, 0, 241))},
+        {protocol.SPP_AUTO_SUNSET_KEY: bytes((20, 60, 45))},
+        {protocol.SPP_AUTO_SLEEP_KEY: bytes((0xFF, 0))},
+        {protocol.SPP_AUTO_DAY_LEVELS_KEY: bytes((80, 70, 60, 50, 101))},
+        {protocol.SPP_AUTO_NIGHT_LEVELS_KEY: bytes((0, 5, 0, 0))},
+    ],
+)
+def test_plant_pro_auto_schedule_rejects_malformed_apk_fields(updates):
+    data = {
+        protocol.SPP_AUTO_SUNRISE_KEY: bytes((8, 0, 60)),
+        protocol.SPP_AUTO_SUNSET_KEY: bytes((20, 30, 45)),
+        protocol.SPP_AUTO_SLEEP_KEY: bytes((23, 15)),
+        protocol.SPP_AUTO_DAY_LEVELS_KEY: bytes((80, 70, 60, 50, 40)),
+        protocol.SPP_AUTO_NIGHT_LEVELS_KEY: bytes((0, 5, 0, 0, 0)),
+    }
+    data.update(updates)
+
+    assert protocol.decode_spp_auto_schedule(data) is None
+
+
+@pytest.mark.parametrize(
+    "blob",
+    [
+        bytes((3,)) + bytes(3 * 7),
+        bytes((13,)) + bytes(13 * 7),
+        bytes((4,)) + bytes(4 * 7 - 1),
+        bytes((4,)) + bytes(4 * 7 + 1),
+        bytes((4, 24, 0)) + bytes(5) + bytes(3 * 7),
+        bytes((4, 8, 60)) + bytes(5) + bytes(3 * 7),
+        bytes((4, 8, 0, 101)) + bytes(4) + bytes(3 * 7),
+    ],
+)
+def test_plant_pro_pro_schedule_rejects_malformed_apk_blob(blob):
+    assert protocol.decode_spp_pro_schedule({protocol.SPP_PRO_SCHEDULE_KEY: blob}) is None
+
+
+def test_spp_schedule_decoders_reject_non_apk_channel_widths():
+    auto = protocol.decode_cbor_update(
+        protocol.spp_auto_schedule_packet(
+            sunrise=(8, 0, 60),
+            sunset=(20, 30, 45),
+            sleep=(23, 15),
+            day_levels=[80, 70, 60, 50, 40],
+            night_levels=[0, 5, 0, 0, 0],
+        )
+    )
+    pro = protocol.decode_cbor_update(
+        protocol.spp_pro_schedule_packet(
+            [
+                {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+                {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
+                {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
+                {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+            ]
+        )
+    )
+
+    assert protocol.decode_spp_auto_schedule(auto, channel_count=3) is None
+    assert protocol.decode_spp_pro_schedule(pro, channel_count=6) is None
 
 
 def test_plant_pro_effect_schedule_uses_fixed_42_byte_apk_blob():
