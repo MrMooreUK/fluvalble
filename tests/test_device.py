@@ -1315,9 +1315,7 @@ async def _async_test_roma_shaker_uses_apk_current_rgbw_commands_and_schedules()
     assert not await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
     device._async_prepare_command.assert_not_awaited()
     device._async_send_packet.assert_not_awaited()
-    assert device.diagnostics["last_error"] == (
-        "This fixture requires exactly 4 day and night channel levels"
-    )
+    assert device.diagnostics["last_error"] == ("This fixture requires exactly 4 day and night channel levels")
 
     device._async_prepare_command.reset_mock()
     device._async_send_packet.reset_mock()

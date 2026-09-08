@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import logging
 from dataclasses import dataclass, field
+from functools import wraps
 from pathlib import Path
 import re
 from time import monotonic
@@ -1367,6 +1368,19 @@ async def _async_load_schedule_data(hass: HomeAssistant, entry_id: str) -> dict:
     return {"points": None, "mode": "manual", "effect_windows": None, "effect_catalog": None}
 
 
+def _serialized_schedule_save(func):
+    """Serialize transactions across all entries sharing the schedule file."""
+
+    @wraps(func)
+    async def save(hass, *args, **kwargs):
+        lock = hass.data.setdefault(f"{DOMAIN}_schedule_save_lock", asyncio.Lock())
+        async with lock:
+            return await func(hass, *args, **kwargs)
+
+    return save
+
+
+@_serialized_schedule_save
 async def _async_save_schedule(
     hass: HomeAssistant,
     entry_id: str,
@@ -1400,6 +1414,7 @@ async def _async_save_schedule(
             handler()
 
 
+@_serialized_schedule_save
 async def _async_save_effect_schedule(
     hass: HomeAssistant,
     entry_id: str,
@@ -1545,7 +1560,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
 
     runtime = entry_runtime_data(hass, entry)
 
-    if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
+    if isinstance(runtime, FluvalRuntimeData):
         tasks = list(runtime.background_tasks)
         for task in tasks:
             task.cancel()
@@ -1553,6 +1568,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
             await asyncio.gather(*tasks, return_exceptions=True)
         runtime.background_tasks.clear()
 
+    if isinstance(runtime, FluvalRuntimeData) and runtime.device is not None:
         runtime.device.cancel_reachability_refresh()
         await runtime.device.async_cancel_channel_mode_restore()
         if runtime.device.preview_task is not None or runtime.device.native_preview_active:
