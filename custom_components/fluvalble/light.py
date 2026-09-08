@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_EFFECT,
@@ -14,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 
 from . import require_entry_runtime_data
 from .core.device import Device
@@ -51,6 +54,16 @@ class FluvalLight(FluvalEntity, LightEntity):
     _attr_icon = "mdi:led-strip-variant"
     _attr_rgb_color: tuple[int, int, int] | None = None
 
+    async def async_added_to_hass(self) -> None:
+        """Refresh schedule presentation locally; remove the timer on unload."""
+        await super().async_added_to_hass()
+        self.async_on_remove(async_track_time_interval(self.hass, self._async_schedule_tick, timedelta(seconds=30)))
+
+    async def _async_schedule_tick(self, _now: datetime) -> None:
+        """Advance display only, without connecting or writing to the lamp."""
+        if self.device.uses_classic_scheduled_state():
+            self.internal_update()
+
     def __init__(self, device: Device, attr: str) -> None:
         super().__init__(device, attr)
         self._update_effect_capabilities()
@@ -64,11 +77,30 @@ class FluvalLight(FluvalEntity, LightEntity):
             self._attr_color_mode = ColorMode.RGB
             self._attr_supported_color_modes = {ColorMode.RGB}
 
+        self.internal_update()
+
     def internal_update(self) -> None:
         """Refresh the entity from decoded fixture state."""
         self._attr_available = self.device.controls_available
         self._attr_is_on = bool(self.device.values.get("led_on_off"))
         self._update_effect_capabilities()
+
+        self._attr_assumed_state = self.device.uses_classic_scheduled_state()
+        if self._attr_assumed_state:
+            self._attr_is_on = self.device.expected_scheduled_on()
+            self._attr_extra_state_attributes = {"state_source": "fixture_schedule"}
+            # The cached Manual colour/effect is not scheduled-mode output.
+            # Keep a supported colour mode so manual controls remain valid;
+            # report no colour/brightness sample rather than a stale sample.
+            self._attr_color_mode = ColorMode.BRIGHTNESS if self.device.light_mode() == "brightness" else ColorMode.RGB
+            self._attr_brightness = None
+            self._attr_rgb_color = None
+            self._attr_rgbw_color = None
+            self._attr_effect = EFFECT_NONE if self._attr_effect_list else None
+            if self.hass:
+                self._async_write_ha_state()
+            return
+        self._attr_extra_state_attributes = None
 
         if self.device.values.get("effect"):
             # Fluval effects do not expose adjustable colour or brightness.

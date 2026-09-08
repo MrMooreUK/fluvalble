@@ -30,6 +30,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Exact channel controls** | Adjust every physical emitter with the same 0–100% channel layout and product-specific labels used by FluvalConnect. These sliders remain the authoritative control for exact spectrum tuning. |
 | **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. |
 | **Native fixture schedules** | Store Auto, Professional, and timed-effect schedules directly on supported fixtures so they continue running without Home Assistant. |
+| **Scheduled on/off indication** | Classic lights show expected Auto/Pro on/off state from the fixture's read-back schedule and synchronized clock, marked as assumed state. No lighting commands are sent to update the display. |
 | **Daylight-saving control** | Supported fixtures expose their onboard daylight-saving setting as a configuration switch. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
@@ -128,6 +129,24 @@ service payloads, paths, and registry identifiers. Creating the report does not
 disconnect, scan for, reconnect to, or send commands to the light.
 
 ### Integration options
+
+In **Automatic** or **Professional** mode, classic Bluetooth lights (including
+Plant 3.0) return their schedule rather than live LED output. The light entity
+therefore follows that schedule for its expected on/off indication, updating
+locally every 30 seconds. Home Assistant marks it as **assumed state**, with
+`state_source: fixture_schedule`; it is not physical confirmation of illumination.
+The fixture still runs its own schedule independently of Home Assistant.
+
+Manual colour and brightness are not displayed as though they were current
+scheduled output. The existing colour/channel controls remain available for
+manual adjustments. A successful explicit off command takes precedence over
+the expected schedule until power is turned on or a mode is selected again.
+Normal idle Bluetooth disconnections retain the read-back schedule and last
+clock synchronization. Missing readback or clock initialization, active preview,
+or schedules with enabled weather overlays cannot provide this static output
+estimate. Power loss or changes made outside Home Assistant can also make an
+estimate inaccurate until the integration reconnects and reads the fixture again.
+Newer transport families retain their existing device-reported behaviour.
 
 Open the integration's **Configure** dialog to adjust its BLE connection behavior.
 The **Active connection window** accepts `0` for a persistent connection or

@@ -43,6 +43,7 @@ from .effects import (
 )
 from . import protocol
 from .products import product_from_id, product_id_from_manufacturer_data
+from .scheduled_state import interpolate_levels
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -209,6 +210,10 @@ class Device:
         self.native_preview_schedule_type: str | None = None
         self.native_preview_restore_mode: str | None = None
         self._clock_synced = False
+        # Immutable readback projections, separate from editable schedule and
+        # manual channel caches used by commands.
+        self._reported_schedule_points: dict[str, tuple[tuple[int, tuple[int, ...]], ...]] = {}
+        self._scheduled_power_off = False
         self._clock_sync_started = False
         self._clock_sync_lock = asyncio.Lock()
         self._command_transaction_lock = asyncio.Lock()
@@ -553,6 +558,18 @@ class Device:
         if professional is not None:
             self.values["native_pro_schedule"] = professional
             self.diagnostics["native_pro_schedule"] = professional
+        if protocol_name == "classic":
+            for mode, schedule in (("automatic", auto), ("professional", professional)):
+                if schedule is None:
+                    continue
+                points = self._classic_auto_preview_points(schedule) if mode == "automatic" else schedule
+                try:
+                    self._reported_schedule_points[mode] = tuple(
+                        (int(point["minute"]), tuple(int(point[channel]) for channel in self.numbers()))
+                        for point in points
+                    )
+                except (KeyError, TypeError, ValueError):
+                    self._reported_schedule_points.pop(mode, None)
         self.diagnostics.update(
             {
                 "native_schedule_protocol": protocol_name,
@@ -560,6 +577,40 @@ class Device:
             }
         )
         return True
+
+    def uses_classic_scheduled_state(self) -> bool:
+        """Whether the active classic mode omits live channel/power readback."""
+        return (
+            self.diagnostics.get("native_schedule_protocol") == "classic"
+            and not self._uses_wifi_protocol()
+            and not self._uses_spp_protocol()
+            and self.values.get("mode") in ("automatic", "professional")
+        )
+
+    def expected_scheduled_on(self, now: datetime | None = None) -> bool | None:
+        """Project stored fixture output without mutating command state.
+
+        Use the same host-local wall time as old_clock_packet. A normal idle
+        disconnect does not erase the last clock synchronization or schedule.
+        This is explicitly assumed state, not physical illumination telemetry.
+        """
+        if not self.uses_classic_scheduled_state() or not self.diagnostics.get("clock_synced_at"):
+            return None
+        if self._scheduled_power_off:
+            return False
+        if self.native_preview_active or self.preview_task is not None:
+            return None
+        # Weather animation output cannot be inferred from static ramps.
+        # Until its timing/output is modelled, do not project schedules with
+        # an enabled dynamic overlay as though they were purely static.
+        if any(window.get("enabled") for window in self.values.get("native_effect_schedule", [])):
+            return None
+        moment = now or datetime.now().astimezone()
+        levels = interpolate_levels(
+            self._reported_schedule_points.get(str(self.values.get("mode")), ()),
+            moment.hour * 60 + moment.minute,
+        )
+        return any(levels) if levels is not None else None
 
     def _record_native_effect_schedule_readback(
         self,
@@ -2022,6 +2073,10 @@ class Device:
             self._clear_effect_state()
             for handler in self.updates_component:
                 handler()
+        if ok and attr == "led_on_off" and self.uses_classic_scheduled_state():
+            # Retain a successful explicit power command in presentation; a
+            # timer must not undo the user's off indication with the curve.
+            self._scheduled_power_off = not value
         return ok
 
     @serialized_device_command
@@ -2207,6 +2262,8 @@ class Device:
         else:
             ok = await self._async_send_packet(protocol.old_mode_packet(MODE_TO_CODE[option]))
 
+        if ok:
+            self._scheduled_power_off = False
         if not ok:
             self.values = old_values
             for handler in self.updates_component:
@@ -2694,7 +2751,12 @@ class Device:
 
         mode = int(decoded["mode"])
         body = decoded["body"]
+        if self.values.get("mode") != MODES[mode]:
+            self._scheduled_power_off = False
         self.values["mode"] = MODES[mode]
+        self.diagnostics["native_schedule_protocol"] = "classic"
+        self._reported_schedule_points.pop(MODES[mode], None)
+        self.values["native_effect_schedule"] = []
 
         if self.values["mode"] == "manual":
             self.values["led_on_off"] = bool(decoded["power"])
