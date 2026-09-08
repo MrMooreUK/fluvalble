@@ -1180,10 +1180,7 @@ class Device:
                 normalized = [
                     {
                         "minute": (hour * 60) + minute,
-                        **{
-                            f"channel_{index}": int(level)
-                            for index, level in enumerate(levels, start=1)
-                        },
+                        **{f"channel_{index}": int(level) for index, level in enumerate(levels, start=1)},
                     }
                     for (hour, minute), levels in zip(raw_times, raw_levels, strict=True)
                 ]
@@ -1834,7 +1831,11 @@ class Device:
                         "spectrum": self._spectrum_report(channels),
                     }
                 )
-                await self.async_set_channels(channels)
+                if not await self.async_set_channels(channels):
+                    self._set_diagnostic_error(
+                        "preview_failed", self.diagnostics.get("last_error") or "Unable to write preview channels"
+                    )
+                    return
                 if step < steps:
                     await asyncio.sleep(step_seconds)
         except asyncio.CancelledError:
@@ -1999,12 +2000,12 @@ class Device:
         """Set switch values and send the updated state to the light."""
         self.cancel_channel_mode_restore()
         _LOGGER.debug("Switch %s changed to %s", attr, value)
-        old_values = dict(self.values)
-        self.values[attr] = value
         if not await self._async_prepare_command():
             _LOGGER.warning("Cannot set Fluval switch before BLE device is available")
-            self.values = old_values
             return False
+
+        old_values = dict(self.values)
+        self.values[attr] = value
 
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_switch_packet(value))
@@ -2192,12 +2193,12 @@ class Device:
 
         self.cancel_channel_mode_restore()
         _LOGGER.debug("Mode changed to %s", option)
-        old_values = dict(self.values)
-        self.values[attr] = option
         if not await self._async_prepare_command():
             _LOGGER.warning("Cannot set Fluval mode before BLE device is available")
-            self.values = old_values
             return False
+
+        old_values = dict(self.values)
+        self.values[attr] = option
 
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE[option]))
@@ -2235,19 +2236,20 @@ class Device:
         if self._clock_synced and not force:
             return True
 
+        # Session initialization invokes the clock callbacks, which acquire
+        # _clock_sync_lock themselves. Never await it while holding that lock.
+        if self.client is None and not await self._async_ensure_client():
+            return False
+        if self.client is None or not await self.client.ensure_connected():
+            self._set_diagnostic_error(
+                "clock_sync_failed",
+                (self.client.last_error if self.client else None) or "Unable to connect for clock sync",
+            )
+            return False
+
         async with self._clock_sync_lock:
             if self._clock_synced and not force:
                 return True
-
-            if self.client is None:
-                if not await self._async_ensure_client():
-                    return False
-            elif not await self.client.ensure_connected():
-                self._set_diagnostic_error(
-                    "clock_sync_failed",
-                    self.client.last_error or "Unable to connect for clock sync",
-                )
-                return False
 
             self._clock_sync_started = await self._async_send_clock_command()
             if not self._clock_sync_started:
@@ -2447,12 +2449,10 @@ class Device:
             return False
 
         try:
-            await client.request_state()
+            return bool(await client.request_state())
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Unable to refresh Fluval state", exc_info=err)
             return False
-
-        return True
 
     async def async_collect_diagnostics(self) -> dict[str, Any]:
         """Collect a practical snapshot without changing the BLE session."""

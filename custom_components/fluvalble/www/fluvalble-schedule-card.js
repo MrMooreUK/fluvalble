@@ -30,7 +30,7 @@ class FluvalbleScheduleCard extends HTMLElement {
     this.store = getScheduleStore(this.config);
     this.previewMinute = this.previewMinute ?? this.store.selectedMinute;
     this._subscribeStore();
-    this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this.render();
   }
 
@@ -731,7 +731,7 @@ class FluvalbleEffectScheduleCard extends HTMLElement {
       ...config,
     };
     this.store = getScheduleStore(this.config);
-    this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this.render();
   }
 
@@ -1003,7 +1003,7 @@ class FluvalbleSpectrumCard extends HTMLElement {
     };
     this.store = getScheduleStore(this.config);
     this._subscribeStore();
-    this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this.render();
   }
 
@@ -1108,7 +1108,7 @@ class FluvalbleWavelengthCard extends HTMLElement {
     };
     this.store = getScheduleStore(this.config);
     this._subscribeStore();
-    this.attachShadow({ mode: "open" });
+    if (!this.shadowRoot) this.attachShadow({ mode: "open" });
     this.render();
   }
 
