@@ -2615,7 +2615,7 @@ async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_widt
     five_channel._async_prepare_command.assert_not_awaited()
     five_channel._async_send_packet.assert_not_awaited()
     assert five_channel.diagnostics["last_error"] == (
-        "This fixture requires 5 channel levels at every Professional point"
+        "This fixture requires exactly 5 channel levels at every Professional point"
     )
 
     four_channel = _make_device(name="Roma_Test", model="Fluval Roma & Shaker 2.0", product_id=564)
