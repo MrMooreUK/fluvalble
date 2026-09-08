@@ -1303,16 +1303,35 @@ async def _async_test_roma_shaker_uses_apk_current_rgbw_commands_and_schedules()
     device._async_send_packet.assert_not_awaited()
     assert device.diagnostics["last_error"] == ("Auto sunrise and sunset require a valid time and a 0-240 minute ramp")
 
-    # Previously saved/card-generated payloads always contained five values.
-    # The four-channel current controller must receive only its physical width.
+    # Width mismatch must reject — never silently slice five channels onto a
+    # four-channel fixture (Bob residual after #105).
+    device._async_prepare_command.reset_mock()
     device._async_send_packet.reset_mock()
     five_channel_auto = {
         **auto,
         "day_levels": [80, 70, 60, 50, 99],
         "night_levels": [0, 5, 0, 0, 99],
     }
-    assert await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
-    device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
+    assert not await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 day and night channel levels"
+    )
+
+    device._async_prepare_command.reset_mock()
+    device._async_send_packet.reset_mock()
+    five_channel_points = [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 0, "levels": [20, 20, 20, 20, 20]},
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+    ]
+    assert not await device.async_set_native_pro_schedule(five_channel_points, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 channel levels at every Professional point"
+    )
 
     device._async_send_packet.reset_mock()
     points = [
@@ -2596,7 +2615,7 @@ async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_widt
     five_channel._async_prepare_command.assert_not_awaited()
     five_channel._async_send_packet.assert_not_awaited()
     assert five_channel.diagnostics["last_error"] == (
-        "This fixture requires 5 channel levels at every Professional point"
+        "This fixture requires exactly 5 channel levels at every Professional point"
     )
 
     four_channel = _make_device(name="Roma_Test", model="Fluval Roma & Shaker 2.0", product_id=564)
@@ -2610,12 +2629,21 @@ async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_widt
     four_channel._async_send_packet = AsyncMock(return_value=True)
     five_levels = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour, 99]} for hour in (8, 10, 12, 20)]
 
-    assert await four_channel.async_set_native_pro_schedule(five_levels, activate=False)
+    # Width mismatch must reject — never silently slice five onto four.
+    assert not await four_channel.async_set_native_pro_schedule(five_levels, activate=False)
+    four_channel._async_prepare_command.assert_not_awaited()
+    four_channel._async_send_packet.assert_not_awaited()
+    assert four_channel.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 channel levels at every Professional point"
+    )
+
+    four_levels_ok = [{"hour": hour, "minute": 0, "levels": [hour, hour, hour, hour]} for hour in (8, 10, 12, 20)]
+    assert await four_channel.async_set_native_pro_schedule(four_levels_ok, activate=False)
     packet = four_channel._async_send_packet.await_args.args[0]
     decoded = protocol.decode_cbor_update(packet)
     assert protocol.decode_spp_pro_schedule(decoded, channel_count=4)[0]["levels"] == [8, 8, 8, 8]
 
-    invalid_time = [*five_levels[:3], {**five_levels[3], "hour": 24}]
+    invalid_time = [*four_levels_ok[:3], {**four_levels_ok[3], "hour": 24}]
     four_channel._async_prepare_command.reset_mock()
     four_channel._async_send_packet.reset_mock()
     assert not await four_channel.async_set_native_pro_schedule(invalid_time, activate=False)
@@ -2625,13 +2653,16 @@ async def _async_test_native_pro_schedule_enforces_detected_fixture_channel_widt
         "Professional schedule points contain a time outside the 24-hour range"
     )
 
-    mixed_widths = [*five_levels[:3], {**five_levels[3], "levels": five_levels[3]["levels"][:4]}]
+    # One point wider than the fixture still fails closed (exact-width first).
+    mixed_widths = [*four_levels_ok[:3], {**four_levels_ok[3], "levels": [*four_levels_ok[3]["levels"], 99]}]
     four_channel._async_prepare_command.reset_mock()
     four_channel._async_send_packet.reset_mock()
     assert not await four_channel.async_set_native_pro_schedule(mixed_widths, activate=False)
     four_channel._async_prepare_command.assert_not_awaited()
     four_channel._async_send_packet.assert_not_awaited()
-    assert four_channel.diagnostics["last_error"] == ("All Professional points must use the same fixture channel count")
+    assert four_channel.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 channel levels at every Professional point"
+    )
 
 
 def test_plant_pro_expected_state_uses_spp_keys():

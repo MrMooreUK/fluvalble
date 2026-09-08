@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Reject native Auto and Professional schedule writes whose channel width does
+  not exactly match the fixture APK channel count, instead of silently slicing
+  longer payloads.
+
 ## [0.0.14] — 2026-09-08
 
 ### Added
