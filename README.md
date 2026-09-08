@@ -188,9 +188,10 @@ the exact channel values read from that slot. Saving remains an explicit action
 because it overwrites the selected slot in the physical fixture.
 
 Schedule previews use data already stored by the fixture and never upload
-unsaved editor values. Using the normal light or Mode controls stops an active
-preview automatically; the dedicated Stop preview action restores the prior
-fixture mode.
+unsaved editor values. Using the normal light, Mode controls, or channel sliders
+stops an active preview before applying the requested change. If stopping the
+preview fails, the channel change is not sent and Home Assistant reports the
+error. The dedicated Stop preview action restores the prior fixture mode.
 
 Supported fixtures also expose their onboard daylight-saving setting. See the
 [technical reference](docs/technical-reference.md) for controller limits,
