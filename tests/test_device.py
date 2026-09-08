@@ -1303,16 +1303,35 @@ async def _async_test_roma_shaker_uses_apk_current_rgbw_commands_and_schedules()
     device._async_send_packet.assert_not_awaited()
     assert device.diagnostics["last_error"] == ("Auto sunrise and sunset require a valid time and a 0-240 minute ramp")
 
-    # Previously saved/card-generated payloads always contained five values.
-    # The four-channel current controller must receive only its physical width.
+    # Width mismatch must reject — never silently slice five channels onto a
+    # four-channel fixture (Bob residual after #105).
+    device._async_prepare_command.reset_mock()
     device._async_send_packet.reset_mock()
     five_channel_auto = {
         **auto,
         "day_levels": [80, 70, 60, 50, 99],
         "night_levels": [0, 5, 0, 0, 99],
     }
-    assert await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
-    device._async_send_packet.assert_awaited_once_with(protocol.spp_auto_schedule_packet(**auto, channel_count=4))
+    assert not await device.async_set_native_auto_schedule(five_channel_auto, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 day and night channel levels"
+    )
+
+    device._async_prepare_command.reset_mock()
+    device._async_send_packet.reset_mock()
+    five_channel_points = [
+        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+        {"hour": 12, "minute": 0, "levels": [20, 20, 20, 20, 20]},
+        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
+    ]
+    assert not await device.async_set_native_pro_schedule(five_channel_points, activate=False)
+    device._async_prepare_command.assert_not_awaited()
+    device._async_send_packet.assert_not_awaited()
+    assert device.diagnostics["last_error"] == (
+        "This fixture requires exactly 4 channel levels at every Professional point"
+    )
 
     device._async_send_packet.reset_mock()
     points = [
