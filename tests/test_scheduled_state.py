@@ -366,6 +366,40 @@ async def test_failed_preview_start_keeps_prior_off_indication():
     assert device.expected_scheduled_on(at(12)) is False
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+@pytest.mark.parametrize("field", ["mode", "led_on_off"])
+@pytest.mark.parametrize("send_ok", [False, True])
+async def test_reported_control_state_wins_over_requested_state(transport, field, send_ok):
+    device = device_with_schedule()
+    device.values.update(mode="manual", led_on_off=False)
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd" if transport == "facebd" else "00001001",
+        wifi_facebd=transport == "facebd",
+        spp_transport=transport == "spp",
+        request_state=AsyncMock(return_value=False),
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+
+    async def send(_packet):
+        if transport == "classic":
+            body = bytes([0, 0, 0] + [0] * 10 + [0] * 20)
+            assert device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + body))
+        elif transport == "facebd":
+            device._decode_wifi_update({protocol.WIFI_MODE_KEY: 0, protocol.WIFI_SWITCH_KEY: False})
+        else:
+            device._decode_spp_update({protocol.SPP_MODE_KEY: 0, protocol.SPP_SWITCH_KEY: False})
+        return send_ok
+
+    device._async_send_packet = AsyncMock(side_effect=send)
+    if field == "mode":
+        assert await device.async_select_option(field, "professional") is send_ok
+    else:
+        assert await device.async_set_switch(field, True) is send_ok
+    assert device.values["mode"] == "manual"
+    assert device.values["led_on_off"] is False
+
+
 def prepare_save(mode, *, read=True, level=0):
     device = device_with_schedule()
     device.values["mode"] = mode

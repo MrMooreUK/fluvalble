@@ -214,6 +214,7 @@ class Device:
         # manual channel caches used by commands.
         self._reported_schedule_points: dict[str, tuple[tuple[int, tuple[int, ...]], ...]] = {}
         self._scheduled_power_off = False
+        self._control_readback_revision = {"mode": 0, "led_on_off": 0}
         self._clock_sync_started = False
         self._clock_sync_lock = asyncio.Lock()
         self._command_transaction_lock = asyncio.Lock()
@@ -2100,9 +2101,7 @@ class Device:
             _LOGGER.warning("Cannot set Fluval switch before BLE device is available")
             return False
 
-        old_values = dict(self.values)
-        self.values[attr] = value
-
+        readback_revision = self._control_readback_revision.get(attr, 0)
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_switch_packet(value))
         elif self._uses_spp_protocol():
@@ -2114,7 +2113,8 @@ class Device:
             # Reconnect/verification may have supplied newer fixture state.
             # No optimistic mutation was made, so there is nothing to undo.
             return False
-        self.values[attr] = value
+        if self._control_readback_revision.get(attr, 0) == readback_revision:
+            self.values[attr] = value
         if attr == "led_on_off" and not value and self.values.get("effect"):
             self._clear_effect_state()
         if attr == "led_on_off" and self.uses_classic_scheduled_state():
@@ -2298,6 +2298,7 @@ class Device:
             _LOGGER.warning("Cannot set Fluval mode before BLE device is available")
             return False
 
+        readback_revision = self._control_readback_revision[attr]
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE[option]))
         elif self._uses_spp_protocol():
@@ -2308,7 +2309,8 @@ class Device:
         if ok:
             # Preserve readback received during reconnect or verification;
             # only commit our requested mode once the write succeeds.
-            self.values[attr] = option
+            if self._control_readback_revision[attr] == readback_revision:
+                self.values[attr] = option
             self._scheduled_power_off = False
             if not self._uses_wifi_protocol() and not self._uses_spp_protocol():
                 # Read the selected mode's complete packet, including weather
@@ -2809,6 +2811,7 @@ class Device:
         if self.values.get("mode") != MODES[mode]:
             self._scheduled_power_off = False
         self.values["mode"] = MODES[mode]
+        self._control_readback_revision["mode"] += 1
         self.diagnostics["native_schedule_protocol"] = "classic"
         # A classic packet describes just one mode. Keep its schedule and
         # effect windows together; inactive-mode forecasts are not reusable.
@@ -2817,6 +2820,7 @@ class Device:
 
         if self.values["mode"] == "manual":
             self.values["led_on_off"] = bool(decoded["power"])
+            self._control_readback_revision["led_on_off"] += 1
             if self.supports_classic_effects():
                 self._store_native_effect_code(int(decoded["effect_id"]))
             presets = [list(preset) for preset in decoded["presets"]]
@@ -2874,10 +2878,12 @@ class Device:
             mode = data[protocol.WIFI_MODE_KEY]
             if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
+                self._control_readback_revision["mode"] += 1
                 updated = True
 
         if protocol.WIFI_SWITCH_KEY in data and isinstance(data[protocol.WIFI_SWITCH_KEY], bool):
             self.values["led_on_off"] = data[protocol.WIFI_SWITCH_KEY]
+            self._control_readback_revision["led_on_off"] += 1
             updated = True
 
         if protocol.WIFI_DST_KEY in data and isinstance(data[protocol.WIFI_DST_KEY], bool):
@@ -2953,10 +2959,12 @@ class Device:
             mode = data[protocol.SPP_MODE_KEY]
             if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
+                self._control_readback_revision["mode"] += 1
                 updated = True
 
         if protocol.SPP_SWITCH_KEY in data and isinstance(data[protocol.SPP_SWITCH_KEY], bool):
             self.values["led_on_off"] = data[protocol.SPP_SWITCH_KEY]
+            self._control_readback_revision["led_on_off"] += 1
             updated = True
 
         present = 0

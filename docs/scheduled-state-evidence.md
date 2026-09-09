@@ -55,6 +55,9 @@ They calculate preview output; they are not a physical light-output sensor.
   override. Failed preparation or writes preserve fresh reconnect/verification
   readback instead of restoring the older idle cache. Classic, FACEBD and SPP
   still use their existing power and mode packet builders.
+  Per-field readback revisions distinguish a submitted command from a power or
+  mode value actually decoded during the write. Fresh fixture reports take
+  precedence, including reports equal to the previous cached value.
 - Static projection is withheld during previews, without a successful clock
   initialization/readback basis, or during active timed-weather windows whose
   instantaneous output is not described by the static channel curve. Weekday
