@@ -168,7 +168,7 @@ def test_manual_and_new_transport_keep_existing_reporting():
 
 @pytest.mark.asyncio
 async def test_successful_off_survives_schedule_ticks_and_failed_on():
-    device = device_with_schedule()
+    device, _save = prepare_save("automatic", level=100)
     device._async_prepare_command = AsyncMock(return_value=True)
     device._async_send_packet = AsyncMock(return_value=True)
     assert await device.async_set_switch("led_on_off", False)
@@ -301,6 +301,56 @@ async def test_newer_schedule_projection_refresh_does_not_read_or_notify():
     await device._async_read_schedule_projection("spp")
     device.client.request_state.assert_not_awaited()
     update.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_entering_scheduled_mode_fetches_missing_readback(mode):
+    device, _save = prepare_save(mode, level=100)
+    device.values["mode"] = "manual"
+    device._reported_schedule_points.clear()
+
+    async def prepare():
+        # A connection-initialization read can report the previous mode.
+        device.values["mode"] = "manual"
+        return True
+
+    device._async_prepare_command.side_effect = prepare
+    assert await device.async_select_option("mode", mode)
+    device.client.request_state.assert_awaited_once()
+    assert device.values["mode"] == mode
+    assert device.expected_scheduled_on(at(12)) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_failed_mode_read_never_reuses_inactive_forecast(mode):
+    device, _save = prepare_save(mode, read=False)
+    assert device.expected_scheduled_on(at(12)) is True
+    device.values["mode"] = "manual"
+    assert await device.async_select_option("mode", mode)
+    assert device.expected_scheduled_on(at(12)) is None
+    assert not device._reported_schedule_points
+
+
+@pytest.mark.asyncio
+async def test_manual_read_and_mode_return_keep_schedule_weather_consistent():
+    device = device_with_schedule(4)
+    manual = bytes([0, 1, 0] + [0] * 8 + [0] * 16)
+    assert device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + manual))
+    assert not device._reported_schedule_points
+    body = bytes([1, 8, 0, 9, 0] + [100] * 4 + [19, 0, 20, 0] + [0] * 4 + [255, 12, 0, 13, 0, 1])
+
+    async def read():
+        return device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + body))
+
+    device.client = SimpleNamespace(command_write_uuid="00001001", request_state=AsyncMock(side_effect=read))
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    assert await device.async_select_option("mode", "automatic")
+    assert device.expected_scheduled_on(at(12)) is None
+    assert device.expected_scheduled_on(at(13)) is True
+    assert device.values["native_effect_schedule"][0]["enabled"] is True
 
 
 @pytest.mark.parametrize(

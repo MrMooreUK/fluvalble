@@ -1,8 +1,9 @@
 # Classic scheduled-state reporting
 
 This change addresses the stale Manual-mode indication described in upstream
-issue #110. It changes presentation only: no new command bytes, scheduler,
-Bluetooth polling, minimum HA version, or automatic clock writes are introduced.
+issue #110. It adds schedule-based presentation and refreshes parameter readback
+after schedule saves and mode selection. No new command bytes, scheduler,
+periodic Bluetooth polling, minimum HA version, or automatic clock writes are introduced.
 
 ## FluvalConnect APK evidence
 
@@ -46,6 +47,12 @@ They calculate preview output; they are not a physical light-output sensor.
   it from the fixture; failed readback never restores the older projection.
 - Successful schedule activation clears the explicit Off override. Saving
   without activation, failed writes and failed activation preserve it.
+- Classic mode selection requests fresh active-mode parameters, including when
+  restoring a mode after manual channel adjustments. Reconnection readback is
+  completed before applying the requested mode, so it cannot overwrite the request.
+- Each classic response replaces the active forecast and weather windows together.
+  Inactive-mode forecasts are discarded; failed reads cannot combine an older
+  schedule with missing or different weather settings.
 - FACEBD/SPP reporting is unchanged. No assumption is made that their switch
   fields describe the same state as a classic schedule projection.
 
@@ -57,6 +64,16 @@ decoding, invalid readback, isolation from editable/manual caches, off-command
 precedence and failures, display-only ticks, and entity unload cleanup.
 Additional checks cover Auto/Pro save-readback transactions, read timeouts,
 partial activation failures, and timed-weather weekday/midnight boundaries.
+Mode-selection checks cover reconnect readback, failed reads and matching
+schedule/weather snapshots when returning from Manual to Auto or Pro.
+
+An isolated smoke check also passed against real Home Assistant 2024.1.0 and
+2026.7.2 (locally cached Docker images). It bootstrapped HA, added the light to
+an entity platform, verified published assumed-state attributes and a real
+30-second timer update, returned to Manual, and removed/re-added the entity
+without duplicate device callbacks. Containers had networking disabled, a
+read-only candidate checkout, temporary configuration, and no Bluetooth devices.
+This validates entity-platform behavior, not a full Bluetooth config-entry setup.
 
 Hardware validation has not been performed. This is expected output with HA's
 standard `assumed_state` flag, not confirmation of physical illumination.

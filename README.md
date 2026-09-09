@@ -147,7 +147,9 @@ or an active timed-weather window cannot provide this static output estimate.
 Enabling a weather schedule does not disable reporting outside its time window
 and selected weekdays. After a classic schedule save, the integration discards
 the old forecast and requests fresh readback; a failed read cannot silently
-restore the old schedule. Successful activation releases an earlier Off override,
+restore the old schedule. Selecting a mode also refreshes its schedule and weather
+settings together, including automatic returns from manual adjustments.
+Successful activation releases an earlier Off override,
 while saving without activation preserves it.
 Power loss or changes made outside Home Assistant can also make an
 estimate inaccurate until the integration reconnects and reads the fixture again.

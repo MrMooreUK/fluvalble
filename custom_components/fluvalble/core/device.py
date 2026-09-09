@@ -2286,6 +2286,8 @@ class Device:
             _LOGGER.warning("Cannot set Fluval mode before BLE device is available")
             return False
 
+        # Connection initialization can read the previous mode. Apply the
+        # requested mode only after that read, and preserve it for rollback.
         old_values = dict(self.values)
         self.values[attr] = option
 
@@ -2298,6 +2300,13 @@ class Device:
 
         if ok:
             self._scheduled_power_off = False
+            if not self._uses_wifi_protocol() and not self._uses_spp_protocol():
+                # Read the selected mode's complete packet, including weather
+                # windows. Never reuse an inactive mode's older forecast.
+                self._reported_schedule_points.clear()
+                self.values["native_effect_schedule"] = []
+                self.diagnostics["native_schedule_protocol"] = "classic"
+                await self._async_read_schedule_projection("classic")
         if not ok:
             self.values = old_values
             for handler in self.updates_component:
@@ -2789,7 +2798,9 @@ class Device:
             self._scheduled_power_off = False
         self.values["mode"] = MODES[mode]
         self.diagnostics["native_schedule_protocol"] = "classic"
-        self._reported_schedule_points.pop(MODES[mode], None)
+        # A classic packet describes just one mode. Keep its schedule and
+        # effect windows together; inactive-mode forecasts are not reusable.
+        self._reported_schedule_points.clear()
         self.values["native_effect_schedule"] = []
 
         if self.values["mode"] == "manual":
