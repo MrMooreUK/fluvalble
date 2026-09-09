@@ -136,6 +136,8 @@ therefore follows that schedule for its expected on/off indication, updating
 locally every 30 seconds. Home Assistant marks it as **assumed state**, with
 `state_source: fixture_schedule`; it is not physical confirmation of illumination.
 The fixture still runs its own schedule independently of Home Assistant.
+Plain on/off commands preserve classic Auto/Pro mode; explicit colour or
+brightness adjustments remain manual controls.
 
 Manual colour and brightness are not displayed as though they were current
 scheduled output. The existing colour/channel controls remain available for

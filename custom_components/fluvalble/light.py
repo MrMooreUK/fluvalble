@@ -188,7 +188,9 @@ class FluvalLight(FluvalEntity, LightEntity):
             self.internal_update()
             return
 
-        if self.device.master_brightness() > 0:
+        # Auto/Pro readback does not populate Manual channels. Their cached
+        # zero values must not turn a plain power action into a colour write.
+        if self.device.uses_classic_scheduled_state() or self.device.master_brightness() > 0:
             if not await self.device.async_set_switch("led_on_off", True):
                 self._raise_command_error()
             self.internal_update()

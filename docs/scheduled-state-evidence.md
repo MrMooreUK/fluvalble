@@ -38,6 +38,11 @@ They calculate preview output; they are not a physical light-output sensor.
 - Existing explicit successful power-off commands override the projection;
   failed commands do not change this override. Selecting a mode or successfully
   turning power on releases it. This adds no packet or mode-switch sequence.
+- Plain turn-on in classic Auto/Pro uses the existing power command even when
+  cached Manual channels are zero. It does not apply a default colour or switch
+  to Manual. Explicit colour and brightness requests retain their normal behavior.
+  `OldLightKxtKt.createLightSwitchValueForOld` constructs the separate `6803`
+  power command without channel data; no protocol bytes are changed here.
 - Static projection is withheld during previews, without a successful clock
   initialization/readback basis, or during active timed-weather windows whose
   instantaneous output is not described by the static channel curve. Weekday

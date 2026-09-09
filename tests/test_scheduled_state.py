@@ -181,6 +181,46 @@ async def test_successful_off_survives_schedule_ticks_and_failed_on():
     assert device.expected_scheduled_on(at(12)) is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [4, 5])
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+@pytest.mark.parametrize("manual_level", [0, 50])
+async def test_plain_turn_on_in_schedule_does_not_rewrite_manual_channels(count, mode, manual_level):
+    device = device_with_schedule(count)
+    device.values["mode"] = mode
+    for channel in device.numbers():
+        device.values[channel] = manual_level
+    device._scheduled_power_off = True
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    device.async_apply_light_channels = AsyncMock(return_value=True)
+    entity = FluvalLight(device, "light")
+    await entity.async_turn_on()
+    device.async_apply_light_channels.assert_not_awaited()
+    device._async_send_packet.assert_awaited_once_with(protocol.old_switch_packet(True))
+    assert device.values["mode"] == mode
+    assert device._scheduled_power_off is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_failed_plain_scheduled_turn_on_preserves_off_override(mode):
+    device = device_with_schedule()
+    device.values["mode"] = mode
+    device._scheduled_power_off = True
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=False)
+    device.async_apply_light_channels = AsyncMock(return_value=True)
+    entity = FluvalLight(device, "light")
+    from homeassistant.exceptions import HomeAssistantError
+
+    with pytest.raises(HomeAssistantError):
+        await entity.async_turn_on()
+    assert device._scheduled_power_off is True
+    assert device.values["mode"] == mode
+    device.async_apply_light_channels.assert_not_awaited()
+
+
 def prepare_save(mode, *, read=True, level=0):
     device = device_with_schedule()
     device.values["mode"] = mode
