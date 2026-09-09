@@ -283,8 +283,6 @@ class FluvalLight(FluvalEntity, LightEntity):
         if not await self.device.async_set_master_brightness(round(brightness / 255 * 100)):
             return False
         self.device.clear_commanded_light()
-        if not self.device.values.get("led_on_off") and not await self.device.async_set_switch("led_on_off", True):
-            return False
         channels = {channel: int(self.device.values[channel]) for channel in self.device.numbers()}
         self.device.remember_commanded_light(
             channels,
@@ -294,7 +292,7 @@ class FluvalLight(FluvalEntity, LightEntity):
         return True
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Turn off the fixture without rewriting its colour channels."""
+        """Turn off the fixture, clearing retained classic weather if active."""
         async with self.device.command_transaction():
             await self._async_turn_off(**kwargs)
 

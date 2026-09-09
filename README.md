@@ -28,7 +28,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. Product-specific FluvalConnect data translates the colour picker to the fixture's physical channels. |
 | **Exact channel controls** | Adjust every physical emitter with the same 0–100% channel layout and product-specific labels used by FluvalConnect. These sliders remain the authoritative control for exact spectrum tuning. |
-| **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. |
+| **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. Turning off an active classic weather effect clears its manual channels before powering off, so the effect is not retained for the next On. |
 | **Native fixture schedules** | Store Auto, Professional, and timed-effect schedules directly on supported fixtures so they continue running without Home Assistant. |
 | **Scheduled on/off indication** | Classic lights show expected Auto/Pro on/off state from the fixture's read-back schedule and synchronized clock, marked as assumed state. No lighting commands are sent to update the display. |
 | **Daylight-saving control** | Supported fixtures expose their onboard daylight-saving setting as a configuration switch. |
@@ -128,7 +128,7 @@ schedule evidence while removing Bluetooth addresses, names, manufacturer and
 service payloads, paths, and registry identifiers. Creating the report does not
 disconnect, scan for, reconnect to, or send commands to the light.
 
-### Integration options
+### Scheduled on/off indication
 
 In **Automatic** or **Professional** mode, classic Bluetooth lights (including
 Plant 3.0) return their schedule rather than live LED output. The light entity
@@ -156,6 +156,8 @@ while saving without activation preserves it.
 Power loss or changes made outside Home Assistant can also make an
 estimate inaccurate until the integration reconnects and reads the fixture again.
 Newer transport families retain their existing device-reported behaviour.
+
+### Integration options
 
 Open the integration's **Configure** dialog to adjust its BLE connection behavior.
 The **Active connection window** accepts `0` for a persistent connection or

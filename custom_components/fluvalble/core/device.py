@@ -910,10 +910,7 @@ class Device:
         if not await self.async_set_channels(values):
             return False
         self.clear_commanded_light()
-        if not any(values.values()):
-            return True
-        if not self.values.get("led_on_off"):
-            return await self.async_set_switch("led_on_off", True)
+        # Channel application owns power sequencing, not delayed cached state.
         return True
 
     def supports_classic_effects(self) -> bool:
@@ -1615,7 +1612,11 @@ class Device:
         if not targets:
             return False
 
-        if not force and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items()):
+        if (
+            not force
+            and bool(any(targets.values())) == bool(self.values.get("led_on_off"))
+            and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items())
+        ):
             _LOGGER.debug("Skipping Fluval channel write because targets are unchanged: %s", targets)
             return True
 
@@ -1676,6 +1677,8 @@ class Device:
     ) -> bool:
         """Send the current channel values to the controller."""
         channel_index = self.numbers().index(single_channel) if single_channel is not None else None
+        # Build from a snapshot: power writes can deliver older channel state.
+        channel_values = self._channel_values()
         if self._uses_wifi_protocol():
             any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
@@ -1684,9 +1687,9 @@ class Device:
                     self.values = old_values
                     return False
             packet = (
-                protocol.wifi_single_zone_packet(channel_index, self.values[single_channel])
+                protocol.wifi_single_zone_packet(channel_index, channel_values[channel_index])
                 if channel_index is not None and single_channel is not None
-                else protocol.wifi_all_zone_packet(self._channel_values())
+                else protocol.wifi_all_zone_packet(channel_values)
             )
             ok = await self._async_send_packet(packet)
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
@@ -1701,9 +1704,9 @@ class Device:
                     self.values = old_values
                     return False
             packet = (
-                protocol.spp_single_zone_packet(channel_index, self.values[single_channel])
+                protocol.spp_single_zone_packet(channel_index, channel_values[channel_index])
                 if channel_index is not None and single_channel is not None
-                else protocol.spp_all_zone_packet(self._channel_values())
+                else protocol.spp_all_zone_packet(channel_values)
             )
             ok = await self._async_send_packet(packet)
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
@@ -1712,14 +1715,14 @@ class Device:
                     self.values["led_on_off"] = False
         else:
             any_channel_on = any(self._channel_values())
-            # Establish power before applying the 6804 channel frame, matching
-            # the app's switch-then-manual-colour ordering for an off fixture.
+            # The classic hardware capture showed that staging channels while
+            # off did not survive the next On. Establish power first.
             if any_channel_on and (force_power or not self.values["led_on_off"]):
                 if not await self._async_send_packet(protocol.old_switch_packet(True)):
                     self.values = old_values
                     return False
                 self.values["led_on_off"] = True
-            ok = await self._async_send_packet(protocol.old_all_zone_packet(self._channel_values()))
+            ok = await self._async_send_packet(protocol.old_all_zone_packet(channel_values))
             if ok and not any_channel_on and self.values["led_on_off"]:
                 ok = await self._async_send_packet(protocol.old_switch_packet(False))
                 if ok:
@@ -2102,6 +2105,19 @@ class Device:
             return False
 
         readback_revision = self._control_readback_revision.get(attr, 0)
+        effect_cleared = True
+        if (
+            attr == "led_on_off"
+            and not value
+            and self.values.get("led_on_off")
+            and self.values.get("effect")
+            and self.values.get("mode") == "manual"
+            and self.supports_classic_effects()
+        ):
+            # The APK exits weather through manual channels. Hardware product
+            # 328 confirmed zero-then-Off clears weather retained by bare Off.
+            # Still attempt Off if the preceding channel write fails.
+            effect_cleared = await self._async_send_packet(protocol.old_all_zone_packet([0] * len(self.numbers())))
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_switch_packet(value))
         elif self._uses_spp_protocol():
@@ -2123,7 +2139,7 @@ class Device:
             self._scheduled_power_off = not value
         for handler in self.updates_component:
             handler()
-        return ok
+        return ok and effect_cleared
 
     @serialized_device_command
     async def async_set_daylight_saving_time(self, enabled: bool) -> bool:

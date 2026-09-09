@@ -137,5 +137,8 @@ race: saving newly discovered identity data previously triggered a reload while
 late entities were being added. The fallback listener now compares options and
 ignores data-only updates. Current HA continues to use OptionsFlowWithReload.
 
-Hardware validation has not been performed. This is expected output with HA's
-standard `assumed_state` flag, not confirmation of physical illumination.
+Classic Auto/Pro output has not been physically validated. This is expected
+output with HA's standard `assumed_state` flag, not confirmation of illumination.
+Manual-mode reads and the accompanying command repairs were tested on product
+328; see [command sequencing evidence](classic-command-sequencing.md). That
+test does not establish scheduled output or other models' physical behaviour.

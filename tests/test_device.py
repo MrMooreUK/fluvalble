@@ -715,6 +715,7 @@ async def _async_test_complete_device_commands_cannot_interleave_packets():
         protocol.old_mode_packet(0),
         protocol.old_switch_packet(True),
         protocol.old_weather_effect_packet(2),
+        protocol.old_all_zone_packet([0, 0, 0, 0]),
         protocol.old_switch_packet(False),
     ]
 
@@ -970,7 +971,7 @@ async def _async_test_stopping_effect_without_static_state():
     assert device.values["led_on_off"] is False
 
 
-def test_effect_active_off_sends_only_switch_packet():
+def test_effect_active_off_without_classic_transport_sends_only_switch_packet():
     asyncio.run(_async_test_effect_active_off_sends_only_switch_packet())
 
 
@@ -991,6 +992,72 @@ async def _async_test_effect_active_off_sends_only_switch_packet():
 
 def test_facebd_effect_active_off_sends_only_switch_packet():
     asyncio.run(_async_test_facebd_effect_active_off_sends_only_switch_packet())
+
+
+@pytest.mark.parametrize("zero_ok", [True, False])
+def test_classic_effect_off_clears_channels_and_always_attempts_off(zero_ok):
+    async def run():
+        device = _make_device(product_id=328)
+        device.client = SimpleNamespace(command_write_uuid="00001001-0000-1000-8000-00805f9b34fb")
+        device.values.update(mode="manual", led_on_off=True, effect="Full moon")
+        device._async_prepare_command = AsyncMock(return_value=True)
+        device._async_send_packet = AsyncMock(side_effect=[zero_ok, True])
+        assert await device.async_set_switch("led_on_off", False) is zero_ok
+        assert [call.args[0] for call in device._async_send_packet.await_args_list] == [
+            protocol.old_all_zone_packet([0, 0, 0, 0]),
+            protocol.old_switch_packet(False),
+        ]
+        assert device.values["led_on_off"] is False
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("unchanged", [True, False])
+@pytest.mark.parametrize("family", ["classic", "facebd", "spp"])
+def test_colour_write_survives_delayed_off_and_channel_notifications(unchanged, family):
+    async def run():
+        device = _make_device(product_id={"classic": 328, "facebd": 532, "spp": 385}[family])
+        device.client = SimpleNamespace(
+            command_write_uuid={"classic": "00001001", "facebd": "facebd01", "spp": "0000fff1"}[family],
+            wifi_facebd=family == "facebd",
+            plant_pro_spp=family == "spp",
+        )
+        device.values.update(mode="manual", led_on_off=False)
+        targets = {channel: 1 if index == 0 else 0 for index, channel in enumerate(device.numbers())}
+        device.values.update(targets if unchanged else dict.fromkeys(targets, 0))
+        device._async_prepare_command = AsyncMock(return_value=True)
+        packets = []
+
+        async def send(packet):
+            packets.append(packet)
+            device.values.update(dict.fromkeys(targets, 0))
+            device.values["led_on_off"] = False
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        assert await device.async_apply_light_channels(targets)
+        prefix = {"classic": "old", "facebd": "wifi", "spp": "spp"}[family]
+        power = getattr(protocol, f"{prefix}_switch_packet")(True)
+        if family != "classic" and not unchanged:
+            channels = getattr(protocol, f"{prefix}_single_zone_packet")(0, 1)
+        else:
+            channels = getattr(protocol, f"{prefix}_all_zone_packet")(list(targets.values()))
+        assert packets == [power, channels]
+
+    asyncio.run(run())
+
+
+def test_classic_effect_already_off_does_not_power_on_to_clear_weather():
+    async def run():
+        device = _make_device(product_id=328)
+        device.client = SimpleNamespace(command_write_uuid="00001001-0000-1000-8000-00805f9b34fb")
+        device.values.update(mode="manual", led_on_off=False, effect="Full moon")
+        device._async_prepare_command = AsyncMock(return_value=True)
+        device._async_send_packet = AsyncMock(return_value=True)
+        assert await device.async_set_switch("led_on_off", False)
+        device._async_send_packet.assert_awaited_once_with(protocol.old_switch_packet(False))
+
+    asyncio.run(run())
 
 
 async def _async_test_facebd_effect_active_off_sends_only_switch_packet():
@@ -1451,7 +1518,7 @@ def test_light_colour_cache_is_used_only_while_physical_channels_match():
         assert device.aquasky_rgb_255() == (162, 255, 33)
 
 
-def test_apply_light_channels_turns_on_after_channel_write():
+def test_apply_light_channels_does_not_repeat_power_after_channel_write():
     asyncio.run(_async_test_apply_light_channels_turns_on_after_channel_write())
 
 
@@ -1464,7 +1531,7 @@ async def _async_test_apply_light_channels_turns_on_after_channel_write():
     assert await device.async_apply_light_channels(values)
 
     device.async_set_channels.assert_awaited_once_with(values)
-    device.async_set_switch.assert_awaited_once_with("led_on_off", True)
+    device.async_set_switch.assert_not_awaited()
 
 
 def test_master_brightness_writes_every_scaled_channel():
@@ -3018,6 +3085,7 @@ def test_set_channels_skips_unchanged_targets_before_ble_connect():
 
 async def _async_test_set_channels_skips_unchanged_targets_before_ble_connect():
     device = _make_device()
+    device.values["led_on_off"] = True
     device.values.update(
         {
             "channel_1": 10,
