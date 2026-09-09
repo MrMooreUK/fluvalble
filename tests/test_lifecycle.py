@@ -157,6 +157,16 @@ async def _async_test_unload_stops_software_preview_task():
     assert entry.entry_id not in hass.data[DOMAIN]
 
 
+def test_static_path_supports_home_assistant_2024_1_api():
+    register = MagicMock()
+    hass = SimpleNamespace(data={DOMAIN: {}}, http=SimpleNamespace(register_static_path=register))
+    asyncio.run(_register_static_paths(hass))
+    asyncio.run(_register_static_paths(hass))
+    register.assert_called_once()
+    assert register.call_args.args[0] == "/fluvalble"
+    assert register.call_args.kwargs == {"cache_headers": False}
+
+
 def test_static_path_prefers_current_home_assistant_api(monkeypatch):
     """Use the collection-based API while retaining the legacy fallback."""
     asyncio.run(_async_test_static_path_prefers_current_home_assistant_api(monkeypatch))

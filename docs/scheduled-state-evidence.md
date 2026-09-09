@@ -114,5 +114,20 @@ The expanded check also verified missing-clock and active-preview `unknown`
 states, explicit Off without clock data, and `unavailable` when the device has
 neither a client nor discovery data needed to attempt controls.
 
+A separate real-HA config-entry check now passes on both versions as well. It
+starts with a version-one entry and exercises migration, all platforms, 18
+registered entities, unload/setup and the public reload operation. Entity IDs
+remain stable, there is one light entity, entity-bound callbacks are removed,
+and Bluetooth subscription registration/unregistration stays balanced. Card
+static-path registration succeeds. Only the radio/discovery boundary and initial
+device construction are simulated; the HA entry manager and entity platforms
+are real. No BLE client is created.
+
+This exposed two existing HA 2024.1 compatibility failures, now repaired:
+version-one migration uses direct version assignment on the legacy API (HA
+persists successful migrations), and static resources fall back to the actual
+legacy `register_static_path` method. Current HA retains its current APIs.
+Neither repair changes the minimum HA version or fixture protocol.
+
 Hardware validation has not been performed. This is expected output with HA's
 standard `assumed_state` flag, not confirmation of physical illumination.
