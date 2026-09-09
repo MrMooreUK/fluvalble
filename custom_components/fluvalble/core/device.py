@@ -2105,17 +2105,18 @@ class Device:
             ok = await self._async_send_packet(protocol.old_switch_packet(value))
 
         if not ok:
-            self.values = old_values
-            for handler in self.updates_component:
-                handler()
-        elif attr == "led_on_off" and not value and self.values.get("effect"):
+            # Reconnect/verification may have supplied newer fixture state.
+            # No optimistic mutation was made, so there is nothing to undo.
+            return False
+        self.values[attr] = value
+        if attr == "led_on_off" and not value and self.values.get("effect"):
             self._clear_effect_state()
-            for handler in self.updates_component:
-                handler()
-        if ok and attr == "led_on_off" and self.uses_classic_scheduled_state():
+        if attr == "led_on_off" and self.uses_classic_scheduled_state():
             # Retain a successful explicit power command in presentation; a
             # timer must not undo the user's off indication with the curve.
             self._scheduled_power_off = not value
+        for handler in self.updates_component:
+            handler()
         return ok
 
     @serialized_device_command

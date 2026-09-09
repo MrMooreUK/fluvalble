@@ -221,6 +221,72 @@ async def test_failed_plain_scheduled_turn_on_preserves_off_override(mode):
     device.async_apply_light_channels.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("requested", [False, True])
+@pytest.mark.parametrize("send_ok", [False, True])
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+async def test_power_write_preserves_reconnect_readback_and_notifies_final_state(requested, send_ok, transport):
+    device = device_with_schedule()
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd" if transport == "facebd" else "00001001",
+        wifi_facebd=transport == "facebd",
+        spp_transport=transport == "spp",
+    )
+    device.values["led_on_off"] = requested
+
+    async def prepare():
+        # A fresh connection reports newer fixture state than the idle cache.
+        device.values.update(mode="manual", led_on_off=not requested, channel_1=37)
+        return True
+
+    device._async_prepare_command = AsyncMock(side_effect=prepare)
+    device._async_send_packet = AsyncMock(return_value=send_ok)
+    observed = []
+    device.updates_component.append(lambda: observed.append(dict(device.values)))
+    assert await device.async_set_switch("led_on_off", requested) is send_ok
+    assert device.values["mode"] == "manual"
+    assert device.values["channel_1"] == 37
+    assert device.values["led_on_off"] is (requested if send_ok else not requested)
+    if send_ok:
+        assert observed[-1]["led_on_off"] is requested
+    builder = {
+        "classic": protocol.old_switch_packet,
+        "facebd": protocol.wifi_switch_packet,
+        "spp": protocol.spp_switch_packet,
+    }[transport]
+    device._async_send_packet.assert_awaited_once_with(builder(requested))
+
+
+@pytest.mark.asyncio
+async def test_power_prepare_failure_keeps_new_readback():
+    device = device_with_schedule()
+
+    async def prepare():
+        device.values.update(mode="manual", led_on_off=True, channel_1=37)
+        return False
+
+    device._async_prepare_command = AsyncMock(side_effect=prepare)
+    device._async_send_packet = AsyncMock()
+    assert not await device.async_set_switch("led_on_off", False)
+    assert device.values["mode"] == "manual"
+    assert device.values["led_on_off"] is True
+    assert device.values["channel_1"] == 37
+    device._async_send_packet.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_power_notification_includes_scheduled_override():
+    device = device_with_schedule()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    observed = []
+    device.updates_component.append(lambda: observed.append(device.expected_scheduled_on(at(12))))
+    assert await device.async_set_switch("led_on_off", False)
+    assert observed[-1] is False
+    assert await device.async_set_switch("led_on_off", True)
+    assert observed[-1] is True
+
+
 def prepare_save(mode, *, read=True, level=0):
     device = device_with_schedule()
     device.values["mode"] = mode
