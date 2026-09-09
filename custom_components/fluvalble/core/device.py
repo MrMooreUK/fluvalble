@@ -43,7 +43,7 @@ from .effects import (
 )
 from . import protocol
 from .products import product_from_id, product_id_from_manufacturer_data
-from .scheduled_state import interpolate_levels
+from .scheduled_state import interpolate_levels, weather_may_be_active
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -600,17 +600,41 @@ class Device:
             return False
         if self.native_preview_active or self.preview_task is not None:
             return None
-        # Weather animation output cannot be inferred from static ramps.
-        # Until its timing/output is modelled, do not project schedules with
-        # an enabled dynamic overlay as though they were purely static.
-        if any(window.get("enabled") for window in self.values.get("native_effect_schedule", [])):
-            return None
         moment = now or datetime.now().astimezone()
+        # Static ramps do not describe the instantaneous weather animation.
+        if weather_may_be_active(self.values.get("native_effect_schedule", []), moment):
+            return None
         levels = interpolate_levels(
             self._reported_schedule_points.get(str(self.values.get("mode")), ()),
             moment.hour * 60 + moment.minute,
         )
         return any(levels) if levels is not None else None
+
+    def _invalidate_schedule_projection(self, mode: str) -> None:
+        """Discard old readback immediately after a successful schedule write."""
+        key = "native_auto_schedule" if mode == "automatic" else "native_pro_schedule"
+        self.values.pop(key, None)
+        self.diagnostics.pop(key, None)
+        self._reported_schedule_points.pop(mode, None)
+
+    async def _async_read_schedule_projection(self, native_protocol: str) -> None:
+        """Refresh classic readback after a save, never from the display timer.
+
+        Submission and readback are distinct: a failed read must not restore
+        the previous schedule or turn a successful save into a failed save.
+        The save has already established a connection; no extra mode switch
+        or clock synchronization is needed here.
+        """
+        if native_protocol != "classic":
+            return
+        if self.client is not None:
+            try:
+                if not await self.client.request_state():
+                    _LOGGER.debug("Classic schedule saved; output projection awaits fresh readback")
+            except (TimeoutError, BleakError):
+                _LOGGER.debug("Unable to refresh classic schedule after save", exc_info=True)
+        for handler in self.updates_component:
+            handler()
 
     def _record_native_effect_schedule_readback(
         self,
@@ -1132,10 +1156,14 @@ class Device:
 
         if not await self._async_send_packet(packet):
             return False
+        if native_protocol == "classic":
+            self._invalidate_schedule_projection("automatic")
         if activate and not await self._async_send_packet(self._native_mode_packet("automatic")):
+            await self._async_read_schedule_projection(native_protocol)
             return False
         if activate:
             self.values["mode"] = "automatic"
+            self._scheduled_power_off = False
         # A successful write confirms submission, not readback. Discard any
         # older fixture copy so native preview cannot render stale levels.
         self.values.pop("native_auto_schedule", None)
@@ -1147,6 +1175,7 @@ class Device:
             }
         )
         self._notify_diagnostics_throttled()
+        await self._async_read_schedule_projection(native_protocol)
         return True
 
     @staticmethod
@@ -1297,10 +1326,14 @@ class Device:
 
         if not await self._async_send_packet(packet):
             return False
+        if native_protocol == "classic":
+            self._invalidate_schedule_projection("professional")
         if activate and not await self._async_send_packet(self._native_mode_packet("professional")):
+            await self._async_read_schedule_projection(native_protocol)
             return False
         if activate:
             self.values["mode"] = "professional"
+            self._scheduled_power_off = False
         self.values.pop("native_pro_schedule", None)
         self.diagnostics.update(
             {
@@ -1311,6 +1344,7 @@ class Device:
             }
         )
         self._notify_diagnostics_throttled()
+        await self._async_read_schedule_projection(native_protocol)
         return True
 
     @serialized_device_command

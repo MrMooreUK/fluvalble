@@ -2,13 +2,14 @@
 
 from copy import deepcopy
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.fluvalble.core.device import Device
 from custom_components.fluvalble.core import protocol
-from custom_components.fluvalble.core.scheduled_state import interpolate_levels
+from custom_components.fluvalble.core.scheduled_state import interpolate_levels, weather_may_be_active
 from custom_components.fluvalble.light import FluvalLight
 
 
@@ -178,3 +179,152 @@ async def test_successful_off_survives_schedule_ticks_and_failed_on():
     device._async_send_packet.return_value = True
     assert await device.async_select_option("mode", "automatic")
     assert device.expected_scheduled_on(at(12)) is True
+
+
+def prepare_save(mode, *, read=True, level=0):
+    device = device_with_schedule()
+    device.values["mode"] = mode
+    points = [{"minute": minute, **{f"channel_{i}": 100 for i in range(1, 6)}} for minute in (0, 480, 960, 1200)]
+    if mode == "professional":
+        device._record_native_schedule_readback(protocol_name="classic", professional=points)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+
+    async def readback():
+        if not read:
+            return False
+        if mode == "automatic":
+            body = bytes([1, 8, 0, 9, 0] + [level] * 5 + [19, 0, 20, 0] + [0] * 5)
+        else:
+            body = bytes([2, 4] + [value for hour in (0, 8, 16, 20) for value in [hour, 0] + [level] * 5])
+        return device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + body))
+
+    device.client = SimpleNamespace(
+        command_write_uuid="00001001-0000-1000-8000-00805f9b34fb",
+        wifi_facebd=False,
+        spp_transport=False,
+        plant_pro_spp=False,
+        request_state=AsyncMock(side_effect=readback),
+    )
+
+    async def save(*, activate=True):
+        if mode == "automatic":
+            return await device.async_set_native_auto_schedule(
+                {
+                    "sunrise": (8, 0, 60),
+                    "sunset": (20, 0, 60),
+                    "day_levels": [level] * 5,
+                    "night_levels": [0] * 5,
+                    "sleep": None,
+                },
+                activate=activate,
+            )
+        return await device.async_set_native_pro_schedule(
+            [{"hour": hour, "minute": 0, "levels": [level] * 5} for hour in (0, 8, 16, 20)], activate=activate
+        )
+
+    return device, save
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+@pytest.mark.parametrize("read", [False, True])
+async def test_save_replaces_projection_only_with_fresh_readback(mode, read):
+    device, save = prepare_save(mode, read=read)
+    assert device.expected_scheduled_on(at(12)) is True
+    assert await save()
+    assert device.expected_scheduled_on(at(12)) is (False if read else None)
+    device.client.request_state.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_successful_activation_releases_off_override(mode):
+    device, save = prepare_save(mode, level=100)
+    assert await device.async_set_switch("led_on_off", False)
+    assert device.expected_scheduled_on(at(12)) is False
+    assert await save()
+    assert device._scheduled_power_off is False
+    assert device.expected_scheduled_on(at(12)) is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_store_without_activation_preserves_explicit_off(mode):
+    device, save = prepare_save(mode, level=100)
+    device._scheduled_power_off = True
+    assert await save(activate=False)
+    assert device.expected_scheduled_on(at(12)) is False
+    device._async_send_packet.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_partial_save_invalidates_but_failed_write_keeps_readback(mode):
+    device, save = prepare_save(mode, read=False)
+    device._async_send_packet.side_effect = [False]
+    assert not await save()
+    assert device.expected_scheduled_on(at(12)) is True
+    device.client.request_state.assert_not_awaited()
+    device._async_send_packet.side_effect = [True, False]
+    assert not await save()
+    assert device.expected_scheduled_on(at(12)) is None
+    device.client.request_state.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_read_timeout_does_not_restore_old_projection(mode):
+    device, save = prepare_save(mode)
+    device.client.request_state.side_effect = TimeoutError
+    assert await save()
+    assert device.expected_scheduled_on(at(12)) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_failed_activation_does_not_release_explicit_off(mode):
+    device, save = prepare_save(mode, level=100)
+    device._scheduled_power_off = True
+    device._async_send_packet.side_effect = [True, False]
+    assert not await save()
+    assert device.expected_scheduled_on(at(12)) is False
+    device.client.request_state.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_newer_schedule_projection_refresh_does_not_read_or_notify():
+    device, _save = prepare_save("automatic")
+    update = MagicMock()
+    device.updates_component.append(update)
+    await device._async_read_schedule_projection("facebd")
+    await device._async_read_schedule_projection("spp")
+    device.client.request_state.assert_not_awaited()
+    update.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "hour,minute,active", [(12, 0, False), (19, 59, False), (20, 0, True), (20, 4, True), (20, 5, False)]
+)
+def test_weather_only_withholds_during_its_window(hour, minute, active):
+    device = device_with_schedule()
+    device.values["native_effect_schedule"] = [
+        {"enabled": True, "start": "20:00", "end": "20:05", "weekdays": [True] * 7}
+    ]
+    assert device.expected_scheduled_on(at(hour, minute)) is (None if active else True)
+
+
+def test_weather_weekdays_and_midnight_boundaries():
+    windows = [
+        {
+            "enabled": True,
+            "start": "23:00",
+            "end": "01:00",
+            "weekdays": [True, False, False, False, False, False, False],
+        }
+    ]
+    assert weather_may_be_active(windows, datetime(2026, 9, 7, 23, 0))
+    assert weather_may_be_active(windows, datetime(2026, 9, 8, 0, 59))
+    assert not weather_may_be_active(windows, datetime(2026, 9, 8, 1, 0))
+    assert not weather_may_be_active(windows, datetime(2026, 9, 8, 23, 0))
+    assert not weather_may_be_active(windows, datetime(2026, 9, 7, 0, 30))

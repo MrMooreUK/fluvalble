@@ -1,6 +1,46 @@
 """Read-only classic schedule projection; never sends fixture commands."""
 
 from collections.abc import Sequence
+from datetime import datetime
+from typing import Any
+
+
+def weather_may_be_active(windows: Sequence[dict[str, Any]], moment: datetime) -> bool:
+    """Limit static-output uncertainty to enabled timed-weather windows.
+
+    Weekday flags are Monday first, as in the integration's APK packet
+    encoder. For a midnight-spanning interval, the early-hours portion
+    belongs to the day on which the interval started.
+    """
+    minute = moment.hour * 60 + moment.minute
+    for window in windows:
+        if not window.get("enabled"):
+            continue
+        try:
+            start_h, start_m = map(int, window["start"].split(":"))
+            end_h, end_m = map(int, window["end"].split(":"))
+            days = window["weekdays"]
+            if not (0 <= start_h < 24 and 0 <= end_h < 24 and 0 <= start_m < 60 and 0 <= end_m < 60):
+                return True
+            if len(days) != 7 or any(not isinstance(day, bool) for day in days):
+                return True
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return True
+        start, end = start_h * 60 + start_m, end_h * 60 + end_m
+        weekday = moment.weekday()
+        if start < end:
+            active = start <= minute < end
+        elif start > end:
+            active = minute >= start or minute < end
+            if minute < end:
+                weekday = (weekday - 1) % 7
+        else:
+            # Equal endpoints have no established zero-duration semantics.
+            # Conservatively withhold static projection on enabled days.
+            active = True
+        if active and days[weekday]:
+            return True
+    return False
 
 
 def interpolate_levels(points: Sequence[tuple[int, tuple[int, ...]]], minute: int) -> tuple[int, ...] | None:

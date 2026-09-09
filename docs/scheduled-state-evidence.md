@@ -38,8 +38,14 @@ They calculate preview output; they are not a physical light-output sensor.
   failed commands do not change this override. Selecting a mode or successfully
   turning power on releases it. This adds no packet or mode-switch sequence.
 - Static projection is withheld during previews, without a successful clock
-  initialization/readback basis, or for enabled timed-weather overlays whose
-  instantaneous output is not described by the static channel curve.
+  initialization/readback basis, or during active timed-weather windows whose
+  instantaneous output is not described by the static channel curve. Weekday
+  and time-window filtering keeps normal reporting available outside them.
+- Successful classic schedule writes immediately invalidate the old projection,
+  even if subsequent activation fails. A parameter read after the save repopulates
+  it from the fixture; failed readback never restores the older projection.
+- Successful schedule activation clears the explicit Off override. Saving
+  without activation, failed writes and failed activation preserve it.
 - FACEBD/SPP reporting is unchanged. No assumption is made that their switch
   fields describe the same state as a classic schedule projection.
 
@@ -49,6 +55,8 @@ Tests cover four/five-channel Auto and Pro schedules, night and sleep behavior,
 midnight wrap, equal-time steps, tenth-percent ramps, actual classic response
 decoding, invalid readback, isolation from editable/manual caches, off-command
 precedence and failures, display-only ticks, and entity unload cleanup.
+Additional checks cover Auto/Pro save-readback transactions, read timeouts,
+partial activation failures, and timed-weather weekday/midnight boundaries.
 
 Hardware validation has not been performed. This is expected output with HA's
 standard `assumed_state` flag, not confirmation of physical illumination.

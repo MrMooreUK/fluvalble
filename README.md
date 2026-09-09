@@ -143,8 +143,13 @@ manual adjustments. A successful explicit off command takes precedence over
 the expected schedule until power is turned on or a mode is selected again.
 Normal idle Bluetooth disconnections retain the read-back schedule and last
 clock synchronization. Missing readback or clock initialization, active preview,
-or schedules with enabled weather overlays cannot provide this static output
-estimate. Power loss or changes made outside Home Assistant can also make an
+or an active timed-weather window cannot provide this static output estimate.
+Enabling a weather schedule does not disable reporting outside its time window
+and selected weekdays. After a classic schedule save, the integration discards
+the old forecast and requests fresh readback; a failed read cannot silently
+restore the old schedule. Successful activation releases an earlier Off override,
+while saving without activation preserves it.
+Power loss or changes made outside Home Assistant can also make an
 estimate inaccurate until the integration reconnects and reads the fixture again.
 Newer transport families retain their existing device-reported behaviour.
 
