@@ -594,10 +594,12 @@ class Device:
         disconnect does not erase the last clock synchronization or schedule.
         This is explicitly assumed state, not physical illumination telemetry.
         """
-        if not self.uses_classic_scheduled_state() or not self.diagnostics.get("clock_synced_at"):
+        if not self.uses_classic_scheduled_state():
             return None
         if self._scheduled_power_off:
             return False
+        if not self.diagnostics.get("clock_synced_at"):
+            return None
         if self.native_preview_active or self.preview_task is not None:
             return None
         moment = now or datetime.now().astimezone()

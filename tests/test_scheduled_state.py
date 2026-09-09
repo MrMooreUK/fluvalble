@@ -108,6 +108,24 @@ def test_incomplete_and_preview_do_not_reuse_manual_state():
     assert device.expected_scheduled_on(at(12)) is None
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [4, 5])
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+async def test_explicit_off_does_not_require_schedule_or_clock(count, mode):
+    device = device_with_schedule(count)
+    device.values["mode"] = mode
+    device.diagnostics.pop("clock_synced_at")
+    device._reported_schedule_points.clear()
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    assert device.expected_scheduled_on(at(12)) is None
+    assert await device.async_set_switch("led_on_off", False)
+    assert device.expected_scheduled_on(at(12)) is False
+    # On releases the override; it cannot manufacture missing schedule data.
+    assert await device.async_set_switch("led_on_off", True)
+    assert device.expected_scheduled_on(at(12)) is None
+
+
 @pytest.mark.parametrize("count", [4, 5])
 def test_actual_classic_response_populates_projection_and_invalid_read_clears_it(count):
     device = device_with_schedule(count)

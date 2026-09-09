@@ -38,6 +38,9 @@ They calculate preview output; they are not a physical light-output sensor.
 - Existing explicit successful power-off commands override the projection;
   failed commands do not change this override. Selecting a mode or successfully
   turning power on releases it. This adds no packet or mode-switch sequence.
+  A successful explicit Off does not require a schedule or synchronized clock
+  to retain its Off indication. Releasing that override does not substitute for
+  missing schedule/clock data.
 - Plain turn-on in classic Auto/Pro uses the existing power command even when
   cached Manual channels are zero. It does not apply a default colour or switch
   to Manual. Explicit colour and brightness requests retain their normal behavior.
@@ -93,6 +96,9 @@ an entity platform, verified published assumed-state attributes and a real
 without duplicate device callbacks. Containers had networking disabled, a
 read-only candidate checkout, temporary configuration, and no Bluetooth devices.
 This validates entity-platform behavior, not a full Bluetooth config-entry setup.
+The expanded check also verified missing-clock and active-preview `unknown`
+states, explicit Off without clock data, and `unavailable` when the device has
+neither a client nor discovery data needed to attempt controls.
 
 Hardware validation has not been performed. This is expected output with HA's
 standard `assumed_state` flag, not confirmation of physical illumination.
