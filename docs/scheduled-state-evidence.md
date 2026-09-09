@@ -129,5 +129,13 @@ persists successful migrations), and static resources fall back to the actual
 legacy `register_static_path` method. Current HA retains its current APIs.
 Neither repair changes the minimum HA version or fixture protocol.
 
+The lifecycle check also covers cached and delayed discovery, unloading before
+any discovery, and real HA light-service dispatch with simulated successful and
+failed writes. Both HA versions pass. On HA 2024.1, a real options update is
+checked to cause exactly one reload. This exposed and fixed a legacy-listener
+race: saving newly discovered identity data previously triggered a reload while
+late entities were being added. The fallback listener now compares options and
+ignores data-only updates. Current HA continues to use OptionsFlowWithReload.
+
 Hardware validation has not been performed. This is expected output with HA's
 standard `assumed_state` flag, not confirmation of physical illumination.

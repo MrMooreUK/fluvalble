@@ -798,7 +798,17 @@ def _register_legacy_options_reload(entry: ConfigEntry) -> None:
     """Retain options reloads on HA versions before OptionsFlowWithReload."""
     if hasattr(config_entries, "OptionsFlowWithReload"):
         return
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    previous_options = dict(entry.options)
+
+    async def options_updated(hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
+        nonlocal previous_options
+        current_options = dict(updated_entry.options)
+        if current_options == previous_options:
+            return
+        previous_options = current_options
+        await _async_update_listener(hass, updated_entry)
+
+    entry.async_on_unload(entry.add_update_listener(options_updated))
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
