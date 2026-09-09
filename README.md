@@ -145,7 +145,7 @@ Normal idle Bluetooth disconnections retain the read-back schedule and last
 clock synchronization. Missing readback or clock initialization, active preview,
 or an active timed-weather window cannot provide this static output estimate.
 Enabling a weather schedule does not disable reporting outside its time window
-and selected weekdays. After a classic schedule save, the integration discards
+and selected weekdays. After a classic Auto, Pro or timed-weather schedule save, the integration discards
 the old forecast and requests fresh readback; a failed read cannot silently
 restore the old schedule. Selecting a mode also refreshes its schedule and weather
 settings together, including automatic returns from manual adjustments.

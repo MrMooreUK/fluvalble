@@ -53,6 +53,10 @@ They calculate preview output; they are not a physical light-output sensor.
 - Each classic response replaces the active forecast and weather windows together.
   Inactive-mode forecasts are discarded; failed reads cannot combine an older
   schedule with missing or different weather settings.
+- Successful classic timed-weather writes also invalidate the forecast and
+  request active-mode readback. Submitted windows alone are not used to resume
+  projection. Failed writes preserve the preceding confirmed forecast, while a
+  failed read after a successful write leaves projection unavailable.
 - FACEBD/SPP reporting is unchanged. No assumption is made that their switch
   fields describe the same state as a classic schedule projection.
 
@@ -66,6 +70,8 @@ Additional checks cover Auto/Pro save-readback transactions, read timeouts,
 partial activation failures, and timed-weather weekday/midnight boundaries.
 Mode-selection checks cover reconnect readback, failed reads and matching
 schedule/weather snapshots when returning from Manual to Auto or Pro.
+Timed-weather save checks include readback differing from the submitted window,
+read failure, timeout, and failed-write preservation of the confirmed forecast.
 
 An isolated smoke check also passed against real Home Assistant 2024.1.0 and
 2026.7.2 (locally cached Docker images). It bootstrapped HA, added the light to

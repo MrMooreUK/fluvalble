@@ -378,3 +378,43 @@ def test_weather_weekdays_and_midnight_boundaries():
     assert not weather_may_be_active(windows, datetime(2026, 9, 8, 1, 0))
     assert not weather_may_be_active(windows, datetime(2026, 9, 8, 23, 0))
     assert not weather_may_be_active(windows, datetime(2026, 9, 7, 0, 30))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("read_result", [True, False, TimeoutError])
+async def test_weather_save_requires_fresh_projection_readback(read_result):
+    device = device_with_schedule(4)
+    # Fixture readback deliberately differs from the submitted window.
+    body = bytes([1, 8, 0, 9, 0] + [100] * 4 + [19, 0, 20, 0] + [0] * 4 + [255, 12, 0, 13, 0, 1])
+
+    async def read():
+        if read_result is TimeoutError:
+            raise TimeoutError
+        if not read_result:
+            return False
+        return device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + body))
+
+    device.client = SimpleNamespace(command_write_uuid="00001001", request_state=AsyncMock(side_effect=read))
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    window = dict(
+        enabled=True, weekdays=[True] * 7, start_hour=20, start_minute=0, end_hour=21, end_minute=0, effect_id=1
+    )
+    assert await device.async_set_native_effect_schedule([window])
+    device.client.request_state.assert_awaited_once()
+    assert device.expected_scheduled_on(at(12)) is None
+    assert device.expected_scheduled_on(at(13)) is (True if read_result is True else None)
+
+
+@pytest.mark.asyncio
+async def test_failed_weather_write_preserves_confirmed_projection():
+    device = device_with_schedule(4)
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=False)
+    device.client = SimpleNamespace(command_write_uuid="00001001", request_state=AsyncMock())
+    window = dict(
+        enabled=True, weekdays=[True] * 7, start_hour=12, start_minute=0, end_hour=13, end_minute=0, effect_id=1
+    )
+    assert not await device.async_set_native_effect_schedule([window])
+    assert device.expected_scheduled_on(at(12)) is True
+    device.client.request_state.assert_not_awaited()

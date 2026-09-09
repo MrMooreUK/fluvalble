@@ -618,11 +618,11 @@ class Device:
         self._reported_schedule_points.pop(mode, None)
 
     async def _async_read_schedule_projection(self, native_protocol: str) -> None:
-        """Refresh classic readback after a save, never from the display timer.
+        """Refresh classic readback after a write, never from the display timer.
 
         Submission and readback are distinct: a failed read must not restore
-        the previous schedule or turn a successful save into a failed save.
-        The save has already established a connection; no extra mode switch
+        the previous schedule or turn a successful write into a failed write.
+        The command has already established a connection; no extra mode switch
         or clock synchronization is needed here.
         """
         if native_protocol != "classic":
@@ -630,9 +630,9 @@ class Device:
         if self.client is not None:
             try:
                 if not await self.client.request_state():
-                    _LOGGER.debug("Classic schedule saved; output projection awaits fresh readback")
+                    _LOGGER.debug("Classic command sent; output projection awaits fresh readback")
             except (TimeoutError, BleakError):
-                _LOGGER.debug("Unable to refresh classic schedule after save", exc_info=True)
+                _LOGGER.debug("Unable to refresh classic schedule after command", exc_info=True)
         for handler in self.updates_component:
             handler()
 
@@ -1416,6 +1416,11 @@ class Device:
         )
         if native_protocol == "spp" and self.uses_plant_spectrum():
             self.diagnostics["plant_pro_effect_schedule"] = normalized
+        if native_protocol == "classic":
+            # Submitted weather settings are not fixture readback. Rebuild
+            # the active schedule/weather snapshot before projecting output.
+            self._reported_schedule_points.clear()
+            await self._async_read_schedule_projection(native_protocol)
         self._notify_diagnostics_throttled()
         return True
 
