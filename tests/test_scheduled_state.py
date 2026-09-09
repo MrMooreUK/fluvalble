@@ -332,6 +332,40 @@ async def test_mode_write_keeps_verification_readback(transport, send_ok):
         assert observed[-1] == "professional"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count", [4, 5])
+async def test_native_preview_takes_precedence_over_off_and_notifies(count):
+    device = device_with_schedule(count)
+    device._scheduled_power_off = True
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=True)
+    observed = []
+    device.updates_component.append(lambda: observed.append(device.expected_scheduled_on(at(12))))
+    assert device.expected_scheduled_on(at(12)) is False
+    assert await device.async_preview_native_schedule(720, "auto")
+    assert device.expected_scheduled_on(at(12)) is None
+    assert observed[-1] is None
+    device._async_send_packet.return_value = False
+    assert not await device.async_stop_preview()
+    assert device.native_preview_active
+    assert device.expected_scheduled_on(at(12)) is None
+    device._async_send_packet.return_value = True
+    assert await device.async_stop_preview()
+    assert observed[-1] is False
+    assert not device.native_preview_active
+
+
+@pytest.mark.asyncio
+async def test_failed_preview_start_keeps_prior_off_indication():
+    device = device_with_schedule()
+    device._scheduled_power_off = True
+    device._async_prepare_command = AsyncMock(return_value=True)
+    device._async_send_packet = AsyncMock(return_value=False)
+    assert not await device.async_preview_native_schedule(720, "auto")
+    assert not device.native_preview_active
+    assert device.expected_scheduled_on(at(12)) is False
+
+
 def prepare_save(mode, *, read=True, level=0):
     device = device_with_schedule()
     device.values["mode"] = mode

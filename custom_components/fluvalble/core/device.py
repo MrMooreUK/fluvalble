@@ -596,11 +596,11 @@ class Device:
         """
         if not self.uses_classic_scheduled_state():
             return None
+        if self.native_preview_active or self.preview_task is not None:
+            return None
         if self._scheduled_power_off:
             return False
         if not self.diagnostics.get("clock_synced_at"):
-            return None
-        if self.native_preview_active or self.preview_task is not None:
             return None
         moment = now or datetime.now().astimezone()
         # Static ramps do not describe the instantaneous weather animation.
@@ -1815,6 +1815,8 @@ class Device:
                 "preview_time": self._format_minute(minute),
             }
         )
+        for handler in self.updates_component:
+            handler()
         self._notify_diagnostics_throttled()
         return True
 
@@ -1870,6 +1872,8 @@ class Device:
                 self.native_preview_schedule_type = None
                 self.native_preview_restore_mode = None
                 self.diagnostics["status"] = "native_preview_interrupted"
+            for handler in self.updates_component:
+                handler()
             self._notify_diagnostics_throttled()
         return restored
 

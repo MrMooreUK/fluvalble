@@ -41,6 +41,10 @@ They calculate preview output; they are not a physical light-output sensor.
   A successful explicit Off does not require a schedule or synchronized clock
   to retain its Off indication. Releasing that override does not substitute for
   missing schedule/clock data.
+- An active preview temporarily takes precedence over the preceding Off
+  override. Native preview start/stop notifies light entities immediately after
+  changing the preview flag. Failed starts retain the previous indication;
+  failed stops keep the preview indication instead of claiming normal output.
 - Plain turn-on in classic Auto/Pro uses the existing power command even when
   cached Manual channels are zero. It does not apply a default colour or switch
   to Manual. Explicit colour and brightness requests retain their normal behavior.
