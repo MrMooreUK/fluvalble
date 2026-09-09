@@ -308,5 +308,4 @@ class FluvalLight(FluvalEntity, LightEntity):
         if not preview_stopped or not powered_off:
             self.internal_update()
             self._raise_command_error()
-        self._attr_is_on = False
-        self._async_write_ha_state()
+        self.internal_update()

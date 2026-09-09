@@ -80,6 +80,37 @@ def test_tenths_and_java_descending_truncation():
     assert interpolate_levels(points, 120) == (0, 0, 0, 0)
 
 
+@pytest.mark.parametrize("count", [4, 5])
+@pytest.mark.parametrize("shift", [0, 360, 900, 1380])
+@pytest.mark.parametrize("sleep", [False, True])
+def test_full_day_matches_apk_auto_segment_walk(count, shift, sleep):
+    # Independent transcription of AutoFragment.getBright's segment walk:
+    # no sorting, explicit midnight branch, separate rising/falling arithmetic.
+    day = tuple([100, 1, 37, 0, 63][:count])
+    night = tuple([1, 0, 2, 0, 4][:count])
+    points = [(480, (0,) * count if sleep else night), (541, day), (1140, day), (1207, night)]
+    if sleep:
+        points.extend([(1320, night), (1320, (0,) * count)])
+    points = [((minute + shift) % 1440, levels) for minute, levels in points]
+    for minute in range(1440):
+        expected = [0] * count
+        for index, (start, levels) in enumerate(points):
+            end, next_levels = points[(index + 1) % len(points)]
+            if end >= start:
+                if not start <= minute < end:
+                    continue
+                duration, elapsed = end - start, minute - start
+            else:
+                if minute < start and minute >= end:
+                    continue
+                duration = 1440 - start + end
+                elapsed = minute - start if minute >= start else 1440 - start + minute
+            for channel, (low, high) in enumerate(zip(levels, next_levels, strict=True)):
+                delta = abs(high - low) * 10 * elapsed // duration
+                expected[channel] = low * 10 + (delta if high >= low else -delta)
+        assert interpolate_levels(points, minute) == tuple(expected), (minute, points)
+
+
 def test_equal_time_steps_select_last_point():
     points = [(480, (0,) * 4), (480, (100,) * 4), (1200, (100,) * 4), (1200, (0,) * 4)]
     assert interpolate_levels(points, 479) == (0,) * 4
@@ -398,6 +429,36 @@ async def test_reported_control_state_wins_over_requested_state(transport, field
         assert await device.async_set_switch(field, True) is send_ok
     assert device.values["mode"] == "manual"
     assert device.values["led_on_off"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+async def test_light_off_preserves_actual_on_readback_and_effect(transport):
+    device = device_with_schedule(4)
+    device.values.update(mode="manual", led_on_off=True, effect="Sun")
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd" if transport == "facebd" else "00001001",
+        wifi_facebd=transport == "facebd",
+        spp_transport=transport == "spp",
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+
+    async def send(_packet):
+        if transport == "classic":
+            body = bytes([0, 1, 1] + [0] * 8 + [0] * 16)
+            assert device.decode_update_packet(protocol.old_packet(protocol.OLD_READ_PARAMS + body))
+        elif transport == "facebd":
+            device._decode_wifi_update({protocol.WIFI_SWITCH_KEY: True})
+        else:
+            device._decode_spp_update({protocol.SPP_SWITCH_KEY: True})
+        return True
+
+    device._async_send_packet = AsyncMock(side_effect=send)
+    entity = FluvalLight(device, "light")
+    await entity.async_turn_off()
+    assert device.values["led_on_off"] is True
+    assert device.values["effect"]
+    assert entity._attr_is_on is True
 
 
 def prepare_save(mode, *, read=True, level=0):

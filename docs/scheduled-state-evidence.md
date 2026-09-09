@@ -58,6 +58,9 @@ They calculate preview output; they are not a physical light-output sensor.
   Per-field readback revisions distinguish a submitted command from a power or
   mode value actually decoded during the write. Fresh fixture reports take
   precedence, including reports equal to the previous cached value.
+  The light entity also renders that final device state after Off rather than
+  forcing its own false value. Effect state is only cleared when the resulting
+  power state is Off, not when fresh readback still reports On.
 - Static projection is withheld during previews, without a successful clock
   initialization/readback basis, or during active timed-weather windows whose
   instantaneous output is not described by the static channel curve. Weekday
@@ -89,6 +92,10 @@ Tests cover four/five-channel Auto and Pro schedules, night and sleep behavior,
 midnight wrap, equal-time steps, tenth-percent ramps, actual classic response
 decoding, invalid readback, isolation from editable/manual caches, off-command
 precedence and failures, display-only ticks, and entity unload cleanup.
+An independent transcription of the APK Auto segment walk is compared with the
+projection for all 1,440 minutes of 16 four-/five-channel schedules, including
+midnight rotations and sleep transitions (23,040 comparisons). This is a source
+cross-check, not execution of the Android application or fixture firmware.
 Additional checks cover Auto/Pro save-readback transactions, read timeouts,
 partial activation failures, and timed-weather weekday/midnight boundaries.
 Mode-selection checks cover reconnect readback, failed reads and matching

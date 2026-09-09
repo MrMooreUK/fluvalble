@@ -2115,7 +2115,7 @@ class Device:
             return False
         if self._control_readback_revision.get(attr, 0) == readback_revision:
             self.values[attr] = value
-        if attr == "led_on_off" and not value and self.values.get("effect"):
+        if attr == "led_on_off" and not self.values[attr] and self.values.get("effect"):
             self._clear_effect_state()
         if attr == "led_on_off" and self.uses_classic_scheduled_state():
             # Retain a successful explicit power command in presentation; a
