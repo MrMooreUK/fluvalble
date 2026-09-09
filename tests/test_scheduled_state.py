@@ -287,6 +287,33 @@ async def test_power_notification_includes_scheduled_override():
     assert observed[-1] is True
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+@pytest.mark.parametrize("send_ok", [False, True])
+async def test_mode_write_keeps_verification_readback(transport, send_ok):
+    device = device_with_schedule()
+    device.client = SimpleNamespace(
+        command_write_uuid="facebd" if transport == "facebd" else "00001001",
+        wifi_facebd=transport == "facebd",
+        spp_transport=transport == "spp",
+        request_state=AsyncMock(return_value=False),
+    )
+    device._async_prepare_command = AsyncMock(return_value=True)
+
+    async def send(_packet):
+        device.values.update(mode="manual", channel_1=37)
+        return send_ok
+
+    device._async_send_packet = AsyncMock(side_effect=send)
+    observed = []
+    device.updates_component.append(lambda: observed.append(device.values["mode"]))
+    assert await device.async_select_option("mode", "professional") is send_ok
+    assert device.values["channel_1"] == 37
+    assert device.values["mode"] == ("professional" if send_ok else "manual")
+    if send_ok:
+        assert observed[-1] == "professional"
+
+
 def prepare_save(mode, *, read=True, level=0):
     device = device_with_schedule()
     device.values["mode"] = mode

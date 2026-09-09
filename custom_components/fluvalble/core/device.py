@@ -2292,11 +2292,6 @@ class Device:
             _LOGGER.warning("Cannot set Fluval mode before BLE device is available")
             return False
 
-        # Connection initialization can read the previous mode. Apply the
-        # requested mode only after that read, and preserve it for rollback.
-        old_values = dict(self.values)
-        self.values[attr] = option
-
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE[option]))
         elif self._uses_spp_protocol():
@@ -2305,6 +2300,9 @@ class Device:
             ok = await self._async_send_packet(protocol.old_mode_packet(MODE_TO_CODE[option]))
 
         if ok:
+            # Preserve readback received during reconnect or verification;
+            # only commit our requested mode once the write succeeds.
+            self.values[attr] = option
             self._scheduled_power_off = False
             if not self._uses_wifi_protocol() and not self._uses_spp_protocol():
                 # Read the selected mode's complete packet, including weather
@@ -2313,8 +2311,10 @@ class Device:
                 self.values["native_effect_schedule"] = []
                 self.diagnostics["native_schedule_protocol"] = "classic"
                 await self._async_read_schedule_projection("classic")
+            else:
+                for handler in self.updates_component:
+                    handler()
         if not ok:
-            self.values = old_values
             for handler in self.updates_component:
                 handler()
         return ok

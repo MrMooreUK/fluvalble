@@ -43,11 +43,11 @@ They calculate preview output; they are not a physical light-output sensor.
   to Manual. Explicit colour and brightness requests retain their normal behavior.
   `OldLightKxtKt.createLightSwitchValueForOld` constructs the separate `6803`
   power command without channel data; no protocol bytes are changed here.
-- Shared power-state bookkeeping now commits the requested value after a
+- Shared power and mode bookkeeping now commits the requested value after a
   successful write, then notifies entities after updating the classic Off
   override. Failed preparation or writes preserve fresh reconnect/verification
   readback instead of restoring the older idle cache. Classic, FACEBD and SPP
-  still use their existing power packet builders.
+  still use their existing power and mode packet builders.
 - Static projection is withheld during previews, without a successful clock
   initialization/readback basis, or during active timed-weather windows whose
   instantaneous output is not described by the static channel curve. Weekday
@@ -59,7 +59,9 @@ They calculate preview output; they are not a physical light-output sensor.
   without activation, failed writes and failed activation preserve it.
 - Classic mode selection requests fresh active-mode parameters, including when
   restoring a mode after manual channel adjustments. Reconnection readback is
-  completed before applying the requested mode, so it cannot overwrite the request.
+  completed before committing the requested mode, so it cannot overwrite the request.
+  Failed mode writes also retain fresh verification readback rather than rolling
+  back the complete device state.
 - Each classic response replaces the active forecast and weather windows together.
   Inactive-mode forecasts are discarded; failed reads cannot combine an older
   schedule with missing or different weather settings.
@@ -67,8 +69,9 @@ They calculate preview output; they are not a physical light-output sensor.
   request active-mode readback. Submitted windows alone are not used to resume
   projection. Failed writes preserve the preceding confirmed forecast, while a
   failed read after a successful write leaves projection unavailable.
-- FACEBD/SPP reporting is unchanged. No assumption is made that their switch
-  fields describe the same state as a classic schedule projection.
+- FACEBD/SPP continue to use their existing reported switch fields, not the
+  classic schedule projection. The shared command-state fixes apply to these
+  transports as well, without changing their protocol or schedule calculations.
 
 ## Verification
 
