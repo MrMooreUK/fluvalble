@@ -93,6 +93,7 @@ def test_legacy_options_flow_registers_one_reload_listener(monkeypatch):
     """Supported older HA versions retain one listener-based reload path."""
     remove_listener = MagicMock()
     entry = SimpleNamespace(
+        options={"active_time": 30},
         add_update_listener=MagicMock(return_value=remove_listener),
         async_on_unload=MagicMock(),
     )
@@ -100,8 +101,19 @@ def test_legacy_options_flow_registers_one_reload_listener(monkeypatch):
 
     _register_legacy_options_reload(entry)
 
-    entry.add_update_listener.assert_called_once_with(_async_update_listener)
+    entry.add_update_listener.assert_called_once()
     entry.async_on_unload.assert_called_once_with(remove_listener)
+
+    listener = entry.add_update_listener.call_args.args[0]
+    hass = SimpleNamespace(config_entries=SimpleNamespace(async_reload=AsyncMock()))
+    entry.entry_id = "entry_1"
+    entry.data = {"model": "Plant 3.0"}
+    asyncio.run(listener(hass, entry))
+    hass.config_entries.async_reload.assert_not_awaited()
+    entry.options = {"active_time": 0}
+    asyncio.run(listener(hass, entry))
+    asyncio.run(listener(hass, entry))
+    hass.config_entries.async_reload.assert_awaited_once_with("entry_1")
 
 
 def test_legacy_options_listener_reloads_once():
@@ -155,6 +167,16 @@ async def _async_test_unload_stops_software_preview_task():
     assert background_task.cancelled()
     assert not runtime.background_tasks
     assert entry.entry_id not in hass.data[DOMAIN]
+
+
+def test_static_path_supports_home_assistant_2024_1_api():
+    register = MagicMock()
+    hass = SimpleNamespace(data={DOMAIN: {}}, http=SimpleNamespace(register_static_path=register))
+    asyncio.run(_register_static_paths(hass))
+    asyncio.run(_register_static_paths(hass))
+    register.assert_called_once()
+    assert register.call_args.args[0] == "/fluvalble"
+    assert register.call_args.kwargs == {"cache_headers": False}
 
 
 def test_static_path_prefers_current_home_assistant_api(monkeypatch):

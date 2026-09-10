@@ -365,6 +365,7 @@ def _stub_homeassistant():
     # ---- homeassistant.helpers.event ----
     ha_event = types.ModuleType("homeassistant.helpers.event")
     ha_event.async_track_point_in_time = MagicMock(return_value=MagicMock())
+    ha_event.async_track_time_interval = MagicMock(return_value=MagicMock())
 
     # ---- homeassistant.util.dt ----
     ha_util = types.ModuleType("homeassistant.util")

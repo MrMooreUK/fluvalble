@@ -28,8 +28,9 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Local-first control** | Talk directly to the LED fixture over BLE; no internet, cloud account, or app login required. |
 | **Native light control** | Use Home Assistant's standard light card for power, brightness, colour, and supported controller-native effects. Product-specific FluvalConnect data translates the colour picker to the fixture's physical channels. |
 | **Exact channel controls** | Adjust every physical emitter with the same 0–100% channel layout and product-specific labels used by FluvalConnect. These sliders remain the authoritative control for exact spectrum tuning. |
-| **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. |
+| **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. Turning off an active classic weather effect clears its manual channels before powering off, so the effect is not retained for the next On. |
 | **Native fixture schedules** | Store Auto, Professional, and timed-effect schedules directly on supported fixtures so they continue running without Home Assistant. |
+| **Scheduled on/off indication** | Classic lights show expected Auto/Pro on/off state from the fixture's read-back schedule and synchronized clock, marked as assumed state. No lighting commands are sent to update the display. |
 | **Daylight-saving control** | Supported fixtures expose their onboard daylight-saving setting as a configuration switch. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
@@ -126,6 +127,35 @@ Home Assistant. The report retains protocol, profile, connection, command, and
 schedule evidence while removing Bluetooth addresses, names, manufacturer and
 service payloads, paths, and registry identifiers. Creating the report does not
 disconnect, scan for, reconnect to, or send commands to the light.
+
+### Scheduled on/off indication
+
+In **Automatic** or **Professional** mode, classic Bluetooth lights (including
+Plant 3.0) return their schedule rather than live LED output. The light entity
+therefore follows that schedule for its expected on/off indication, updating
+locally every 30 seconds. Home Assistant marks it as **assumed state**, with
+`state_source: fixture_schedule`; it is not physical confirmation of illumination.
+The fixture still runs its own schedule independently of Home Assistant.
+Plain on/off commands preserve classic Auto/Pro mode; explicit colour or
+brightness adjustments remain manual controls.
+
+Manual colour and brightness are not displayed as though they were current
+scheduled output. The existing colour/channel controls remain available for
+manual adjustments. A successful explicit off command takes precedence over
+the expected schedule until power is turned on or a mode is selected again.
+Normal idle Bluetooth disconnections retain the read-back schedule and last
+clock synchronization. Missing readback or clock initialization, active preview,
+or an active timed-weather window cannot provide this static output estimate.
+Enabling a weather schedule does not disable reporting outside its time window
+and selected weekdays. After a classic Auto, Pro or timed-weather schedule save, the integration discards
+the old forecast and requests fresh readback; a failed read cannot silently
+restore the old schedule. Selecting a mode also refreshes its schedule and weather
+settings together, including automatic returns from manual adjustments.
+Successful activation releases an earlier Off override,
+while saving without activation preserves it.
+Power loss or changes made outside Home Assistant can also make an
+estimate inaccurate until the integration reconnects and reads the fixture again.
+Newer transport families retain their existing device-reported behaviour.
 
 ### Integration options
 

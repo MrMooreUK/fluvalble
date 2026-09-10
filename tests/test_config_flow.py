@@ -59,6 +59,22 @@ def test_version_one_config_entry_migrates_without_changing_user_data():
     assert entry.options == {"lamp_profile": "plant", "active_time": 120}
 
 
+def test_legacy_migration_uses_mutable_entry_version():
+    from custom_components.fluvalble import async_migrate_entry
+
+    class LegacyManager:
+        def async_update_entry(self, entry, *, data=None, options=None):
+            raise AssertionError("No data/options need updating")
+
+    entry = config_entries.ConfigEntry(version=1, data={"mac": "AA:BB:CC:DD:EE:FF"}, options={"active_time": 0})
+    hass = MagicMock()
+    hass.config_entries = LegacyManager()
+    assert asyncio.run(async_migrate_entry(hass, entry))
+    assert entry.version == 2
+    assert entry.data == {"mac": "AA:BB:CC:DD:EE:FF"}
+    assert entry.options == {"active_time": 0}
+
+
 def test_current_config_entry_version_is_accepted_without_rewrite():
     """A version-two entry is already current and requires no mutation."""
     from custom_components.fluvalble import async_migrate_entry

@@ -43,6 +43,7 @@ from .effects import (
 )
 from . import protocol
 from .products import product_from_id, product_id_from_manufacturer_data
+from .scheduled_state import interpolate_levels, weather_may_be_active
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -209,6 +210,11 @@ class Device:
         self.native_preview_schedule_type: str | None = None
         self.native_preview_restore_mode: str | None = None
         self._clock_synced = False
+        # Immutable readback projections, separate from editable schedule and
+        # manual channel caches used by commands.
+        self._reported_schedule_points: dict[str, tuple[tuple[int, tuple[int, ...]], ...]] = {}
+        self._scheduled_power_off = False
+        self._control_readback_revision = {"mode": 0, "led_on_off": 0}
         self._clock_sync_started = False
         self._clock_sync_lock = asyncio.Lock()
         self._command_transaction_lock = asyncio.Lock()
@@ -553,6 +559,18 @@ class Device:
         if professional is not None:
             self.values["native_pro_schedule"] = professional
             self.diagnostics["native_pro_schedule"] = professional
+        if protocol_name == "classic":
+            for mode, schedule in (("automatic", auto), ("professional", professional)):
+                if schedule is None:
+                    continue
+                points = self._classic_auto_preview_points(schedule) if mode == "automatic" else schedule
+                try:
+                    self._reported_schedule_points[mode] = tuple(
+                        (int(point["minute"]), tuple(int(point[channel]) for channel in self.numbers()))
+                        for point in points
+                    )
+                except (KeyError, TypeError, ValueError):
+                    self._reported_schedule_points.pop(mode, None)
         self.diagnostics.update(
             {
                 "native_schedule_protocol": protocol_name,
@@ -560,6 +578,66 @@ class Device:
             }
         )
         return True
+
+    def uses_classic_scheduled_state(self) -> bool:
+        """Whether the active classic mode omits live channel/power readback."""
+        return (
+            self.diagnostics.get("native_schedule_protocol") == "classic"
+            and not self._uses_wifi_protocol()
+            and not self._uses_spp_protocol()
+            and self.values.get("mode") in ("automatic", "professional")
+        )
+
+    def expected_scheduled_on(self, now: datetime | None = None) -> bool | None:
+        """Project stored fixture output without mutating command state.
+
+        Use the same host-local wall time as old_clock_packet. A normal idle
+        disconnect does not erase the last clock synchronization or schedule.
+        This is explicitly assumed state, not physical illumination telemetry.
+        """
+        if not self.uses_classic_scheduled_state():
+            return None
+        if self.native_preview_active or self.preview_task is not None:
+            return None
+        if self._scheduled_power_off:
+            return False
+        if not self.diagnostics.get("clock_synced_at"):
+            return None
+        moment = now or datetime.now().astimezone()
+        # Static ramps do not describe the instantaneous weather animation.
+        if weather_may_be_active(self.values.get("native_effect_schedule", []), moment):
+            return None
+        levels = interpolate_levels(
+            self._reported_schedule_points.get(str(self.values.get("mode")), ()),
+            moment.hour * 60 + moment.minute,
+        )
+        return any(levels) if levels is not None else None
+
+    def _invalidate_schedule_projection(self, mode: str) -> None:
+        """Discard old readback immediately after a successful schedule write."""
+        key = "native_auto_schedule" if mode == "automatic" else "native_pro_schedule"
+        self.values.pop(key, None)
+        self.diagnostics.pop(key, None)
+        self._reported_schedule_points.pop(mode, None)
+
+    async def _async_read_schedule_projection(self, native_protocol: str) -> None:
+        """Refresh classic readback after a write, never from the display timer.
+
+        Submission and readback are distinct: a failed read must not restore
+        the previous schedule or turn a successful write into a failed write.
+        The command has already established a connection; no extra mode switch
+        or clock synchronization is needed here.
+        """
+        if native_protocol != "classic":
+            return
+        if self.client is not None:
+            try:
+                if not await self.client.request_state():
+                    _LOGGER.debug("Classic command sent; output projection awaits fresh readback")
+            except (TimeoutError, BleakError):
+                _LOGGER.debug("Unable to refresh classic schedule after command", exc_info=True)
+        for handler in self.updates_component:
+            handler()
 
     def _record_native_effect_schedule_readback(
         self,
@@ -832,10 +910,7 @@ class Device:
         if not await self.async_set_channels(values):
             return False
         self.clear_commanded_light()
-        if not any(values.values()):
-            return True
-        if not self.values.get("led_on_off"):
-            return await self.async_set_switch("led_on_off", True)
+        # Channel application owns power sequencing, not delayed cached state.
         return True
 
     def supports_classic_effects(self) -> bool:
@@ -1081,10 +1156,14 @@ class Device:
 
         if not await self._async_send_packet(packet):
             return False
+        if native_protocol == "classic":
+            self._invalidate_schedule_projection("automatic")
         if activate and not await self._async_send_packet(self._native_mode_packet("automatic")):
+            await self._async_read_schedule_projection(native_protocol)
             return False
         if activate:
             self.values["mode"] = "automatic"
+            self._scheduled_power_off = False
         # A successful write confirms submission, not readback. Discard any
         # older fixture copy so native preview cannot render stale levels.
         self.values.pop("native_auto_schedule", None)
@@ -1096,6 +1175,7 @@ class Device:
             }
         )
         self._notify_diagnostics_throttled()
+        await self._async_read_schedule_projection(native_protocol)
         return True
 
     @staticmethod
@@ -1246,10 +1326,14 @@ class Device:
 
         if not await self._async_send_packet(packet):
             return False
+        if native_protocol == "classic":
+            self._invalidate_schedule_projection("professional")
         if activate and not await self._async_send_packet(self._native_mode_packet("professional")):
+            await self._async_read_schedule_projection(native_protocol)
             return False
         if activate:
             self.values["mode"] = "professional"
+            self._scheduled_power_off = False
         self.values.pop("native_pro_schedule", None)
         self.diagnostics.update(
             {
@@ -1260,6 +1344,7 @@ class Device:
             }
         )
         self._notify_diagnostics_throttled()
+        await self._async_read_schedule_projection(native_protocol)
         return True
 
     @serialized_device_command
@@ -1331,6 +1416,11 @@ class Device:
         )
         if native_protocol == "spp" and self.uses_plant_spectrum():
             self.diagnostics["plant_pro_effect_schedule"] = normalized
+        if native_protocol == "classic":
+            # Submitted weather settings are not fixture readback. Rebuild
+            # the active schedule/weather snapshot before projecting output.
+            self._reported_schedule_points.clear()
+            await self._async_read_schedule_projection(native_protocol)
         self._notify_diagnostics_throttled()
         return True
 
@@ -1522,7 +1612,11 @@ class Device:
         if not targets:
             return False
 
-        if not force and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items()):
+        if (
+            not force
+            and bool(any(targets.values())) == bool(self.values.get("led_on_off"))
+            and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items())
+        ):
             _LOGGER.debug("Skipping Fluval channel write because targets are unchanged: %s", targets)
             return True
 
@@ -1583,6 +1677,8 @@ class Device:
     ) -> bool:
         """Send the current channel values to the controller."""
         channel_index = self.numbers().index(single_channel) if single_channel is not None else None
+        # Build from a snapshot: power writes can deliver older channel state.
+        channel_values = self._channel_values()
         if self._uses_wifi_protocol():
             any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
@@ -1591,9 +1687,9 @@ class Device:
                     self.values = old_values
                     return False
             packet = (
-                protocol.wifi_single_zone_packet(channel_index, self.values[single_channel])
+                protocol.wifi_single_zone_packet(channel_index, channel_values[channel_index])
                 if channel_index is not None and single_channel is not None
-                else protocol.wifi_all_zone_packet(self._channel_values())
+                else protocol.wifi_all_zone_packet(channel_values)
             )
             ok = await self._async_send_packet(packet)
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
@@ -1608,9 +1704,9 @@ class Device:
                     self.values = old_values
                     return False
             packet = (
-                protocol.spp_single_zone_packet(channel_index, self.values[single_channel])
+                protocol.spp_single_zone_packet(channel_index, channel_values[channel_index])
                 if channel_index is not None and single_channel is not None
-                else protocol.spp_all_zone_packet(self._channel_values())
+                else protocol.spp_all_zone_packet(channel_values)
             )
             ok = await self._async_send_packet(packet)
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
@@ -1619,14 +1715,14 @@ class Device:
                     self.values["led_on_off"] = False
         else:
             any_channel_on = any(self._channel_values())
-            # Establish power before applying the 6804 channel frame, matching
-            # the app's switch-then-manual-colour ordering for an off fixture.
+            # The classic hardware capture showed that staging channels while
+            # off did not survive the next On. Establish power first.
             if any_channel_on and (force_power or not self.values["led_on_off"]):
                 if not await self._async_send_packet(protocol.old_switch_packet(True)):
                     self.values = old_values
                     return False
                 self.values["led_on_off"] = True
-            ok = await self._async_send_packet(protocol.old_all_zone_packet(self._channel_values()))
+            ok = await self._async_send_packet(protocol.old_all_zone_packet(channel_values))
             if ok and not any_channel_on and self.values["led_on_off"]:
                 ok = await self._async_send_packet(protocol.old_switch_packet(False))
                 if ok:
@@ -1723,6 +1819,8 @@ class Device:
                 "preview_time": self._format_minute(minute),
             }
         )
+        for handler in self.updates_component:
+            handler()
         self._notify_diagnostics_throttled()
         return True
 
@@ -1778,6 +1876,8 @@ class Device:
                 self.native_preview_schedule_type = None
                 self.native_preview_restore_mode = None
                 self.diagnostics["status"] = "native_preview_interrupted"
+            for handler in self.updates_component:
+                handler()
             self._notify_diagnostics_throttled()
         return restored
 
@@ -2004,9 +2104,20 @@ class Device:
             _LOGGER.warning("Cannot set Fluval switch before BLE device is available")
             return False
 
-        old_values = dict(self.values)
-        self.values[attr] = value
-
+        readback_revision = self._control_readback_revision.get(attr, 0)
+        effect_cleared = True
+        if (
+            attr == "led_on_off"
+            and not value
+            and self.values.get("led_on_off")
+            and self.values.get("effect")
+            and self.values.get("mode") == "manual"
+            and self.supports_classic_effects()
+        ):
+            # The APK exits weather through manual channels. Hardware product
+            # 328 confirmed zero-then-Off clears weather retained by bare Off.
+            # Still attempt Off if the preceding channel write fails.
+            effect_cleared = await self._async_send_packet(protocol.old_all_zone_packet([0] * len(self.numbers())))
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_switch_packet(value))
         elif self._uses_spp_protocol():
@@ -2015,14 +2126,20 @@ class Device:
             ok = await self._async_send_packet(protocol.old_switch_packet(value))
 
         if not ok:
-            self.values = old_values
-            for handler in self.updates_component:
-                handler()
-        elif attr == "led_on_off" and not value and self.values.get("effect"):
+            # Reconnect/verification may have supplied newer fixture state.
+            # No optimistic mutation was made, so there is nothing to undo.
+            return False
+        if self._control_readback_revision.get(attr, 0) == readback_revision:
+            self.values[attr] = value
+        if attr == "led_on_off" and not self.values[attr] and self.values.get("effect"):
             self._clear_effect_state()
-            for handler in self.updates_component:
-                handler()
-        return ok
+        if attr == "led_on_off" and self.uses_classic_scheduled_state():
+            # Retain a successful explicit power command in presentation; a
+            # timer must not undo the user's off indication with the curve.
+            self._scheduled_power_off = not value
+        for handler in self.updates_component:
+            handler()
+        return ok and effect_cleared
 
     @serialized_device_command
     async def async_set_daylight_saving_time(self, enabled: bool) -> bool:
@@ -2197,9 +2314,7 @@ class Device:
             _LOGGER.warning("Cannot set Fluval mode before BLE device is available")
             return False
 
-        old_values = dict(self.values)
-        self.values[attr] = option
-
+        readback_revision = self._control_readback_revision[attr]
         if self._uses_wifi_protocol():
             ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE[option]))
         elif self._uses_spp_protocol():
@@ -2207,8 +2322,23 @@ class Device:
         else:
             ok = await self._async_send_packet(protocol.old_mode_packet(MODE_TO_CODE[option]))
 
+        if ok:
+            # Preserve readback received during reconnect or verification;
+            # only commit our requested mode once the write succeeds.
+            if self._control_readback_revision[attr] == readback_revision:
+                self.values[attr] = option
+            self._scheduled_power_off = False
+            if not self._uses_wifi_protocol() and not self._uses_spp_protocol():
+                # Read the selected mode's complete packet, including weather
+                # windows. Never reuse an inactive mode's older forecast.
+                self._reported_schedule_points.clear()
+                self.values["native_effect_schedule"] = []
+                self.diagnostics["native_schedule_protocol"] = "classic"
+                await self._async_read_schedule_projection("classic")
+            else:
+                for handler in self.updates_component:
+                    handler()
         if not ok:
-            self.values = old_values
             for handler in self.updates_component:
                 handler()
         return ok
@@ -2694,10 +2824,19 @@ class Device:
 
         mode = int(decoded["mode"])
         body = decoded["body"]
+        if self.values.get("mode") != MODES[mode]:
+            self._scheduled_power_off = False
         self.values["mode"] = MODES[mode]
+        self._control_readback_revision["mode"] += 1
+        self.diagnostics["native_schedule_protocol"] = "classic"
+        # A classic packet describes just one mode. Keep its schedule and
+        # effect windows together; inactive-mode forecasts are not reusable.
+        self._reported_schedule_points.clear()
+        self.values["native_effect_schedule"] = []
 
         if self.values["mode"] == "manual":
             self.values["led_on_off"] = bool(decoded["power"])
+            self._control_readback_revision["led_on_off"] += 1
             if self.supports_classic_effects():
                 self._store_native_effect_code(int(decoded["effect_id"]))
             presets = [list(preset) for preset in decoded["presets"]]
@@ -2755,10 +2894,12 @@ class Device:
             mode = data[protocol.WIFI_MODE_KEY]
             if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
+                self._control_readback_revision["mode"] += 1
                 updated = True
 
         if protocol.WIFI_SWITCH_KEY in data and isinstance(data[protocol.WIFI_SWITCH_KEY], bool):
             self.values["led_on_off"] = data[protocol.WIFI_SWITCH_KEY]
+            self._control_readback_revision["led_on_off"] += 1
             updated = True
 
         if protocol.WIFI_DST_KEY in data and isinstance(data[protocol.WIFI_DST_KEY], bool):
@@ -2834,10 +2975,12 @@ class Device:
             mode = data[protocol.SPP_MODE_KEY]
             if not isinstance(mode, bool) and isinstance(mode, int) and 0 <= mode < len(MODES):
                 self.values["mode"] = MODES[mode]
+                self._control_readback_revision["mode"] += 1
                 updated = True
 
         if protocol.SPP_SWITCH_KEY in data and isinstance(data[protocol.SPP_SWITCH_KEY], bool):
             self.values["led_on_off"] = data[protocol.SPP_SWITCH_KEY]
+            self._control_readback_revision["led_on_off"] += 1
             updated = True
 
         present = 0

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta
+
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
     ATTR_EFFECT,
@@ -14,6 +16,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 
 from . import require_entry_runtime_data
 from .core.device import Device
@@ -51,6 +54,16 @@ class FluvalLight(FluvalEntity, LightEntity):
     _attr_icon = "mdi:led-strip-variant"
     _attr_rgb_color: tuple[int, int, int] | None = None
 
+    async def async_added_to_hass(self) -> None:
+        """Refresh schedule presentation locally; remove the timer on unload."""
+        await super().async_added_to_hass()
+        self.async_on_remove(async_track_time_interval(self.hass, self._async_schedule_tick, timedelta(seconds=30)))
+
+    async def _async_schedule_tick(self, _now: datetime) -> None:
+        """Advance display only, without connecting or writing to the lamp."""
+        if self.device.uses_classic_scheduled_state():
+            self.internal_update()
+
     def __init__(self, device: Device, attr: str) -> None:
         super().__init__(device, attr)
         self._update_effect_capabilities()
@@ -64,11 +77,30 @@ class FluvalLight(FluvalEntity, LightEntity):
             self._attr_color_mode = ColorMode.RGB
             self._attr_supported_color_modes = {ColorMode.RGB}
 
+        self.internal_update()
+
     def internal_update(self) -> None:
         """Refresh the entity from decoded fixture state."""
         self._attr_available = self.device.controls_available
         self._attr_is_on = bool(self.device.values.get("led_on_off"))
         self._update_effect_capabilities()
+
+        self._attr_assumed_state = self.device.uses_classic_scheduled_state()
+        if self._attr_assumed_state:
+            self._attr_is_on = self.device.expected_scheduled_on()
+            self._attr_extra_state_attributes = {"state_source": "fixture_schedule"}
+            # The cached Manual colour/effect is not scheduled-mode output.
+            # Keep a supported colour mode so manual controls remain valid;
+            # report no colour/brightness sample rather than a stale sample.
+            self._attr_color_mode = ColorMode.BRIGHTNESS if self.device.light_mode() == "brightness" else ColorMode.RGB
+            self._attr_brightness = None
+            self._attr_rgb_color = None
+            self._attr_rgbw_color = None
+            self._attr_effect = EFFECT_NONE if self._attr_effect_list else None
+            if self.hass:
+                self._async_write_ha_state()
+            return
+        self._attr_extra_state_attributes = None
 
         if self.device.values.get("effect"):
             # Fluval effects do not expose adjustable colour or brightness.
@@ -156,7 +188,9 @@ class FluvalLight(FluvalEntity, LightEntity):
             self.internal_update()
             return
 
-        if self.device.master_brightness() > 0:
+        # Auto/Pro readback does not populate Manual channels. Their cached
+        # zero values must not turn a plain power action into a colour write.
+        if self.device.uses_classic_scheduled_state() or self.device.master_brightness() > 0:
             if not await self.device.async_set_switch("led_on_off", True):
                 self._raise_command_error()
             self.internal_update()
@@ -249,8 +283,6 @@ class FluvalLight(FluvalEntity, LightEntity):
         if not await self.device.async_set_master_brightness(round(brightness / 255 * 100)):
             return False
         self.device.clear_commanded_light()
-        if not self.device.values.get("led_on_off") and not await self.device.async_set_switch("led_on_off", True):
-            return False
         channels = {channel: int(self.device.values[channel]) for channel in self.device.numbers()}
         self.device.remember_commanded_light(
             channels,
@@ -260,7 +292,7 @@ class FluvalLight(FluvalEntity, LightEntity):
         return True
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Turn off the fixture without rewriting its colour channels."""
+        """Turn off the fixture, clearing retained classic weather if active."""
         async with self.device.command_transaction():
             await self._async_turn_off(**kwargs)
 
@@ -274,5 +306,4 @@ class FluvalLight(FluvalEntity, LightEntity):
         if not preview_stopped or not powered_off:
             self.internal_update()
             self._raise_command_error()
-        self._attr_is_on = False
-        self._async_write_ha_state()
+        self.internal_update()

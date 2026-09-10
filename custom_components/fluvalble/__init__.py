@@ -77,7 +77,14 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Migrate historical Fluval config entries to the current schema."""
     if entry.version == 1:
         _LOGGER.info("Migrating Fluval config entry %s from version 1 to 2", entry.entry_id)
-        hass.config_entries.async_update_entry(entry, version=CONFIG_ENTRY_VERSION)
+        update_entry = hass.config_entries.async_update_entry
+        parameters = inspect.signature(update_entry).parameters
+        if "version" in parameters or any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
+            update_entry(entry, version=CONFIG_ENTRY_VERSION)
+        else:
+            # HA 2024.1 migrations mutate the version directly; the config
+            # entry manager schedules persistence after migration succeeds.
+            entry.version = CONFIG_ENTRY_VERSION
         return True
 
     return entry.version == CONFIG_ENTRY_VERSION
@@ -791,7 +798,17 @@ def _register_legacy_options_reload(entry: ConfigEntry) -> None:
     """Retain options reloads on HA versions before OptionsFlowWithReload."""
     if hasattr(config_entries, "OptionsFlowWithReload"):
         return
-    entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    previous_options = dict(entry.options)
+
+    async def options_updated(hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
+        nonlocal previous_options
+        current_options = dict(updated_entry.options)
+        if current_options == previous_options:
+            return
+        previous_options = current_options
+        await _async_update_listener(hass, updated_entry)
+
+    entry.async_on_unload(entry.add_update_listener(options_updated))
 
 
 async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -807,6 +824,8 @@ async def _register_static_paths(hass: HomeAssistant) -> None:
     static_path = str(Path(__file__).parent / "www")
     register_many = getattr(hass.http, "async_register_static_paths", None)
     register_one = getattr(hass.http, "async_register_static_path", None)
+    if register_one is None:
+        register_one = getattr(hass.http, "register_static_path", None)
 
     try:
         if register_many is not None:
