@@ -74,6 +74,11 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
         domain="button",
         unique_id="AABBCCDDEEFF_test_led_channels",
     )
+    connection_mode = SimpleNamespace(
+        entity_id="sensor.fluval_connection_mode",
+        domain="sensor",
+        unique_id="AABBCCDDEEFF_connection_mode",
+    )
     advertisement_source = SimpleNamespace(
         entity_id="sensor.fluval_bluetooth_advertisement_source",
         domain="sensor",
@@ -95,6 +100,7 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
             refresh,
             channel_test,
             advertisement_source,
+            connection_mode,
         ]
     )
     monkeypatch.setitem(
@@ -126,6 +132,7 @@ def test_retired_platform_and_diagnostic_entities_are_removed(monkeypatch):
         refresh.entity_id,
         channel_test.entity_id,
         advertisement_source.entity_id,
+        connection_mode.entity_id,
     ]
 
 
@@ -153,7 +160,7 @@ def test_mac_is_removed_from_legacy_serial_number(monkeypatch):
     device_registry.async_update_device.assert_called_once_with("device_1", serial_number=None)
 
 
-def test_persistent_connection_disables_only_stale_rssi(monkeypatch):
+def test_enabled_diagnostics_are_not_disabled(monkeypatch):
     integration_disabled = object()
     user_disabled = object()
 
@@ -182,14 +189,12 @@ def test_persistent_connection_disables_only_stale_rssi(monkeypatch):
     entity_registry.async_entries_for_config_entry = MagicMock(return_value=[rssi, last_seen, source])
     monkeypatch.setitem(sys.modules, "homeassistant.helpers.entity_registry", entity_registry)
 
-    _sync_connection_diagnostic_registry_entries(MagicMock(), SimpleNamespace(entry_id="entry_1"), 0)
+    _sync_connection_diagnostic_registry_entries(MagicMock(), SimpleNamespace(entry_id="entry_1"))
 
-    assert registry.async_update_entity.call_args_list == [
-        ((rssi.entity_id,), {"disabled_by": integration_disabled}),
-    ]
+    registry.async_update_entity.assert_not_called()
 
 
-def test_persistent_connection_restores_connected_since(monkeypatch):
+def test_retired_persistent_setting_restores_last_seen(monkeypatch):
     integration_disabled = object()
 
     last_seen = SimpleNamespace(
@@ -204,7 +209,7 @@ def test_persistent_connection_restores_connected_since(monkeypatch):
     entity_registry.async_entries_for_config_entry = MagicMock(return_value=[last_seen])
     monkeypatch.setitem(sys.modules, "homeassistant.helpers.entity_registry", entity_registry)
 
-    _sync_connection_diagnostic_registry_entries(MagicMock(), SimpleNamespace(entry_id="entry_1"), 0)
+    _sync_connection_diagnostic_registry_entries(MagicMock(), SimpleNamespace(entry_id="entry_1"))
 
     registry.async_update_entity.assert_called_once_with(last_seen.entity_id, disabled_by=None)
 
@@ -233,7 +238,7 @@ def test_timed_connection_restores_only_integration_disabled_diagnostics(monkeyp
     entity_registry.async_entries_for_config_entry = MagicMock(return_value=[integration_disabled, user_disabled])
     monkeypatch.setitem(sys.modules, "homeassistant.helpers.entity_registry", entity_registry)
 
-    _sync_connection_diagnostic_registry_entries(MagicMock(), SimpleNamespace(entry_id="entry_1"), 30)
+    _sync_connection_diagnostic_registry_entries(MagicMock(), SimpleNamespace(entry_id="entry_1"))
 
     registry.async_update_entity.assert_called_once_with(
         integration_disabled.entity_id,

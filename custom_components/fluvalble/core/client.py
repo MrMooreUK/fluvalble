@@ -352,7 +352,7 @@ class Client:
             return client
 
     def _on_disconnected(self, client: BleakClient) -> None:
-        """Update state and restore an opted-in persistent connection."""
+        """Clear the disconnected session and wake an existing heartbeat."""
         if client is not self.client:
             return
 
@@ -365,11 +365,6 @@ class Client:
         # Wake the heartbeat so it stops using the disconnected client.
         if self.ping_future:
             self.ping_future.cancel()
-
-        if self._stopping or self._active_time != 0:
-            return
-        if not self.ping_task or self.ping_task.done():
-            self.ping()
 
     async def ensure_connected(self) -> bool:
         """Connect far enough to resolve the live GATT profile."""
@@ -390,10 +385,7 @@ class Client:
 
     def ping(self):
         """Start the ping task to periodically talk to the Fluval."""
-        if self._active_time == 0:
-            self.ping_time = float("inf")
-        else:
-            self.ping_time = time.time() + self._active_time
+        self.ping_time = time.time() + self._active_time
 
         if not self.ping_task:
             self.ping_task = asyncio.create_task(self._ping_loop())
@@ -495,7 +487,7 @@ class Client:
             if self.status_callback:
                 self.status_callback(False)
         finally:
-            if not self._stopping and (connected or self._active_time == 0):
+            if not self._stopping and connected:
                 self.ping()
 
     async def _initialize_session(self, client: BleakClient) -> bool:
@@ -544,8 +536,7 @@ class Client:
         while time.time() < self.ping_time and not self._stopping:
             try:
                 # Reconnect only after any command using the old link has
-                # finished its failure handling. This also makes the heartbeat
-                # the single owner of persistent reconnect cycles.
+                # finished its failure handling, within the finite idle window.
                 async with self._command_lock:
                     client = await self._ensure_client()
                 if not await self._initialize_session(client):

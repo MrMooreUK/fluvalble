@@ -34,19 +34,6 @@ class FluvalSensor(FluvalEntity, SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_entity_registry_enabled_default = True
 
-    def __init__(self, device: Device, attr: str) -> None:
-        """Initialize a diagnostic sensor."""
-        if attr == "rssi":
-            # Persistent GATT sessions do not provide meaningful advertisement
-            # RSSI values. Keep the registry row so switching back to a timed
-            # connection can restore the same entity.
-            self._attr_entity_registry_enabled_default = not device.is_persistent_connection()
-        super().__init__(device, attr)
-        if attr == "last_seen" and device.is_persistent_connection():
-            # Preserve the entity's unique ID while describing the timestamp
-            # that is meaningful for an open GATT session.
-            self._attr_translation_key = "connected_since"
-
     def internal_update(self):
         """Update sensor state from the device."""
         attribute = self.device.attribute(self.attr)

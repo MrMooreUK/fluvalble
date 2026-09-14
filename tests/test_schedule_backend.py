@@ -1,54 +1,25 @@
-"""Tests for saved schedules and fixture-native scheduling."""
+"""Tests for light actions and fixture-owned schedule readback."""
 
 import asyncio
 import inspect
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
-
 import pytest
 import voluptuous as vol
-
 from custom_components.fluvalble import (
     DOMAIN,
-    EFFECT_CATALOG,
     FluvalRuntimeData,
     SERVICE_RECALL_MANUAL_PRESET,
-    SERVICE_PREVIEW_SCHEDULE,
     SERVICE_SAVE_MANUAL_PRESET,
     SERVICE_SET_CHANNELS,
     _register_services,
-    _async_schedule_payload,
-    _async_save_effect_schedule,
-    _async_load_schedule,
-    _async_load_schedule_data,
-    _async_migrate_legacy_auto_schedule,
-    _async_save_schedule,
-    _validate_native_auto_schedule,
-    _validate_native_effect_windows,
-    _validate_native_pro_points,
     _validate_manual_preset_slot,
-    _async_upload_native_schedule,
     _native_schedule_readback,
     _normalize_effect_schedule,
-    _validate_schedule_points,
-    async_set_schedule_mode,
+    _async_schedule_payload,
 )
 from custom_components.fluvalble.core.device import Device
-
-
-class _MemoryStore:
-    data = None
-
-    def __init__(self, *args, **kwargs):
-        pass
-
-    async def async_load(self):
-        return self.__class__.data
-
-    async def async_save(self, data):
-        self.__class__.data = data
 
 
 class _FakeHass:
@@ -81,34 +52,6 @@ def _make_device(*, product_id=None):
     )
     device.connected = True
     return device
-
-
-def _schedule_points():
-    return [
-        {"time": "08:00", "red": 0, "green": 0, "blue": 0, "white": 0},
-        {"time": "12:00", "red": 10, "green": 10, "blue": 10, "white": 10},
-        {"time": "19:00", "red": 3, "green": 0, "blue": 8, "white": 0},
-        {"time": "20:00", "red": 0, "green": 0, "blue": 0, "white": 0},
-    ]
-
-
-def _canonical_schedule_points():
-    return [
-        {
-            "time": point["time"],
-            "channel_1": point.get("red", 0),
-            "channel_2": point.get("green", 0),
-            "channel_3": point.get("blue", 0),
-            "channel_4": point.get("white", 0),
-            "channel_5": point.get("channel_5", 0),
-        }
-        for point in _schedule_points()
-    ]
-
-
-def test_schedule_validator_rejects_malformed_points():
-    with pytest.raises(vol.Invalid):
-        _validate_schedule_points([{"time": "not-a-time"}, {"time": "20:00"}])
 
 
 @pytest.mark.parametrize("slot", [1, 2, 3, 4])
@@ -158,39 +101,6 @@ async def _async_test_set_channels_service_reports_ble_write_failure():
         {"channel_1": 50},
         transition=0,
         step_seconds=0.1,
-    )
-
-
-def test_preview_schedule_service_reports_start_failure():
-    asyncio.run(_async_test_preview_schedule_service_reports_start_failure())
-
-
-async def _async_test_preview_schedule_service_reports_start_failure():
-    from homeassistant.exceptions import HomeAssistantError
-
-    device = _make_device()
-    device.async_preview_schedule = AsyncMock(return_value=False)
-    device.diagnostics["last_error"] = "Unable to stop the previous preview"
-    hass = _FakeHass(device)
-    _register_services(hass)
-
-    points = _schedule_points()
-    with pytest.raises(HomeAssistantError, match="Unable to stop the previous preview"):
-        await hass.services.handlers[(DOMAIN, SERVICE_PREVIEW_SCHEDULE)](
-            SimpleNamespace(
-                data={
-                    "entry_id": "entry_1",
-                    "points": points,
-                    "duration": 60,
-                    "step_seconds": 2,
-                }
-            )
-        )
-
-    device.async_preview_schedule.assert_awaited_once_with(
-        points,
-        duration=60,
-        step_seconds=2,
     )
 
 
@@ -373,390 +283,11 @@ async def _async_test_unloaded_light_is_a_translated_operational_error():
 def test_service_descriptions_use_device_picker_and_fixture_language():
     source = (Path(__file__).parents[1] / "custom_components" / "fluvalble" / "services.yaml").read_text()
 
-    assert source.count("integration: fluvalble") == 10
+    assert source.count("integration: fluvalble") == 3
     assert "entry_id:" not in source
     assert "MAC address" not in source
     for internal_label in ("classic/OLD", "FACEBD", "FFF0", "SPP", "MESH", "product ID"):
         assert internal_label not in source
-
-
-def test_schedule_validator_limits_schedule_size():
-    points = [{"time": "00:00"}, {"time": "00:01"}] * 49
-    with pytest.raises(vol.Invalid):
-        _validate_schedule_points(points)
-
-
-def test_schedule_validator_rejects_unknown_fields():
-    with pytest.raises(vol.Invalid):
-        _validate_schedule_points([{"time": "19:00", "unexpected": 1}, {"time": "20:00"}])
-
-
-def test_schedule_validator_normalizes_missing_channels():
-    validated = _validate_schedule_points([{"time": "19:00", "blue": 8}, {"time": "20:00"}])
-    assert validated[0] == {
-        "time": "19:00",
-        "channel_1": 0,
-        "channel_2": 0,
-        "channel_3": 8,
-        "channel_4": 0,
-        "channel_5": 0,
-    }
-
-
-def test_schedule_validator_accepts_canonical_channels_and_rejects_conflicts():
-    points = [
-        {"time": "19:00", "channel_1": 3, "channel_3": 8},
-        {"time": "20:00"},
-    ]
-    assert _validate_schedule_points(points)[0] == {
-        "time": "19:00",
-        "channel_1": 3,
-        "channel_2": 0,
-        "channel_3": 8,
-        "channel_4": 0,
-        "channel_5": 0,
-    }
-    with pytest.raises(vol.Invalid, match="channel_1 and its legacy alias red"):
-        _validate_schedule_points([{"time": "19:00", "channel_1": 3, "red": 3}, {"time": "20:00"}])
-
-
-def test_native_auto_schedule_validator_normalizes_fixture_payload():
-    schedule = _validate_native_auto_schedule(
-        {
-            "sunrise": "08:00",
-            "sunrise_ramp": 60,
-            "sunset": "20:30",
-            "sunset_ramp": 45,
-            "sleep": "23:15",
-            "day": {
-                "red": 80,
-                "blue": 70,
-                "cool_white": 60,
-                "warm_white": 50,
-                "amber": 40,
-            },
-            "night": {
-                "red": 0,
-                "blue": 5,
-                "cool_white": 0,
-                "warm_white": 0,
-                "amber": 0,
-            },
-        }
-    )
-
-    assert schedule["sunrise"] == (8, 0, 60)
-    assert schedule["sunset"] == (20, 30, 45)
-    assert schedule["day_levels"] == [80, 70, 60, 50, 40]
-
-
-def test_native_auto_schedule_validator_accepts_canonical_channel_order():
-    schedule = _validate_native_auto_schedule(
-        {
-            "sunrise": "08:00",
-            "sunrise_ramp": 60,
-            "sunset": "20:30",
-            "sunset_ramp": 45,
-            "day": {f"channel_{index}": index * 10 for index in range(1, 6)},
-            "night": {f"channel_{index}": 0 for index in range(1, 6)},
-        }
-    )
-
-    assert schedule["day_levels"] == [10, 20, 30, 40, 50]
-    assert schedule["night_levels"] == [0, 0, 0, 0, 0]
-
-
-def test_native_auto_schedule_validator_accepts_four_channel_fixture_order():
-    schedule = _validate_native_auto_schedule(
-        {
-            "sunrise": "08:00",
-            "sunrise_ramp": 60,
-            "sunset": "20:30",
-            "sunset_ramp": 45,
-            "day": {f"channel_{index}": index * 10 for index in range(1, 5)},
-            "night": {f"channel_{index}": 0 for index in range(1, 5)},
-        }
-    )
-
-    assert schedule["day_levels"] == [10, 20, 30, 40]
-    assert schedule["night_levels"] == [0, 0, 0, 0]
-
-
-def test_native_auto_schedule_validator_rejects_mixed_fixture_channel_counts():
-    schedule = {
-        "sunrise": "08:00",
-        "sunrise_ramp": 60,
-        "sunset": "20:30",
-        "sunset_ramp": 45,
-        "day": {f"channel_{index}": 0 for index in range(1, 5)},
-        "night": {f"channel_{index}": 0 for index in range(1, 6)},
-    }
-
-    with pytest.raises(vol.Invalid, match="same fixture channel count"):
-        _validate_native_auto_schedule(schedule)
-
-
-def test_native_pro_and_effect_validators_normalize_service_objects():
-    points = _validate_native_pro_points(
-        [
-            {
-                "time": "08:00",
-                "red": 0,
-                "blue": 0,
-                "cool_white": 0,
-                "warm_white": 0,
-                "amber": 0,
-            },
-            {
-                "time": "12:30",
-                "red": 80,
-                "blue": 70,
-                "cool_white": 60,
-                "warm_white": 50,
-                "amber": 40,
-            },
-            {
-                "time": "20:00",
-                "red": 0,
-                "blue": 0,
-                "cool_white": 0,
-                "warm_white": 0,
-                "amber": 0,
-            },
-            {
-                "time": "22:00",
-                "red": 0,
-                "blue": 0,
-                "cool_white": 0,
-                "warm_white": 0,
-                "amber": 0,
-            },
-        ]
-    )
-    windows = _validate_native_effect_windows(
-        [
-            {
-                "start": "12:00",
-                "end": "12:10",
-                "effect": "Thunderstorm",
-                "weekdays": ["monday", "wednesday", "friday"],
-            }
-        ]
-    )
-
-    assert points == [
-        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
-        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
-        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
-        {"hour": 22, "minute": 0, "levels": [0, 0, 0, 0, 0]},
-    ]
-    assert windows[0]["effect"] == "Thunderstorm"
-    assert windows[0]["weekdays"] == [True, False, True, False, True, False, False]
-
-
-def test_native_pro_validator_accepts_canonical_channel_order():
-    points = _validate_native_pro_points(
-        [
-            {
-                "time": f"{hour:02d}:00",
-                **{f"channel_{index}": hour + index for index in range(1, 6)},
-            }
-            for hour in (8, 12, 20, 22)
-        ]
-    )
-
-    assert points[0] == {"hour": 8, "minute": 0, "levels": [9, 10, 11, 12, 13]}
-
-
-def test_native_pro_validator_rejects_mixed_fixture_channel_counts():
-    points = [
-        {
-            "time": f"{hour:02d}:00",
-            **{f"channel_{index}": 0 for index in range(1, count + 1)},
-        }
-        for hour, count in ((8, 4), (12, 5), (20, 4), (22, 4))
-    ]
-
-    with pytest.raises(vol.Invalid, match="same fixture channel count"):
-        _validate_native_pro_points(points)
-
-
-def test_native_effect_validator_accepts_classic_and_facebd_weather_catalog():
-    windows = _validate_native_effect_windows(
-        [
-            {
-                "start": "22:00",
-                "end": "22:10",
-                "effect": "Crescent moon",
-            }
-        ]
-    )
-
-    assert windows[0]["effect"] == "Crescent moon"
-    assert windows[0]["weekdays"] == [True] * 7
-
-
-def test_native_effect_validator_matches_apk_weekday_rules():
-    with pytest.raises(vol.Invalid, match="only one effect window"):
-        _validate_native_effect_windows(
-            [
-                {
-                    "start": "12:00",
-                    "end": "12:10",
-                    "effect": "Thunderstorm",
-                    "weekdays": ["monday"],
-                },
-                {
-                    "start": "13:00",
-                    "end": "13:10",
-                    "effect": "Lightning",
-                    "weekdays": ["monday"],
-                },
-            ]
-        )
-
-    with pytest.raises(vol.Invalid, match="at least one weekday"):
-        _validate_native_effect_windows([{"start": "12:00", "end": "12:10", "effect": "Thunderstorm", "weekdays": []}])
-
-    with pytest.raises(vol.Invalid, match="cannot both be 00:00"):
-        _validate_native_effect_windows([{"start": "00:00", "end": "00:00", "effect": "Thunderstorm"}])
-
-
-def test_save_and_load_schedule_data(monkeypatch):
-    asyncio.run(_async_test_save_and_load_schedule_data(monkeypatch))
-
-
-async def _async_test_save_and_load_schedule_data(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    _MemoryStore.data = None
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    hass = _FakeHass()
-    points = _schedule_points()
-    canonical_points = _canonical_schedule_points()
-
-    await _async_save_schedule(hass, "entry_1", points, mode="auto")
-
-    assert await _async_load_schedule(hass, "entry_1") == canonical_points
-    assert await _async_load_schedule_data(hass, "entry_1") == {
-        "points": canonical_points,
-        "mode": "auto",
-        "effect_windows": None,
-        "effect_catalog": None,
-    }
-
-
-def test_save_schedule_preserves_existing_mode(monkeypatch):
-    asyncio.run(_async_test_save_schedule_preserves_existing_mode(monkeypatch))
-
-
-async def _async_test_save_schedule_preserves_existing_mode(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": [], "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-    points = _schedule_points()
-
-    await _async_save_schedule(_FakeHass(), "entry_1", points)
-
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "auto"
-    assert _MemoryStore.data["schedules"]["entry_1"]["points"] == _canonical_schedule_points()
-
-
-def test_control_schedule_mode_updates_the_saved_schedule(monkeypatch):
-    asyncio.run(_async_test_removed_ha_auto_mode_is_rejected(monkeypatch))
-
-
-async def _async_test_removed_ha_auto_mode_is_rejected(monkeypatch):
-    import custom_components.fluvalble as integration
-    from homeassistant.exceptions import ServiceValidationError
-
-    device = _make_device()
-    hass = _FakeHass(device)
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": _schedule_points(), "mode": "manual"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    with pytest.raises(ServiceValidationError) as raised:
-        await async_set_schedule_mode(hass, "entry_1", "auto")
-
-    assert raised.value.translation_domain == DOMAIN
-    assert raised.value.translation_key == "unsupported_schedule_mode"
-    assert raised.value.translation_placeholders == {"mode": "auto"}
-
-
-def test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch):
-    asyncio.run(_async_test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch))
-
-
-async def _async_test_native_schedule_mode_uploads_once_to_the_fixture(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.async_set_native_pro_schedule = AsyncMock(return_value=True)
-    hass = _FakeHass(device)
-    points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "manual"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    await async_set_schedule_mode(hass, "entry_1", "native")
-
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "native"
-    device.async_set_native_pro_schedule.assert_awaited_once_with(_canonical_schedule_points(), activate=True)
-
-
-def test_native_schedule_upload_rejects_more_than_twelve_points():
-    asyncio.run(_async_test_native_schedule_upload_rejects_more_than_twelve_points())
-
-
-async def _async_test_native_schedule_upload_rejects_more_than_twelve_points():
-    device = _make_device()
-    device.async_set_native_pro_schedule = AsyncMock(return_value=True)
-    points = [{"time": f"{hour:02d}:00"} for hour in range(13)]
-
-    assert not await _async_upload_native_schedule(_FakeHass(device), "entry_1", points)
-    device.async_set_native_pro_schedule.assert_not_awaited()
-    assert device.diagnostics["native_schedule_last_result"] == "invalid_point_count"
-
-
-def test_failed_native_mode_upload_does_not_replace_working_mode(monkeypatch):
-    asyncio.run(_async_test_failed_native_mode_upload_does_not_replace_working_mode(monkeypatch))
-
-
-async def _async_test_failed_native_mode_upload_does_not_replace_working_mode(monkeypatch):
-    import custom_components.fluvalble as integration
-    from homeassistant.exceptions import HomeAssistantError
-
-    device = _make_device()
-    device.async_set_native_pro_schedule = AsyncMock(return_value=False)
-    device.diagnostics["last_error"] = "write failed"
-    hass = _FakeHass(device)
-    points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "manual"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    with pytest.raises(HomeAssistantError, match="write failed"):
-        await async_set_schedule_mode(hass, "entry_1", "native")
-
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "manual"
-
-
-def test_load_schedule_supports_legacy_list_records(monkeypatch):
-    asyncio.run(_async_test_load_schedule_supports_legacy_list_records(monkeypatch))
-
-
-async def _async_test_load_schedule_supports_legacy_list_records(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": points}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    assert await _async_load_schedule_data(_FakeHass(), "entry_1") == {
-        "points": _canonical_schedule_points(),
-        "mode": "manual",
-        "effect_windows": None,
-        "effect_catalog": None,
-    }
 
 
 def test_effect_schedule_normalizes_submitted_and_fixture_shapes():
@@ -787,157 +318,12 @@ def test_effect_schedule_normalizes_submitted_and_fixture_shapes():
     assert _normalize_effect_schedule([{"start": "12:00"}]) is None
 
 
-def test_saving_effect_schedule_preserves_professional_curve(monkeypatch):
-    asyncio.run(_async_test_saving_effect_schedule_preserves_professional_curve(monkeypatch))
-
-
-async def _async_test_saving_effect_schedule_preserves_professional_curve(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "native"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    await _async_save_effect_schedule(
-        _FakeHass(),
-        "entry_1",
-        [
-            {
-                "start_hour": 12,
-                "start_minute": 0,
-                "end_hour": 12,
-                "end_minute": 10,
-                "effect_id": 1,
-                "weekdays": [True, False, False, False, False, False, False],
-                "enabled": True,
-            }
-        ],
-    )
-
-    assert _MemoryStore.data["schedules"]["entry_1"] == {
-        "points": _canonical_schedule_points(),
-        "mode": "native",
-        "effect_windows": [
-            {
-                "start": "12:00",
-                "end": "12:10",
-                "effect": "Thunderstorm",
-                "weekdays": ["monday"],
-                "enabled": True,
-            }
-        ],
-        "effect_catalog": EFFECT_CATALOG,
-    }
-
-
-def test_manual_schedule_mode_disables_fixture_scheduler(monkeypatch):
-    asyncio.run(_async_test_manual_schedule_mode_disables_fixture_scheduler(monkeypatch))
-
-
-async def _async_test_manual_schedule_mode_disables_fixture_scheduler(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.values["mode"] = "professional"
-    device.async_select_option = AsyncMock(return_value=True)
-    points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "native"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    await async_set_schedule_mode(_FakeHass(device), "entry_1", "manual")
-
-    device.async_select_option.assert_awaited_once_with("mode", "manual")
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "manual"
-
-
-def test_legacy_auto_schedule_migrates_to_fixture(monkeypatch):
-    asyncio.run(_async_test_legacy_auto_schedule_migrates_to_fixture(monkeypatch))
-
-
-async def _async_test_legacy_auto_schedule_migrates_to_fixture(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    device.async_set_native_pro_schedule = AsyncMock(return_value=True)
-    points = _schedule_points()
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    await _async_migrate_legacy_auto_schedule(_FakeHass(device), "entry_1")
-
-    device.async_set_native_pro_schedule.assert_awaited_once_with(_canonical_schedule_points(), activate=True)
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "native"
-
-
-def test_legacy_schedule_over_fixture_limit_becomes_manual(monkeypatch):
-    asyncio.run(_async_test_legacy_schedule_over_fixture_limit_becomes_manual(monkeypatch))
-
-
-async def _async_test_legacy_schedule_over_fixture_limit_becomes_manual(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    device = _make_device()
-    points = [{"time": f"{hour:02d}:00"} for hour in range(13)]
-    _MemoryStore.data = {"schedules": {"entry_1": {"points": points, "mode": "auto"}}}
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    await _async_migrate_legacy_auto_schedule(_FakeHass(device), "entry_1")
-
-    assert _MemoryStore.data["schedules"]["entry_1"]["mode"] == "manual"
-    assert device.diagnostics["native_schedule_last_result"] == "legacy_schedule_requires_edit"
-
-
 def test_integration_has_no_recurring_ha_schedule_executor():
     import custom_components.fluvalble as integration
 
     source = inspect.getsource(integration)
     assert "async_track_time_interval" not in source
     assert "_async_run_auto_schedule" not in source
-
-
-def test_schedule_card_exposes_fixture_native_auto_editor():
-    source = (
-        Path(__file__).parents[1] / "custom_components" / "fluvalble" / "www" / "fluvalble-schedule-card.js"
-    ).read_text(encoding="utf-8")
-
-    assert 'callService("set_native_auto_schedule"' in source
-    assert "Save Auto to fixture" in source
-    assert "Load Auto from fixture" in source
-    assert "sunrise_ramp" in source
-    assert "day_levels" in source
-    assert 'callService("preview_native_schedule"' in source
-    assert "Preview fixture time" in source
-    assert "Play fixture schedule" in source
-    assert "Unsaved editor values are never uploaded by preview" in source
-    assert 'const NATIVE_SERVICE_CHANNELS = ["channel_1"' in source
-    assert "buildGraph(points, scheduleChannelDefinitions(this.store))" in source
-    assert "point.channel_1 ?? point.red" in source
-    assert "autoSchedulePayload(this.store.autoSchedule, channelCount)" in source
-    assert "NATIVE_SERVICE_CHANNELS.slice(0, channelCount)" in source
-
-
-def test_wavelength_card_uses_apk_spectrum_profiles_without_synthetic_channel():
-    root = Path(__file__).parents[1] / "custom_components" / "fluvalble" / "www"
-    card_source = (root / "fluvalble-schedule-card.js").read_text(encoding="utf-8")
-    data_source = (root / "fluvalble-spectrum-data.js").read_text(encoding="utf-8")
-    prefix = "export const SPECTRUM_PROFILES = "
-    payload = data_source[data_source.index(prefix) + len(prefix) :].strip().removesuffix(";")
-    profiles = json.loads(payload)
-
-    assert set(profiles) == {
-        "aquasky_current",
-        "aquasky_legacy",
-        "plant_current",
-        "plant_legacy",
-        "reef_current",
-        "reef_legacy",
-    }
-    assert all(len(profile["rows"]) == 89 for profile in profiles.values())
-    assert len(profiles["aquasky_current"]["channel_keys"]) == 4
-    assert len(profiles["plant_current"]["channel_keys"]) == 5
-    assert len(profiles["reef_current"]["channel_keys"]) == 5
-    assert "gaussian(" not in card_source
-    assert "profile.channel_keys.reduce" in card_source
 
 
 def test_fixture_schedule_readback_normalizes_protocol_shapes():
@@ -1054,110 +440,23 @@ def test_current_reef_spp_effect_readback_is_complete():
     assert readback["effect_readback_complete"] is True
 
 
-def test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch):
-    asyncio.run(_async_test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch))
+def test_only_everyday_control_services_are_registered():
+    hass = _FakeHass(_make_device())
+    _register_services(hass)
+    assert {name for domain, name in hass.services.handlers if domain == DOMAIN} == {
+        "set_channels",
+        "recall_manual_preset",
+        "save_manual_preset",
+    }
 
 
-async def _async_test_schedule_payload_refreshes_fixture_only_when_requested(monkeypatch):
-    import custom_components.fluvalble as integration
-
+def test_readback_payload_does_not_load_or_write_local_schedules():
     device = _make_device()
     device.async_refresh_state = AsyncMock(return_value=True)
-    device.values["native_pro_schedule"] = [
-        {"minute": 480, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40}
-    ]
-    effect_windows = [
-        {
-            "start": "12:00",
-            "end": "12:10",
-            "effect": "Lightning",
-            "weekdays": ["monday"],
-            "enabled": True,
-        }
-    ]
-    _MemoryStore.data = {
-        "schedules": {
-            "entry_1": {
-                "points": _schedule_points(),
-                "mode": "native",
-                "effect_windows": effect_windows,
-            }
-        }
-    }
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
     hass = _FakeHass(device)
-
-    cached = await _async_schedule_payload(hass, "entry_1")
-    refreshed = await _async_schedule_payload(hass, "entry_1", refresh=True)
-
-    assert cached["refresh_ok"] is None
-    assert cached["effect_windows"] == effect_windows
-    assert refreshed["refresh_ok"] is True
-    assert refreshed["fixture"]["professional"][0]["time"] == "08:00"
-    device.async_refresh_state.assert_awaited_once()
-
-
-def test_schedule_payload_relabels_legacy_four_effect_names(monkeypatch):
-    asyncio.run(_async_test_schedule_payload_relabels_legacy_four_effect_names(monkeypatch))
-
-
-async def _async_test_schedule_payload_relabels_legacy_four_effect_names(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    effect_windows = [
-        {
-            "start": "12:00",
-            "end": "12:10",
-            "effect": "Lightning",
-            "weekdays": ["monday"],
-            "enabled": True,
-        }
-    ]
-    _MemoryStore.data = {
-        "schedules": {
-            "entry_1": {
-                "points": None,
-                "mode": "native",
-                "effect_windows": effect_windows,
-            }
-        }
-    }
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    payload = await _async_schedule_payload(_FakeHass(_make_device(product_id=546)), "entry_1")
-
-    assert payload["effect_windows"][0]["effect"] == "Sun and lightning"
-    assert _MemoryStore.data["schedules"]["entry_1"]["effect_windows"] == effect_windows
-
-
-def test_schedule_payload_does_not_relabel_current_four_effect_names(monkeypatch):
-    asyncio.run(_async_test_schedule_payload_does_not_relabel_current_four_effect_names(monkeypatch))
-
-
-async def _async_test_schedule_payload_does_not_relabel_current_four_effect_names(monkeypatch):
-    import custom_components.fluvalble as integration
-
-    effect_windows = [
-        {
-            "start": "12:00",
-            "end": "12:10",
-            "effect": "Lightning",
-            "weekdays": ["monday"],
-            "enabled": True,
-        }
-    ]
-    _MemoryStore.data = {
-        "schedules": {
-            "entry_1": {
-                "points": None,
-                "mode": "native",
-                "effect_windows": effect_windows,
-                "effect_catalog": EFFECT_CATALOG,
-            }
-        }
-    }
-    monkeypatch.setattr(integration, "Store", _MemoryStore)
-
-    payload = await _async_schedule_payload(_FakeHass(_make_device(product_id=546)), "entry_1")
-
-    assert payload["effect_windows"][0]["effect"] == "Lightning"
+    payload = asyncio.run(_async_schedule_payload(hass, "entry_1"))
+    assert set(payload) == {"entry_id", "fixture", "refresh_ok"}
+    device.async_refresh_state.assert_not_awaited()
+    payload = asyncio.run(_async_schedule_payload(hass, "entry_1", refresh=True))
+    device.async_refresh_state.assert_awaited_once_with()
+    assert payload["refresh_ok"] is True

@@ -32,7 +32,7 @@
   },
   "options": {
     "error": {
-      "invalid_active_time": "Enter 0 for a persistent connection, or a value from 30 to 600 seconds."
+      "invalid_active_time": "Enter a value from 30 to 600 seconds."
     },
     "step": {
       "init": {
@@ -46,7 +46,7 @@
         "data_description": {
           "lamp_profile": "Override auto-detection when the wrong model or channel count is shown. Plant and Marine/Reef use their distinct five-channel spectral layouts.",
           "ping_interval": "How often Home Assistant reads from the light to keep the BLE connection alive. Lower values improve reliability at the cost of slightly more radio traffic. Default: 10 s.",
-          "active_time": "How long to maintain the BLE connection after the last command. Use 0 for a persistent connection with the lowest command latency, or 30–600 seconds to disconnect when idle. Persistent connections consume a Bluetooth connection slot and can prevent the Fluval app or gateway from connecting. Default: 120 s.",
+          "active_time": "How long to maintain the BLE connection after the last command. Use 30–600 seconds to disconnect when idle and release the Bluetooth connection for the Fluval app or gateway. Default: 120 s.",
           "restore_previous_mode": "After all exact channel sliders reach zero, wait three seconds and restore the mode used before channel adjustment. Any new channel, power, or mode control cancels the restoration. This may allow the fixture's Auto or Professional schedule to turn the light back on. Default: off."
         }
       }
@@ -65,9 +65,6 @@
     "device_not_managed": {
       "message": "The selected device is not managed by Fluval BLE."
     },
-    "effect_schedule_normalization_failed": {
-      "message": "Unable to normalize the timed-effect schedule."
-    },
     "light_unavailable": {
       "message": "The selected Fluval light is not loaded or available."
     },
@@ -76,9 +73,6 @@
     },
     "selected_device_missing": {
       "message": "The selected Home Assistant device no longer exists."
-    },
-    "unsupported_schedule_mode": {
-      "message": "The fixture schedule mode {mode} is not supported."
     }
   },
   "entity": {
@@ -136,14 +130,8 @@
       "last_seen": {
         "name": "Last seen"
       },
-      "connected_since": {
-        "name": "Connected since"
-      },
       "active_connection_source": {
         "name": "Source"
-      },
-      "connection_mode": {
-        "name": "Connection mode"
       }
     }
   }

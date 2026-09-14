@@ -1,6 +1,7 @@
 """Tests for BLE client notification and write behavior."""
 
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -763,9 +764,9 @@ async def _async_test_disconnected_client_is_replaced_instead_of_reused():
     establish.assert_awaited_once()
 
 
-def test_unexpected_persistent_disconnect_schedules_immediate_reconnect():
+def test_unexpected_disconnect_reports_loss_without_starting_idle_task():
     status_callback = MagicMock()
-    client = _make_client(active_time=0)
+    client = _make_client(active_time=120)
     client.status_callback = status_callback
     connected = MagicMock()
     client.client = connected
@@ -780,7 +781,7 @@ def test_unexpected_persistent_disconnect_schedules_immediate_reconnect():
     assert client.client is None
     client.ping_future.cancel.assert_called_once()
     status_callback.assert_called_once_with(False)
-    create_task.assert_called_once()
+    create_task.assert_not_called()
 
 
 def test_finite_disconnect_does_not_reconnect_until_demand():
@@ -796,15 +797,15 @@ def test_finite_disconnect_does_not_reconnect_until_demand():
     create_task.assert_not_called()
 
 
-def test_persistent_heartbeat_reconnects_once_after_command_releases():
-    asyncio.run(_async_test_persistent_heartbeat_reconnects_once_after_command_releases())
+def test_finite_heartbeat_reconnects_once_after_command_releases():
+    asyncio.run(_async_test_finite_heartbeat_reconnects_once_after_command_releases())
 
 
-async def _async_test_persistent_heartbeat_reconnects_once_after_command_releases():
-    client = _make_client(active_time=0, ping_interval=60)
+async def _async_test_finite_heartbeat_reconnects_once_after_command_releases():
+    client = _make_client(active_time=120, ping_interval=60)
     client.connect_task = None
     client.wake_read_uuid = "wake"
-    client.ping_time = float("inf")
+    client.ping_time = time.time() + 120
     old = SimpleNamespace(
         is_connected=True,
         read_gatt_char=AsyncMock(return_value=b""),
@@ -850,7 +851,7 @@ async def _async_test_persistent_heartbeat_reconnects_once_after_command_release
 
 
 def test_stale_disconnect_callback_cannot_clear_new_connection():
-    client = _make_client(active_time=0)
+    client = _make_client(active_time=120)
     stale = MagicMock()
     current = MagicMock()
     client.client = current
@@ -861,7 +862,7 @@ def test_stale_disconnect_callback_cannot_clear_new_connection():
 
 
 def test_final_stop_prevents_disconnect_callback_from_reconnecting():
-    client = _make_client(active_time=0)
+    client = _make_client(active_time=120)
     client.connect_task = None
     connected = MagicMock()
     client.client = connected
@@ -874,15 +875,15 @@ def test_final_stop_prevents_disconnect_callback_from_reconnecting():
     create_task.assert_not_called()
 
 
-def test_persistent_connection_uses_infinite_idle_deadline():
-    client = _make_client(active_time=0)
+def test_connection_uses_finite_idle_deadline():
+    client = _make_client(active_time=120)
     with patch(
         "custom_components.fluvalble.core.client.asyncio.create_task",
         side_effect=lambda coro: _FakeTask(coro),
     ):
         client.ping()
 
-    assert client.ping_time == float("inf")
+    assert time.time() < client.ping_time <= time.time() + 120
 
 
 def test_disconnect_is_reusable_but_stop_is_final():
@@ -890,7 +891,7 @@ def test_disconnect_is_reusable_but_stop_is_final():
 
 
 async def _async_test_disconnect_is_reusable_but_stop_is_final():
-    client = _make_client(active_time=0)
+    client = _make_client(active_time=120)
     client.connect_task = None
     client.client = SimpleNamespace(is_connected=True, disconnect=AsyncMock())
 

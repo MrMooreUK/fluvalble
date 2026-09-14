@@ -63,11 +63,6 @@ class FluvalChannelNumber(FluvalEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Write one physical emitter without round-tripping through RGB."""
         async with self.device.command_transaction():
-            # Keep interruption and replacement atomic, as for light/mode
-            # controls. Do not restore the state the user is replacing.
-            if not await self.device.async_stop_preview(restore=False):
-                self.internal_update()
-                self._raise_command_error()
             if not await self.device.async_set_value(self.attr, int(value)):
                 self.internal_update()
                 self._raise_command_error()

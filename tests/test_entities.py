@@ -6,7 +6,6 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from custom_components.fluvalble.core import protocol
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -70,13 +69,29 @@ def _make_device(*, active_time: int = 120):
     return device
 
 
+def test_turn_off_only_sends_power_command():
+    """Retiring previews must not introduce an intermediate colour write."""
+
+    async def run():
+        device = _make_device()
+        device.async_set_switch = AsyncMock(return_value=True)
+        device.async_apply_channels = AsyncMock()
+        entity = light.FluvalLight(device, "light")
+        await entity.async_turn_off()
+        device.async_set_switch.assert_awaited_once_with("led_on_off", False)
+        device.async_apply_channels.assert_not_awaited()
+        assert not hasattr(device, "async_stop_preview")
+
+    asyncio.run(run())
+
+
 def test_create_entities_for_platforms():
     device = _make_device()
 
     mode_entities = select.create_entities(device)
     assert len(mode_entities) == 1
     assert mode_entities[0].attr == "mode"
-    assert len(sensor.create_entities(device)) == 4
+    assert len(sensor.create_entities(device)) == 3
     assert len(button.create_entities(device)) == 2
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
@@ -227,125 +242,6 @@ def test_channel_control_writes_exact_emitter_percentage():
     asyncio.run(_async_test_channel_control_writes_exact_emitter_percentage())
 
 
-@pytest.mark.parametrize("stop_ok", [False, True])
-def test_channel_control_stops_preview_before_writing(stop_ok):
-    async def run():
-        device = _make_device()
-        device.client = SimpleNamespace(last_error="preview stop failed")
-        events = []
-
-        async def stop(*, restore):
-            events.append(("stop", restore))
-            return stop_ok
-
-        async def write(attr, value):
-            events.append((attr, value))
-            return True
-
-        device.async_stop_preview = AsyncMock(side_effect=stop)
-        device.async_set_value = AsyncMock(side_effect=write)
-        entity = number.FluvalChannelNumber(device, "channel_2")
-        if stop_ok:
-            await entity.async_set_native_value(37)
-            assert events == [("stop", False), ("channel_2", 37)]
-        else:
-            with pytest.raises(HomeAssistantError, match="preview stop failed"):
-                await entity.async_set_native_value(37)
-            assert events == [("stop", False)]
-            device.async_set_value.assert_not_awaited()
-
-    asyncio.run(run())
-
-
-def test_channel_preview_stop_and_write_are_atomic():
-    async def run():
-        device = _make_device()
-        started = asyncio.Event()
-        release = asyncio.Event()
-        events = []
-
-        async def stop(*, restore):
-            events.append("stop")
-            if len(events) == 1:
-                started.set()
-                await release.wait()
-            return True
-
-        async def write(attr, value):
-            events.append(attr)
-            return True
-
-        device.async_stop_preview = AsyncMock(side_effect=stop)
-        device.async_set_value = AsyncMock(side_effect=write)
-        first = number.FluvalChannelNumber(device, "channel_1")
-        second = number.FluvalChannelNumber(device, "channel_2")
-        task1 = asyncio.create_task(first.async_set_native_value(25))
-        task2 = None
-        try:
-            await asyncio.wait_for(started.wait(), 1)
-            task2 = asyncio.create_task(second.async_set_native_value(50))
-            await asyncio.sleep(0)
-            assert events == ["stop"]
-            release.set()
-            await asyncio.wait_for(asyncio.gather(task1, task2), 1)
-            assert events == ["stop", "channel_1", "stop", "channel_2"]
-        finally:
-            release.set()
-            for task in (task1, task2):
-                if task is not None:
-                    task.cancel()
-            await asyncio.gather(*(task for task in (task1, task2) if task is not None), return_exceptions=True)
-
-    asyncio.run(run())
-
-
-@pytest.mark.parametrize("transport", ["classic", "facebd", "spp", "host"])
-def test_channel_control_cancels_real_preview_state(transport):
-    async def run():
-        device = _make_device()
-        device._uses_wifi_protocol = lambda: transport == "facebd"
-        device._uses_spp_protocol = lambda: transport == "spp"
-        device._async_prepare_command = AsyncMock(return_value=True)
-        device._async_send_packet = AsyncMock(return_value=True)
-        pending = None
-        if transport == "host":
-            pending = asyncio.create_task(asyncio.sleep(100))
-            device.preview_task = pending
-            device.preview_restore_mode = "automatic"
-        else:
-            device.native_preview_active = True
-            device.native_preview_restore_mode = "automatic"
-        device.async_select_option = AsyncMock(return_value=True)
-
-        async def write(attr, value):
-            assert device.preview_task is None
-            assert not device.native_preview_active
-            assert (attr, value) == ("channel_2", 37)
-            return True
-
-        device.async_set_value = AsyncMock(side_effect=write)
-        try:
-            await number.FluvalChannelNumber(device, "channel_2").async_set_native_value(37)
-            device.async_set_value.assert_awaited_once()
-            device.async_select_option.assert_not_awaited()
-            if pending is not None:
-                assert pending.cancelled()
-                device._async_send_packet.assert_not_awaited()
-            else:
-                expected = {
-                    "classic": protocol.old_auto_preview_packet(None),
-                    "facebd": protocol.wifi_auto_preview_packet(None),
-                    "spp": protocol.spp_schedule_preview_packet(None),
-                }[transport]
-                device._async_send_packet.assert_awaited_once_with(expected)
-        finally:
-            if pending is not None:
-                pending.cancel()
-                await asyncio.gather(pending, return_exceptions=True)
-
-    asyncio.run(run())
-
-
 async def _async_test_channel_control_writes_exact_emitter_percentage():
     device = _make_device()
     device.async_set_value = AsyncMock(return_value=True)
@@ -485,7 +381,6 @@ def test_diagnostic_entities_update_from_device_attributes():
     rssi = sensor.FluvalSensor(device, "rssi")
     last_seen = sensor.FluvalSensor(device, "last_seen")
     connection_source = sensor.FluvalSensor(device, "active_connection_source")
-    connection_mode = sensor.FluvalSensor(device, "connection_mode")
 
     assert rssi._attr_entity_registry_enabled_default is True
     assert last_seen._attr_entity_registry_enabled_default is True
@@ -494,7 +389,6 @@ def test_diagnostic_entities_update_from_device_attributes():
     rssi.internal_update()
     last_seen.internal_update()
     connection_source.internal_update()
-    connection_mode.internal_update()
 
     assert connection._attr_is_on is True
     assert rssi._attr_available is True
@@ -509,7 +403,6 @@ def test_diagnostic_entities_update_from_device_attributes():
     assert "source_address" not in connection_source._attr_extra_state_attributes
     assert connection_source._attr_extra_state_attributes["source_type"] == "remote"
     assert connection_source._attr_extra_state_attributes["gatt_connected"] is True
-    assert connection_mode._attr_native_value == "120 seconds"
 
     device.connected = False
     rssi.internal_update()
@@ -517,37 +410,23 @@ def test_diagnostic_entities_update_from_device_attributes():
     assert rssi._attr_native_value == -70
 
 
-def test_persistent_connection_mode_hides_stale_rssi():
-    device = _make_device(active_time=0)
-
-    connection_mode = sensor.FluvalSensor(device, "connection_mode")
+def test_diagnostics_are_enabled_without_persistent_mode():
+    device = _make_device()
     rssi = sensor.FluvalSensor(device, "rssi")
-    connected_since = sensor.FluvalSensor(device, "last_seen")
-
-    assert connection_mode._attr_native_value == "Persistent"
-    assert rssi._attr_entity_registry_enabled_default is False
-    assert connected_since._attr_entity_registry_enabled_default is True
-    assert rssi._attr_available is False
-    assert rssi._attr_native_value is None
-    assert rssi._attr_extra_state_attributes == {
-        "last_updated": device.conn_info["rssi_updated_at"],
-    }
-    assert connected_since._attr_translation_key == "connected_since"
-    assert connected_since._attr_native_value == device.conn_info["active_connection_connected_at"]
-
-    device.connected = False
-    connected_since.internal_update()
-    assert connected_since._attr_available is False
-    assert connected_since._attr_native_value is None
+    last_seen = sensor.FluvalSensor(device, "last_seen")
+    assert rssi._attr_entity_registry_enabled_default is True
+    assert last_seen._attr_entity_registry_enabled_default is True
+    assert rssi._attr_native_value == -70
+    assert last_seen._attr_translation_key == "last_seen"
+    assert last_seen._attr_native_value == device.conn_info["last_seen"]
+    assert not hasattr(device, "is_persistent_connection")
 
 
-def test_connection_mode_uses_singular_second():
+def test_finite_connection_uses_last_seen():
     device = _make_device(active_time=1)
 
-    connection_mode = sensor.FluvalSensor(device, "connection_mode")
     last_seen = sensor.FluvalSensor(device, "last_seen")
 
-    assert connection_mode._attr_native_value == "1 second"
     assert last_seen._attr_translation_key == "last_seen"
     assert last_seen._attr_native_value == device.conn_info["last_seen"]
 
@@ -772,152 +651,6 @@ async def _async_test_light_entity_handles_power_only_actions():
     assert device.async_set_switch.await_args_list[1].args == ("led_on_off", False)
 
 
-def test_normal_light_and_mode_controls_stop_active_previews_first():
-    asyncio.run(_async_test_normal_light_and_mode_controls_stop_active_previews_first())
-
-
-async def _async_test_normal_light_and_mode_controls_stop_active_previews_first():
-    device = _make_device()
-    device.values["led_on_off"] = True
-    events = []
-
-    async def stop_preview(*, restore=True):
-        events.append(("stop_preview", restore))
-        return True
-
-    async def apply_channels(_channels):
-        events.append(("apply_channels", None))
-        return True
-
-    async def set_switch(_attr, _value):
-        events.append(("set_switch", None))
-        return True
-
-    async def set_option(_attr, _option):
-        events.append(("set_option", None))
-        return True
-
-    device.async_stop_preview = AsyncMock(side_effect=stop_preview)
-    device.async_apply_light_channels = AsyncMock(side_effect=apply_channels)
-    device.async_set_switch = AsyncMock(side_effect=set_switch)
-    device.async_select_option = AsyncMock(side_effect=set_option)
-    light_entity = light.FluvalLight(device, "light")
-    mode_entity = select.FluvalSelect(device, "mode")
-
-    await light_entity.async_turn_on(**{ATTR_RGB_COLOR: (0, 255, 0)})
-    device.async_stop_preview.assert_awaited_once_with(restore=False)
-    assert events == [("stop_preview", False), ("apply_channels", None)]
-
-    device.async_stop_preview.reset_mock()
-    events.clear()
-    await light_entity.async_turn_off()
-    device.async_stop_preview.assert_awaited_once_with(restore=False)
-    assert events == [("stop_preview", False), ("set_switch", None)]
-
-    device.async_stop_preview.reset_mock()
-    events.clear()
-    await mode_entity.async_select_option("automatic")
-    device.async_stop_preview.assert_awaited_once_with(restore=False)
-    device.async_select_option.assert_awaited_once_with("mode", "automatic")
-    assert events == [("stop_preview", False), ("set_option", None)]
-
-
-def test_preview_stop_and_replacement_entity_command_are_atomic():
-    asyncio.run(_async_test_preview_stop_and_replacement_entity_command_are_atomic())
-
-
-async def _async_test_preview_stop_and_replacement_entity_command_are_atomic():
-    device = _make_device()
-    device.values["led_on_off"] = True
-    events = []
-    first_stop_started = asyncio.Event()
-    release_first_stop = asyncio.Event()
-    stop_calls = 0
-
-    async def stop_preview(*, restore=True):
-        nonlocal stop_calls
-        stop_calls += 1
-        events.append(("stop_preview", restore))
-        if stop_calls == 1:
-            first_stop_started.set()
-            await release_first_stop.wait()
-        return True
-
-    async def set_switch(_attr, _value):
-        events.append(("set_switch", None))
-        return True
-
-    async def set_option(_attr, _option):
-        events.append(("set_option", None))
-        return True
-
-    device.async_stop_preview = AsyncMock(side_effect=stop_preview)
-    device.async_set_switch = AsyncMock(side_effect=set_switch)
-    device.async_select_option = AsyncMock(side_effect=set_option)
-    light_entity = light.FluvalLight(device, "light")
-    mode_entity = select.FluvalSelect(device, "mode")
-
-    power_task = asyncio.create_task(light_entity.async_turn_off())
-    await first_stop_started.wait()
-    mode_task = asyncio.create_task(mode_entity.async_select_option("automatic"))
-    await asyncio.sleep(0)
-
-    assert events == [("stop_preview", False)]
-    assert not mode_task.done()
-
-    release_first_stop.set()
-    await power_task
-    await mode_task
-    assert events == [
-        ("stop_preview", False),
-        ("set_switch", None),
-        ("stop_preview", False),
-        ("set_option", None),
-    ]
-
-
-def test_turn_off_is_attempted_when_preview_stop_fails():
-    asyncio.run(_async_test_turn_off_is_attempted_when_preview_stop_fails())
-
-
-async def _async_test_turn_off_is_attempted_when_preview_stop_fails():
-    device = _make_device()
-    device.client = SimpleNamespace(
-        last_error="preview stop failed",
-        command_write_uuid=None,
-    )
-    device.async_stop_preview = AsyncMock(return_value=False)
-    device.async_set_switch = AsyncMock(return_value=True)
-    entity = light.FluvalLight(device, "light")
-
-    with pytest.raises(HomeAssistantError, match="preview stop failed"):
-        await entity.async_turn_off()
-
-    device.async_stop_preview.assert_awaited_once_with(restore=False)
-    device.async_set_switch.assert_awaited_once_with("led_on_off", False)
-
-
-def test_turn_on_does_not_write_over_a_preview_that_failed_to_stop():
-    asyncio.run(_async_test_turn_on_does_not_write_over_a_preview_that_failed_to_stop())
-
-
-async def _async_test_turn_on_does_not_write_over_a_preview_that_failed_to_stop():
-    device = _make_device()
-    device.client = SimpleNamespace(
-        last_error="preview stop failed",
-        command_write_uuid=None,
-    )
-    device.async_stop_preview = AsyncMock(return_value=False)
-    device.async_apply_light_channels = AsyncMock(return_value=True)
-    entity = light.FluvalLight(device, "light")
-
-    with pytest.raises(HomeAssistantError, match="preview stop failed"):
-        await entity.async_turn_on(**{ATTR_RGB_COLOR: (0, 255, 0)})
-
-    device.async_stop_preview.assert_awaited_once_with(restore=False)
-    device.async_apply_light_channels.assert_not_awaited()
-
-
 def test_light_entity_surfaces_ble_command_failures():
     asyncio.run(_async_test_light_entity_surfaces_ble_command_failures())
 
@@ -1118,12 +851,12 @@ def test_reported_firmware_updates_standard_device_registry_info():
     device.firmware_version = "14"
     registry_device = SimpleNamespace(id="device_1", sw_version=None)
     registry = MagicMock()
-    registry.async_get_device.return_value = registry_device
+    registry.async_get_device_by_identifier.return_value = registry_device
 
     with patch.object(integration.dr, "async_get", return_value=registry, create=True):
-        integration._sync_firmware_version_to_device_registry(MagicMock(), device)
+        integration._sync_firmware_version_to_device_registry(MagicMock(), SimpleNamespace(entry_id="entry_1"), device)
 
-    registry.async_get_device.assert_called_once_with(identifiers={("fluvalble", "AA:BB:CC:DD:EE:FF")})
+    registry.async_get_device_by_identifier.assert_called_once_with(("fluvalble", "AA:BB:CC:DD:EE:FF"), "entry_1")
     registry.async_update_device.assert_called_once_with("device_1", sw_version="14")
 
 
@@ -1133,11 +866,11 @@ def test_product_identity_updates_config_entry_and_device_registry():
     device = _make_device()
     device.product_id = 328
     device.model = "Aquasky 750mm"
-    entry = SimpleNamespace(data={"mac": device.mac})
+    entry = SimpleNamespace(entry_id="entry_1", data={"mac": device.mac})
     hass = MagicMock()
     registry_device = SimpleNamespace(id="device_1", model="AquaSky Bluetooth LED")
     registry = MagicMock()
-    registry.async_get_device.return_value = registry_device
+    registry.async_get_device_by_identifier.return_value = registry_device
 
     with patch.object(integration.dr, "async_get", return_value=registry, create=True):
         integration._sync_product_identity(hass, entry, device)
@@ -1147,3 +880,30 @@ def test_product_identity_updates_config_entry_and_device_registry():
         data={"mac": device.mac, "product_id": 328, "model": "Aquasky 750mm"},
     )
     registry.async_update_device.assert_called_once_with("device_1", model="Aquasky 750mm")
+
+
+def test_connection_mode_sensor_is_not_created():
+    device = _make_device()
+    assert "connection_mode" not in device.sensors()
+    assert {entity.attr for entity in sensor.create_entities(device)} == {
+        "rssi",
+        "last_seen",
+        "active_connection_source",
+    }
+
+
+def test_registry_lookup_older_ha_is_scoped_to_config_entry():
+    import custom_components.fluvalble as integration
+
+    device = _make_device()
+    entry = SimpleNamespace(entry_id="entry_1")
+    registry = SimpleNamespace()
+    own = SimpleNamespace(identifiers={("fluvalble", device.mac.upper())})
+    unrelated = SimpleNamespace(identifiers={("fluvalble", "11:22:33:44:55:66")})
+    with patch.object(
+        integration.dr, "async_entries_for_config_entry", return_value=[unrelated, own], create=True
+    ) as lookup:
+        assert integration._registry_device_for_entry(registry, entry, device) is own
+        lookup.assert_called_once_with(registry, "entry_1")
+    with patch.object(integration.dr, "async_entries_for_config_entry", return_value=[unrelated], create=True):
+        assert integration._registry_device_for_entry(registry, entry, device) is None

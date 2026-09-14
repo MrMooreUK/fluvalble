@@ -9,9 +9,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
-- Reject native Auto and Professional schedule writes whose channel width does
-  not exactly match the fixture APK channel count, instead of silently slicing
-  longer payloads.
+- Preserve cached RSSI timestamps on reconnect instead of reporting the cached
+  reading as a fresh advertisement.
+- Use config-entry-scoped device registry lookup while retaining the existing
+  minimum Home Assistant version.
+- Restore RSSI and Last seen entities disabled by the integration without
+  changing entities disabled by the user.
+
+### Changed
+
+- Leave hardware schedule programming to Fluval Connect. Home Assistant keeps
+  light controls, physical channel sliders, native effects, mode selection,
+  manual presets, and fixture schedule readback.
+- Restrict the active connection window to 30–600 seconds so an idle connection
+  can release for Fluval Connect. Existing unlimited settings migrate to the
+  default of 120 seconds.
+
+### Removed
+
+- Bundled schedule cards, schedule-editing and preview actions, local draft
+  storage, and startup draft uploads. Fixture schedules are not erased.
+- Persistent-connection handling, its alternate diagnostic presentation, and
+  the redundant Connection mode sensor.
+
+### Updating existing installations
+
+- Remove old custom cards and manually added
+  `/fluvalble/fluvalble-schedule-card.js` dashboard resources.
+- Remove retired actions from scripts and automations:
+  `fluvalble.save_schedule`, `fluvalble.set_native_auto_schedule`,
+  `fluvalble.set_native_pro_schedule`, `fluvalble.set_native_effect_schedule`,
+  `fluvalble.preview_schedule`, `fluvalble.preview_native_schedule`,
+  and `fluvalble.stop_preview`.
+- Local drafts are not uploaded or converted automatically. Use the schedule
+  saved on the fixture or recreate an unsaved draft in Fluval Connect.
+  Fixture memory and the integration entry are not erased.
+
+See [hardware schedules](docs/hardware-schedules.md) for the current workflow.
 
 ## [0.0.14] — 2026-09-08
 

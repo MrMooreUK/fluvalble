@@ -56,15 +56,15 @@ MANUAL_ENTRY = "__manual__"
 
 
 def validate_active_time(value: Any) -> int:
-    """Accept persistent mode (0) or a non-churning finite idle window."""
+    """Accept a bounded idle window so the app can reconnect."""
     try:
         active_time = int(value)
     except (TypeError, ValueError) as err:
         raise vol.Invalid("Active connection window must be an integer") from err
 
-    if active_time == 0 or 30 <= active_time <= 600:
+    if 30 <= active_time <= 600:
         return active_time
-    raise vol.Invalid("Active connection window must be 0 or between 30 and 600 seconds")
+    raise vol.Invalid("Active connection window must be between 30 and 600 seconds")
 
 
 OPTIONS_SCHEMA = vol.Schema(
@@ -83,11 +83,10 @@ OPTIONS_SCHEMA = vol.Schema(
             int,
             vol.Range(min=5, max=60),
         ),
-        # Keep the form schema serializable by Home Assistant. The 1-29 gap is
-        # enforced explicitly in the options step below.
+        # Keep the form schema serializable by Home Assistant.
         vol.Optional(CONF_ACTIVE_TIME, default=DEFAULT_ACTIVE_TIME): vol.All(
             int,
-            vol.Range(min=0, max=600),
+            vol.Range(min=30, max=600),
         ),
         vol.Optional(
             CONF_RESTORE_PREVIOUS_MODE,

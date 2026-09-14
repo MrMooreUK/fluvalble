@@ -53,31 +53,23 @@ complete D2 CBOR value before updating fixture state or confirming a command.
 The transport is therefore named `spp` in protocol-neutral diagnostics; the
 former `plant_pro_spp` flag remains as a compatibility alias.
 
-## Native schedules and previews
+## Native schedule readback
 
 Classic/OLD controllers accept 4–10 Professional schedule points. FACEBD and
-FFF0/SPP controllers accept 4–12 points. Schedule actions use positional
-`channel_1` through `channel_5` fields and label those positions with the
-detected product's APK-defined channel names. Earlier RGB-style and
-Plant-specific names remain accepted as compatibility aliases.
+FFF0/SPP controllers accept 4–12 points. Readback uses the detected product's
+APK-defined channel order and width. Program these schedules in Fluval Connect.
 
 Auto schedules preserve FluvalConnect's midnight wrapping for sunrise and
-sunset ramps. Four-channel product profiles send and accept exactly four day
-and night levels; five-channel profiles use five. Professional points are
-sorted into fixture time order and duplicate times are rejected, matching the
-APK editor's ordering and duplicate-time checks. Readback is accepted only
+sunset ramps. Four-channel product profiles read exactly four day
+and night levels; five-channel profiles use five. Readback is accepted only
 when its packet shape, channel width, point limits, times, ramps, and levels
 fit the corresponding APK controller format.
 
 Timed-effect schedules support up to seven windows, with a weekday assigned to
 no more than one window. The product ID selects either the 11-effect catalogue
 or the four-effect subset. Classic status readback exposes only one embedded
-effect slot, so a longer submitted schedule is retained in diagnostics without
-being presented as complete fixture-confirmed readback.
-
-Fixture schedule previews use the schedule already stored by the controller
-and never upload unsaved editor values. Stopping a preview sends the APK stop
-command and restores the prior fixture mode.
+effect slot, which is not presented as complete fixture-confirmed readback.
+The integration does not provide schedule-writing or preview actions.
 
 FACEBD daylight-saving state is reported through CBOR key `99`. Clock
 synchronization sends the Home Assistant host's UTC offset and Unix time using
@@ -101,14 +93,14 @@ and overwrites memory in the physical fixture.
 
 On load and reconnect, the integration asks Home Assistant for its best
 connectable route across local adapters and ESPHome Bluetooth proxies. It uses
-a fresh BLE client for each reconnect and runs a keep-alive every 10 seconds
-while connected.
+a fresh BLE client for each reconnect. The keep-alive interval is configurable
+from 5 to 60 seconds (default 10) while connected; it is separate from the idle
+connection window.
 
-An active connection window of `0` keeps the session open and starts one
-serialized reconnect cycle after an unexpected drop. A finite window closes an
-idle session; the default is two minutes. FFF0/SPP fixtures permit one BLE
-central at a time, so a persistent Home Assistant connection prevents the
-official application or gateway from connecting.
+The active connection window is configurable from 30 to 600 seconds, with a
+two-minute default. An idle session closes after this window. FFF0/SPP fixtures
+permit one BLE central
+at a time, so allow the idle window to expire before using Fluval Connect.
 
 Reachability remains true for five minutes after an advertisement, successful
 connection, or successful command. While connected, signal strength represents
@@ -117,9 +109,9 @@ preserved because Fluval controllers normally stop advertising during an
 active session, and advertisements from other scanners do not replace it.
 
 Source exposes only the friendly name of the adapter or proxy confirmed by
-Home Assistant's connected GATT client. Scanner addresses, the latest
-advertisement, product profile, connection and command state, and schedule
-evidence remain available in redacted diagnostics.
+Home Assistant's connected GATT client. Product profile, connection and command
+state, and schedule evidence remain available in redacted diagnostics.
+Identifying addresses and names are removed from that downloadable report.
 
 Complete commands are serialized per fixture so multi-packet operations retain
 their APK-defined order when different Home Assistant entities or actions are

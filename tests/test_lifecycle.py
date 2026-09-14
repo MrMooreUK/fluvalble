@@ -1,10 +1,10 @@
 """Tests for config-entry lifecycle cleanup."""
 
 import asyncio
-import sys
 from types import SimpleNamespace
-import types
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 from homeassistant import config_entries
 
@@ -14,11 +14,33 @@ from custom_components.fluvalble import (
     _store_entry_runtime_data,
     _async_update_listener,
     _register_legacy_options_reload,
-    _register_static_paths,
-    async_unload_entry,
     entry_runtime_data,
 )
 from custom_components.fluvalble import binary_sensor, button, light, number, select, sensor, switch
+
+
+def test_unload_cleans_runtime_without_preview_support():
+    async def run():
+        from custom_components.fluvalble import async_unload_entry
+
+        device = SimpleNamespace(
+            cancel_reachability_refresh=MagicMock(),
+            async_cancel_channel_mode_restore=AsyncMock(),
+            client=SimpleNamespace(stop=AsyncMock()),
+        )
+        runtime = FluvalRuntimeData(device=device)
+        entry = SimpleNamespace(entry_id="test_entry", runtime_data=runtime)
+        hass = SimpleNamespace(
+            data={DOMAIN: {"test_entry": runtime}},
+            config_entries=SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True)),
+        )
+        assert await async_unload_entry(hass, entry)
+        device.cancel_reachability_refresh.assert_called_once()
+        device.async_cancel_channel_mode_restore.assert_awaited_once()
+        device.client.stop.assert_awaited_once()
+        assert "test_entry" not in hass.data[DOMAIN]
+
+    asyncio.run(run())
 
 
 def test_current_options_flow_does_not_register_second_reload_listener():
@@ -131,84 +153,22 @@ async def _async_test_legacy_options_listener_reloads_once():
     reload_entry.assert_awaited_once_with("entry_1")
 
 
-def test_unload_stops_software_preview_task():
-    """A reload must not leave the software preview writing to BLE."""
-    asyncio.run(_async_test_unload_stops_software_preview_task())
+@pytest.mark.parametrize("old, expected", [(0, 120), (30, 30), (600, 600)])
+def test_connection_window_migration_preserves_other_options(old, expected):
+    from custom_components.fluvalble import _migrate_connection_window
+
+    entry = SimpleNamespace(options={"active_time": old, "lamp_profile": "aquasky"})
+    update = MagicMock()
+    hass = SimpleNamespace(config_entries=SimpleNamespace(async_update_entry=update))
+    assert _migrate_connection_window(hass, entry) == expected
+    if old == 0:
+        update.assert_called_once_with(entry, options={"active_time": 120, "lamp_profile": "aquasky"})
+    else:
+        update.assert_not_called()
 
 
-async def _async_test_unload_stops_software_preview_task():
-    background_task = asyncio.create_task(asyncio.Event().wait())
+def test_setup_does_not_load_retired_cards():
+    import inspect
+    from custom_components.fluvalble import async_setup_entry
 
-    async def stop_preview_after_background_work():
-        assert background_task.done()
-        return True
-
-    preview_task = MagicMock()
-    device = SimpleNamespace(
-        preview_task=preview_task,
-        native_preview_active=False,
-        cancel_reachability_refresh=MagicMock(),
-        async_cancel_channel_mode_restore=AsyncMock(),
-        async_stop_preview=AsyncMock(side_effect=stop_preview_after_background_work),
-        client=None,
-    )
-    runtime = FluvalRuntimeData(device=device, background_tasks={background_task})
-    entry = SimpleNamespace(entry_id="entry_1", runtime_data=runtime)
-    hass = SimpleNamespace(
-        data={DOMAIN: {entry.entry_id: runtime}},
-        config_entries=SimpleNamespace(async_unload_platforms=AsyncMock(return_value=True)),
-    )
-
-    assert await async_unload_entry(hass, entry)
-
-    device.cancel_reachability_refresh.assert_called_once_with()
-    device.async_cancel_channel_mode_restore.assert_awaited_once_with()
-    device.async_stop_preview.assert_awaited_once_with()
-    assert background_task.cancelled()
-    assert not runtime.background_tasks
-    assert entry.entry_id not in hass.data[DOMAIN]
-
-
-def test_static_path_supports_home_assistant_2024_1_api():
-    register = MagicMock()
-    hass = SimpleNamespace(data={DOMAIN: {}}, http=SimpleNamespace(register_static_path=register))
-    asyncio.run(_register_static_paths(hass))
-    asyncio.run(_register_static_paths(hass))
-    register.assert_called_once()
-    assert register.call_args.args[0] == "/fluvalble"
-    assert register.call_args.kwargs == {"cache_headers": False}
-
-
-def test_static_path_prefers_current_home_assistant_api(monkeypatch):
-    """Use the collection-based API while retaining the legacy fallback."""
-    asyncio.run(_async_test_static_path_prefers_current_home_assistant_api(monkeypatch))
-
-
-async def _async_test_static_path_prefers_current_home_assistant_api(monkeypatch):
-    class StaticPathConfig:
-        def __init__(self, url_path, path, cache_headers):
-            self.url_path = url_path
-            self.path = path
-            self.cache_headers = cache_headers
-
-    http_module = types.ModuleType("homeassistant.components.http")
-    http_module.StaticPathConfig = StaticPathConfig
-    monkeypatch.setitem(sys.modules, "homeassistant.components.http", http_module)
-
-    register_many = AsyncMock()
-    register_one = AsyncMock()
-    hass = SimpleNamespace(
-        data={DOMAIN: {}},
-        http=SimpleNamespace(
-            async_register_static_paths=register_many,
-            async_register_static_path=register_one,
-        ),
-    )
-
-    await _register_static_paths(hass)
-
-    register_many.assert_awaited_once()
-    register_one.assert_not_awaited()
-    config = register_many.await_args.args[0][0]
-    assert config.url_path == "/fluvalble"
-    assert config.cache_headers is False
+    assert "_register_static_paths" not in inspect.getsource(async_setup_entry)

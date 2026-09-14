@@ -49,9 +49,6 @@ class FluvalSelect(FluvalEntity, SelectEntity):
 
     async def _async_select_option(self, option: str) -> None:
         """Apply one complete mode-selection transaction."""
-        if not await self.device.async_stop_preview(restore=False):
-            self.internal_update()
-            self._raise_command_error()
         if not await self.device.async_select_option(self.attr, option):
             self.internal_update()
             self._raise_command_error()

@@ -1,7 +1,6 @@
 """Failure-path checks for command, storage, and unload ordering."""
 
 import asyncio
-import copy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
@@ -102,23 +101,6 @@ def test_refresh_propagates_read_result(response):
     asyncio.run(run())
 
 
-def test_failed_preview_stops_and_preserves_error():
-    async def run():
-        device = make_device()
-
-        async def fail(_channels):
-            device._set_diagnostic_error("write_failed", "Connection lost")
-            return False
-
-        device.async_set_channels = AsyncMock(side_effect=fail)
-        await device._async_preview_schedule([{"time": "00:00"}, {"time": "12:00"}], 60, 2)
-        device.async_set_channels.assert_awaited_once()
-        assert device.diagnostics["status"] == "preview_failed"
-        assert device.diagnostics["last_error"] == "Connection lost"
-
-    asyncio.run(run())
-
-
 @pytest.mark.parametrize("unload_ok", [False, True])
 def test_unload_tasks_without_discovered_device(unload_ok):
     async def run():
@@ -137,43 +119,5 @@ def test_unload_tasks_without_discovered_device(unload_ok):
         finally:
             pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
-
-    asyncio.run(run())
-
-
-@pytest.mark.parametrize("effects", [False, True])
-def test_shared_schedule_transactions_preserve_both_saves(effects):
-    async def run():
-        stored = {}
-
-        class Store:
-            def __init__(self, *args):
-                pass
-
-            async def async_load(self):
-                snapshot = copy.deepcopy(stored)
-                await asyncio.sleep(0)
-                return snapshot
-
-            async def async_save(self, data):
-                await asyncio.sleep(0)
-                stored.clear()
-                stored.update(copy.deepcopy(data))
-
-        hass = SimpleNamespace(data={integration.DOMAIN: {}})
-        points = [{"time": "00:00", "channel_1": 10}, {"time": "12:00", "channel_1": 20}]
-        with patch.object(integration, "Store", Store):
-            second = (
-                integration._async_save_effect_schedule(hass, "lamp-a", [])
-                if effects
-                else integration._async_save_schedule(hass, "lamp-b", points)
-            )
-            await asyncio.gather(integration._async_save_schedule(hass, "lamp-a", points), second)
-        schedules = stored["schedules"]
-        assert schedules["lamp-a"]["points"]
-        if effects:
-            assert schedules["lamp-a"]["effect_windows"] == []
-        else:
-            assert set(schedules) == {"lamp-a", "lamp-b"}
 
     asyncio.run(run())
