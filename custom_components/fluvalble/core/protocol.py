@@ -684,7 +684,7 @@ def old_clock_packet(now: datetime | None = None) -> bytes:
     return old_packet(bytes((0x68, OLD_CLOCK)) + _clock_payload(now))
 
 
-def old_packet(packet: bytes) -> bytes:
+def old_packet(packet: bytes | bytearray) -> bytes:
     """Append the XOR checksum used by the old light protocol."""
     checksum = 0
     for item in packet:
@@ -700,12 +700,12 @@ def _xor_checksum(packet: Iterable[int]) -> int:
     return checksum
 
 
-def encrypted_old_packet(packet: bytes) -> bytearray:
+def encrypted_old_packet(packet: bytes | bytearray) -> bytearray:
     """Encode one complete APK classic packet without changing its checksum."""
     return encrypted_old_frames(packet)[0]
 
 
-def encrypted_old_frames(packet: bytes) -> list[bytearray]:
+def encrypted_old_frames(packet: bytes | bytearray) -> list[bytearray]:
     """Validate, chunk, and encode one already-checksummed classic frame."""
     if not is_valid_old_command_packet(packet):
         raise ValueError("Classic Fluval writes require one complete APK command frame")
@@ -899,13 +899,13 @@ def _decode_effect_schedule_blob(
     return windows
 
 
-def decode_cbor_map(data: bytes) -> dict[Any, Any] | None:
+def decode_cbor_map(data: bytes | bytearray) -> dict[Any, Any] | None:
     """Decode the CBOR maps the FACEBD controllers use for light state."""
     if not data or data[0] >> 5 != 5:
         return None
 
     try:
-        value, offset = _read_cbor_value(data, 0)
+        value, offset = _read_cbor_value(bytes(data), 0)
     except (UnicodeError, ValueError):
         return None
     if not isinstance(value, dict):
@@ -915,7 +915,7 @@ def decode_cbor_map(data: bytes) -> dict[Any, Any] | None:
     return value
 
 
-def decode_cbor_update(data: bytes) -> dict[Any, Any] | None:
+def decode_cbor_update(data: bytes | bytearray) -> dict[Any, Any] | None:
     """Decode a raw CBOR map or a current-controller D1/D2 frame."""
     if not data:
         return None

@@ -174,7 +174,8 @@ def rgb_to_channel_percentages(
     if channel_count is not None:
         columns = columns[:channel_count]
     linear_rgb = tuple(_srgb_to_linear(component) for component in rgb)
-    target = _mat_vec(_SRGB_TO_XYZ, linear_rgb)
+    target_values = _mat_vec(_SRGB_TO_XYZ, linear_rgb)
+    target = (target_values[0], target_values[1], target_values[2])
     levels = _nonnegative_xyz_fit(columns, target)
     peak = max(levels, default=0.0)
     if peak <= _EPSILON:

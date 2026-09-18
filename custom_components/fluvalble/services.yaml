@@ -1,6 +1,6 @@
 set_channels:
-  name: Set color channels
-  description: Set one or more Fluval light color channels, optionally ramping over time.
+  name: Set physical channels
+  description: Set one or more APK-defined Fluval emitter channels, optionally ramping over time. Channel names differ by fixture; the device's Number entities show the exact labels.
   fields:
     device_id:
       name: Light
@@ -9,41 +9,41 @@ set_channels:
       selector:
         device:
           integration: fluvalble
-    red:
-      name: Red
-      description: Red channel intensity, 0-100%.
+    channel_1:
+      name: Channel 1
+      description: First physical emitter channel for this fixture, 0-100%.
       selector:
         number:
           min: 0
           max: 100
           unit_of_measurement: "%"
-    green:
-      name: Green
-      description: Green channel intensity, 0-100%.
+    channel_2:
+      name: Channel 2
+      description: Second physical emitter channel for this fixture, 0-100%.
       selector:
         number:
           min: 0
           max: 100
           unit_of_measurement: "%"
-    blue:
-      name: Blue
-      description: Blue channel intensity, 0-100%.
+    channel_3:
+      name: Channel 3
+      description: Third physical emitter channel for this fixture, 0-100%.
       selector:
         number:
           min: 0
           max: 100
           unit_of_measurement: "%"
-    white:
-      name: White
-      description: White channel intensity, 0-100%.
+    channel_4:
+      name: Channel 4
+      description: Fourth physical emitter channel for this fixture, 0-100%.
       selector:
         number:
           min: 0
           max: 100
           unit_of_measurement: "%"
     channel_5:
-      name: Violet
-      description: Violet channel intensity for compatible fixtures, 0-100%.
+      name: Channel 5
+      description: Fifth physical emitter channel for compatible fixtures, 0-100%.
       selector:
         number:
           min: 0

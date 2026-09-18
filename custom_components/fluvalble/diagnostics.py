@@ -20,7 +20,11 @@ REDACTED = "**REDACTED**"
 TO_REDACT = {
     CONF_MAC,
     "address",
+    "active_connection_source",
+    "active_connection_source_address",
     "advertisement_name",
+    "advertisement_source",
+    "advertisement_source_address",
     "bluetooth_address",
     "configured_mac",
     "entry_id",

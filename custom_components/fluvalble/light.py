@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from typing import Any
 
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
@@ -52,7 +53,9 @@ class FluvalLight(FluvalEntity, LightEntity):
     """Expose Fluval channels through Home Assistant's native light controls."""
 
     _attr_icon = "mdi:led-strip-variant"
+    _attr_is_on: bool | None = None
     _attr_rgb_color: tuple[int, int, int] | None = None
+    _attr_extra_state_attributes: dict[str, Any] | None = None
 
     async def async_added_to_hass(self) -> None:
         """Refresh schedule presentation locally; remove the timer on unload."""
@@ -206,7 +209,8 @@ class FluvalLight(FluvalEntity, LightEntity):
         """Expose native effects only for positively identified controllers."""
         self._attr_effect_list = self.device.effect_list()
         if self._attr_effect_list:
-            self._attr_effect = self.device.values.get("effect") or EFFECT_NONE
+            effect = self.device.values.get("effect")
+            self._attr_effect = effect if isinstance(effect, str) else EFFECT_NONE
             self._attr_supported_features = LightEntityFeature.EFFECT
         else:
             self._attr_effect = None

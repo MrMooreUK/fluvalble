@@ -8,7 +8,7 @@ import logging
 from dataclasses import dataclass, field
 import re
 from time import monotonic
-from typing import Any, TypeAlias
+from typing import Any, TYPE_CHECKING, TypeAlias
 
 import voluptuous as vol
 
@@ -32,11 +32,6 @@ from .core import (
 from .core.device import Device
 from .core.discovery import CONF_MODEL, CONF_PRODUCT_ID
 from .core.effects import EFFECT_NONE, WEATHER_EFFECTS, effect_name
-
-try:
-    from homeassistant.config_entries import ConfigEntryState
-except ImportError:  # pragma: no cover - stubbed test environments
-    ConfigEntryState = None  # type: ignore[misc, assignment]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -96,10 +91,13 @@ class FluvalRuntimeData:
     background_tasks: set[asyncio.Task] = field(default_factory=set, repr=False)
 
 
-try:
+if TYPE_CHECKING:
     FluvalConfigEntry: TypeAlias = ConfigEntry[FluvalRuntimeData]
-except TypeError:  # pragma: no cover - stubbed test ConfigEntry isn't generic
-    FluvalConfigEntry: TypeAlias = ConfigEntry  # type: ignore[misc,assignment]
+else:
+    try:
+        FluvalConfigEntry = ConfigEntry[FluvalRuntimeData]
+    except TypeError:  # pragma: no cover - stubbed test ConfigEntry isn't generic
+        FluvalConfigEntry = ConfigEntry
 
 
 def _runtime_device(entry_data: Any) -> Device | None:
@@ -202,8 +200,6 @@ SERVICE_SAVE_MANUAL_PRESET = "save_manual_preset"
 SERVICES_REGISTERED = "services_registered"
 WEBSOCKET_REGISTERED = "websocket_registered"
 NATIVE_SCHEDULE_CHANNELS = tuple(f"channel_{index}" for index in range(1, 6))
-LEGACY_SCHEDULE_CHANNELS = ("red", "green", "blue", "white", "channel_5")
-LEGACY_PLANT_PRO_CHANNELS = ("red", "blue", "cool_white", "warm_white", "amber")
 NATIVE_EFFECT_WEEKDAYS = (
     "monday",
     "tuesday",
@@ -215,9 +211,8 @@ NATIVE_EFFECT_WEEKDAYS = (
 )
 SERVICE_TARGET_FIELDS = {
     vol.Optional(ATTR_DEVICE_ID): str,
-    # Retain the two historical selectors for saved automations and the bundled
-    # Lovelace cards. They are intentionally omitted from services.yaml so new
-    # action-editor calls use Home Assistant's device picker.
+    # Retain historical selectors for saved automations. They are intentionally
+    # omitted from services.yaml so new action-editor calls use HA's device picker.
     vol.Optional("entry_id"): str,
     vol.Optional("mac"): str,
 }
@@ -243,11 +238,18 @@ def _validate_manual_preset_slot(value: object) -> int:
 CHANNEL_SERVICE_SCHEMA = vol.Schema(
     {
         **SERVICE_TARGET_FIELDS,
+        vol.Optional("channel_1"): vol.All(int, vol.Range(min=0, max=100)),
+        vol.Optional("channel_2"): vol.All(int, vol.Range(min=0, max=100)),
+        vol.Optional("channel_3"): vol.All(int, vol.Range(min=0, max=100)),
+        vol.Optional("channel_4"): vol.All(int, vol.Range(min=0, max=100)),
+        vol.Optional("channel_5"): vol.All(int, vol.Range(min=0, max=100)),
+        # Hidden compatibility aliases from the original AquaSky-only action.
+        # Their positional meaning is preserved, but they are not advertised
+        # because those colour names are false for Plant and Marine fixtures.
         vol.Optional("red"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("green"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("blue"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("white"): vol.All(int, vol.Range(min=0, max=100)),
-        vol.Optional("channel_5"): vol.All(int, vol.Range(min=0, max=100)),
         vol.Optional("transition", default=0): vol.All(int, vol.Range(min=0, max=86400)),
         vol.Optional("step_seconds", default=30): vol.All(int, vol.Range(min=1, max=3600)),
     }
@@ -281,11 +283,17 @@ def _migrate_connection_window(hass: HomeAssistant, entry: FluvalConfigEntry) ->
     return active_time
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
-    """Set up Fluval Aquarium LED from a config entry."""
+async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
+    """Set up integration-wide Fluval actions and APIs."""
     hass.data.setdefault(DOMAIN, {})
     _register_websocket(hass)
     _register_services(hass)
+    return True
+
+
+async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
+    """Set up Fluval Aquarium LED from a config entry."""
+    hass.data.setdefault(DOMAIN, {})
     mac_raw = entry.data.get(CONF_MAC)
     # HA's Bluetooth stack uses uppercase MACs internally. Normalize here
     # so the address filter in async_register_callback matches correctly,
@@ -502,8 +510,8 @@ def _cleanup_duplicate_devices(hass: HomeAssistant, entry: ConfigEntry, mac: str
     normalized_mac = format_mac(mac).lower()
 
     def _is_canonical(device_entry) -> bool:
-        identifiers = getattr(device_entry, "identifiers", set()) or set()
-        connections = getattr(device_entry, "connections", set()) or set()
+        identifiers: set[tuple[Any, Any]] = getattr(device_entry, "identifiers", set()) or set()
+        connections: set[tuple[Any, Any]] = getattr(device_entry, "connections", set()) or set()
         return any(
             str(domain) == DOMAIN and str(identifier).lower() == normalized_mac for domain, identifier in identifiers
         ) or any(
@@ -617,17 +625,14 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def async_set_channels(call: ServiceCall) -> None:
         device = get_device(call)
-        values = {
-            channel: call.data[color]
-            for channel, color in (
-                ("channel_1", "red"),
-                ("channel_2", "green"),
-                ("channel_3", "blue"),
-                ("channel_4", "white"),
-                ("channel_5", "channel_5"),
-            )
-            if color in call.data
-        }
+        aliases = dict(zip(NATIVE_SCHEDULE_CHANNELS[:4], ("red", "green", "blue", "white"), strict=True))
+        values = {}
+        for channel in NATIVE_SCHEDULE_CHANNELS:
+            alias = aliases.get(channel)
+            if channel in call.data:
+                values[channel] = call.data[channel]
+            elif alias is not None and alias in call.data:
+                values[channel] = call.data[alias]
         if not values:
             raise _action_validation_error("channels_required")
         if not await device.async_set_channels(

@@ -9,6 +9,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Register integration-wide actions and schedule readback during Home
+  Assistant's global setup instead of tying them to one config entry's load.
+- Describe the public channel action with neutral physical-channel fields so
+  Plant and Marine emitters are not mislabeled as AquaSky RGBW channels.
+- Redact adapter and Bluetooth-proxy names and addresses from every copy in
+  downloadable diagnostics.
+- Strengthen runtime typing across BLE writes, decoded fixture state, colour
+  conversion, discovery metadata, and entity presentation.
 - Preserve cached RSSI timestamps on reconnect instead of reporting the cached
   reading as a fresh advertisement.
 - Use config-entry-scoped device registry lookup while retaining the existing

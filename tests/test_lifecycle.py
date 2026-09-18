@@ -2,7 +2,7 @@
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -41,6 +41,22 @@ def test_unload_cleans_runtime_without_preview_support():
         assert "test_entry" not in hass.data[DOMAIN]
 
     asyncio.run(run())
+
+
+def test_global_setup_registers_integration_actions_and_api_once():
+    """Home Assistant requires integration-wide actions in async_setup."""
+    from custom_components.fluvalble import async_setup
+
+    hass = SimpleNamespace(data={})
+    with (
+        patch("custom_components.fluvalble._register_services") as register_services,
+        patch("custom_components.fluvalble._register_websocket") as register_websocket,
+    ):
+        assert asyncio.run(async_setup(hass, {}))
+
+    assert DOMAIN in hass.data
+    register_services.assert_called_once_with(hass)
+    register_websocket.assert_called_once_with(hass)
 
 
 def test_current_options_flow_does_not_register_second_reload_listener():
@@ -172,3 +188,5 @@ def test_setup_does_not_load_retired_cards():
     from custom_components.fluvalble import async_setup_entry
 
     assert "_register_static_paths" not in inspect.getsource(async_setup_entry)
+    assert "_register_services" not in inspect.getsource(async_setup_entry)
+    assert "_register_websocket" not in inspect.getsource(async_setup_entry)

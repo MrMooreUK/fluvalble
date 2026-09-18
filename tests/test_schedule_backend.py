@@ -87,7 +87,7 @@ async def _async_test_set_channels_service_reports_ble_write_failure():
             SimpleNamespace(
                 data={
                     "entry_id": "entry_1",
-                    "red": 50,
+                    "channel_1": 50,
                     "transition": 0,
                     "step_seconds": 0.1,
                 }
@@ -102,6 +102,36 @@ async def _async_test_set_channels_service_reports_ble_write_failure():
         transition=0,
         step_seconds=0.1,
     )
+
+
+def test_set_channels_retains_hidden_positional_aliases_for_saved_automations():
+    async def run():
+        device = _make_device()
+        device.async_set_channels = AsyncMock(return_value=True)
+        hass = _FakeHass(device)
+        _register_services(hass)
+
+        await hass.services.handlers[(DOMAIN, SERVICE_SET_CHANNELS)](
+            SimpleNamespace(
+                data={
+                    "entry_id": "entry_1",
+                    "red": 10,
+                    "green": 20,
+                    "blue": 30,
+                    "white": 40,
+                    "transition": 0,
+                    "step_seconds": 30,
+                }
+            )
+        )
+
+        device.async_set_channels.assert_awaited_once_with(
+            {"channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
+            transition=0,
+            step_seconds=30,
+        )
+
+    asyncio.run(run())
 
 
 async def _async_test_manual_preset_services_dispatch_to_selected_device():
@@ -286,6 +316,10 @@ def test_service_descriptions_use_device_picker_and_fixture_language():
     assert source.count("integration: fluvalble") == 3
     assert "entry_id:" not in source
     assert "MAC address" not in source
+    assert "channel_1:" in source
+    assert "channel_5:" in source
+    assert "    red:" not in source
+    assert "    green:" not in source
     for internal_label in ("classic/OLD", "FACEBD", "FFF0", "SPP", "MESH", "product ID"):
         assert internal_label not in source
 

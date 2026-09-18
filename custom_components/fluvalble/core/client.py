@@ -107,18 +107,18 @@ class Client:
         self.ping_time: float = 0.0
         self._stopping = False
 
-        self.send_data = None
-        self.send_time = 0
+        self.send_data: bytearray | None = None
+        self.send_time = 0.0
         self.connect_task: asyncio.Task | None = None
 
         self.receive_buffer = b""
         self.raw_receive_buffer = b""
-        self.notify_uuid = None
+        self.notify_uuid: str | None = None
         self.notify_uuids: list[str] = []
-        self.init_write_uuid = None
-        self.command_write_uuid = None
+        self.init_write_uuid: str | None = None
+        self.command_write_uuid: str | None = None
         self.command_write_uuids: list[str] = []
-        self.wake_read_uuid = None
+        self.wake_read_uuid: str | None = None
         self.state_read_uuids: list[str] = []
         self.raw_facebd = False
         self.wifi_facebd = False
@@ -286,7 +286,7 @@ class Client:
                 _LOGGER.debug("Unable to refresh Fluval BLE route", exc_info=err)
         return self.device
 
-    async def _ensure_client(self):
+    async def _ensure_client(self) -> BleakClient:
         """Connect and subscribe to notifications if needed."""
         async with self._connection_lock:
             if self._stopping:
@@ -493,14 +493,17 @@ class Client:
     async def _initialize_session(self, client: BleakClient) -> bool:
         """Run the APK initialization once for every physical GATT session."""
         async with self._initialization_lock:
-            if self._session_initialized and client is self.client and client.is_connected:
-                return True
-            if client is not self.client or not client.is_connected:
+            current_client = self.client
+            if current_client is None or client is not current_client:
                 return False
+            if not current_client.is_connected:
+                return False
+            if self._session_initialized:
+                return True
 
             if self.wake_read_uuid:
                 with contextlib.suppress(BleakError):
-                    await client.read_gatt_char(self.wake_read_uuid)
+                    await current_client.read_gatt_char(self.wake_read_uuid)
 
             if self.ready_callback:
                 await self.ready_callback()
@@ -585,8 +588,13 @@ class Client:
 
         self.ping_task = None
 
-    async def _write_packet(self, uuid: str, data: bytes):
+    async def _write_packet(self, uuid: str | None, data: bytes | bytearray) -> None:
         """Write a packet using the right wire format for the active profile."""
+        if uuid is None:
+            raise BleakError("Fluval command characteristic is unavailable")
+        client = self.client
+        if client is None or not client.is_connected:
+            raise BleakError("Fluval BLE client disconnected before write")
         characteristic = self._get_characteristic(uuid)
         # Prefer write-without-response when available — matches ESPHome
         # fluval_ble_led and fixes Aquasky 2.0 lights that ignore response writes (#6).
@@ -608,12 +616,12 @@ class Client:
             if isinstance(characteristic_limit, int) and characteristic_limit > 0:
                 chunk_size = characteristic_limit
             else:
-                mtu_size = getattr(self.client, "mtu_size", None)
+                mtu_size = getattr(client, "mtu_size", None)
                 if isinstance(mtu_size, int) and mtu_size > 3:
                     chunk_size = mtu_size - 3
             payloads = [data[offset : offset + chunk_size] for offset in range(0, len(data), chunk_size)]
         else:
-            payloads = protocol.encrypted_old_frames(data)
+            payloads = list(protocol.encrypted_old_frames(data))
 
         for index, payload in enumerate(payloads):
             _LOGGER.debug(
@@ -625,7 +633,7 @@ class Client:
                 to_hex(data) if index == 0 else "(cont)",
                 to_hex(payload),
             )
-            await self.client.write_gatt_char(uuid, data=payload, response=response)
+            await client.write_gatt_char(uuid, data=payload, response=response)
             if index + 1 < len(payloads):
                 await asyncio.sleep(CHUNK_WRITE_GAP)
 
@@ -725,10 +733,13 @@ class Client:
 
                 self._state_update_event.clear()
                 self._observed_state = {}
+                target_uuid = self.command_write_uuid
+                if target_uuid is None:
+                    raise BleakError("Fluval command characteristic is unavailable")
                 wrote_target = False
                 for attempt in range(1, WRITE_RETRIES + 1):
                     try:
-                        await self._write_packet(self.command_write_uuid, data)
+                        await self._write_packet(target_uuid, data)
                     except (TimeoutError, BleakError, EOFError) as err:
                         self.last_error = (
                             f"write {self.command_write_uuid} attempt {attempt} failed: {type(err).__name__}: {err}"
@@ -743,7 +754,7 @@ class Client:
                             await asyncio.sleep(WRITE_DELAY)
                     else:
                         wrote_target = True
-                        self.last_write_targets.append(self.command_write_uuid)
+                        self.last_write_targets.append(target_uuid)
                         break
 
                 if not wrote_target:
@@ -836,9 +847,9 @@ def encrypt(data: bytearray) -> bytearray:
 
 def decrypt(data: bytearray) -> bytearray:
     """Decrypt a packet that has been received by the Fluval."""
-    return encryption.decrypt(data)
+    return bytearray(encryption.decrypt(data))
 
 
-def to_hex(data: bytes) -> str:
+def to_hex(data: bytes | bytearray) -> str:
     """Print a byte array as hex strings for debugging."""
     return " ".join(format(x, "02x") for x in data)

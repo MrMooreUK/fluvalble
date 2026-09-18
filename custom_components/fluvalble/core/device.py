@@ -122,15 +122,15 @@ class Attribute(TypedDict, total=False):
     """Attributes used by entities like binary_sensor and number."""
 
     options: list[str]
-    default: str
+    default: str | int | bool
 
     min: int
     max: int
     step: int
-    value: int
+    value: Any
 
     is_on: bool
-    extra: dict
+    extra: dict[str, Any]
     device_class: str
     native_unit_of_measurement: str | None
 
@@ -175,7 +175,7 @@ class Device:
         self._active_time = active_time
         self.connected = False
         self.entry_id: str | None = None
-        self.conn_info = {
+        self.conn_info: dict[str, Any] = {
             "mac": self.address,
             "model": self.model,
             "product_id": self.product_id,
@@ -188,10 +188,10 @@ class Device:
             self.conn_info["service_data"],
             config_data.get("manufacturer_data", {}),
         )
-        self.updates_connect: list = []
-        self.updates_component: list = []
+        self.updates_connect: list[Callable[[], None]] = []
+        self.updates_component: list[Callable[[], None]] = []
         self._last_diagnostic_update = 0.0
-        self.values = {}
+        self.values: dict[str, Any] = {}
         for channel in NUMBERS:
             self.values[channel] = 0
         self.values["mode"] = "manual"
@@ -561,7 +561,9 @@ class Device:
             for mode, schedule in (("automatic", auto), ("professional", professional)):
                 if schedule is None:
                     continue
-                points = self._classic_auto_schedule_points(schedule) if mode == "automatic" else schedule
+                points: list[dict[str, Any]] = (
+                    self._classic_auto_schedule_points(schedule) if mode == "automatic" else professional or []
+                )
                 try:
                     self._reported_schedule_points[mode] = tuple(
                         (int(point["minute"]), tuple(int(point[channel]) for channel in self.numbers()))
@@ -601,7 +603,8 @@ class Device:
             return None
         moment = now or datetime.now().astimezone()
         # Static ramps do not describe the instantaneous weather animation.
-        if weather_may_be_active(self.values.get("native_effect_schedule", []), moment):
+        effect_schedule = self.values.get("native_effect_schedule", [])
+        if isinstance(effect_schedule, list) and weather_may_be_active(effect_schedule, moment):
             return None
         levels = interpolate_levels(
             self._reported_schedule_points.get(str(self.values.get("mode")), ()),
@@ -920,7 +923,7 @@ class Device:
             if profile not in (LAMP_PROFILE_AQUASKY, LAMP_PROFILE_AQUASKY3):
                 return False
         if self.client is not None and self.client.command_write_uuid:
-            return self.client.command_write_uuid.lower().startswith("00001001")
+            return str(self.client.command_write_uuid).lower().startswith("00001001")
 
         service_uuids = [str(uuid).lower() for uuid in self.conn_info.get("service_uuids", [])]
         return any(uuid.startswith(("00001000", "00001002")) for uuid in service_uuids) and not any(
@@ -1499,8 +1502,9 @@ class Device:
         product = product_from_id(self.product_id)
         if product is not None and product.manual_preset_count != 4:
             return False
-        if self.client is not None and getattr(self.client, "command_write_uuid", None):
-            return self.client.command_write_uuid.lower().startswith("00001001")
+        command_uuid = getattr(self.client, "command_write_uuid", None)
+        if isinstance(command_uuid, str):
+            return command_uuid.lower().startswith("00001001")
         if product is not None:
             return product.manual_preset_count == 4
 
@@ -1759,7 +1763,7 @@ class Device:
             if getattr(self.client, "wifi_facebd", False):
                 self.facebd = True
                 return True
-            write_uuid = self.client.command_write_uuid.lower()
+            write_uuid = str(self.client.command_write_uuid).lower()
             if write_uuid.startswith("facebd"):
                 self.facebd = True
                 return True
