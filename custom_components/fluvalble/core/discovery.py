@@ -195,7 +195,7 @@ def detect_model(name: str | None, advertisement: AdvertisementData | None) -> s
 
 def discovery_metadata(name: str | None, advertisement: AdvertisementData) -> dict[str, Any]:
     """Build config-entry metadata from the latest BLE advertisement."""
-    metadata = {
+    metadata: dict[str, Any] = {
         CONF_MODEL: detect_model(name, advertisement),
         CONF_SERVICE_UUIDS: list(advertisement.service_uuids),
         CONF_SERVICE_DATA: {key: _data_as_hex(value) for key, value in advertisement.service_data.items()},

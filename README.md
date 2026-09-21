@@ -111,10 +111,10 @@ When Home Assistant detects a Fluval light advertising over BLE, it will show a 
 
 1. Go to **Settings** → **Devices & services** → **Add integration**.
 2. Search for **Fluval Aquarium LED** (or **Fluval BLE**).
-3. **Select your light** from the dropdown. The list shows only devices that look like Fluval lights (by Bluetooth service or name), so your aquarium light is easy to find. Ensure the light is **on** and in range before adding.
+3. **Select your light** from the dropdown. The list contains advertisements whose product ID is present in FluvalConnect's light catalogue. Ensure the light is **on** and in range before adding.
    - If your light appears: choose it and submit. The integration creates one device with a primary light entity, exact channel sliders, mode select, identify and clock-sync buttons, connection status, and diagnostic sensors.
    - If it's not in the list: choose **"My device isn't in the list — enter MAC address manually"**, then enter the MAC (e.g. `AA:BB:CC:DD:EE:FF`). You can find the MAC in your phone's Bluetooth settings or the Fluval app.
-4. After setup, the light and supporting entities appear on the device. If you only see the integration card (for example, "Update") and no light entity, see [Troubleshooting](#troubleshooting) below.
+4. After setup, the light and supporting entities appear when Home Assistant receives the fixture's next advertisement. If they do not, see [Troubleshooting](#troubleshooting) below.
 
 No cloud account or app login is needed; the integration talks directly to the light over BLE.
 When the product is identified, the device page uses FluvalConnect's model name
@@ -169,7 +169,8 @@ off by default because restoring a hardware-scheduled mode can turn the fixture
 back on according to its stored schedule.
 
 Allow the idle timeout to elapse without Home Assistant commands before
-connecting with Fluval Connect. Only one controller may be supported at a time.
+connecting with Fluval Connect. Some fixtures accept only one Bluetooth
+controller at a time.
 
 ---
 
@@ -185,6 +186,11 @@ See [hardware schedules](docs/hardware-schedules.md) for the programming workflo
 Under **Developer tools → Actions**, the integration provides exact channel
 control and manual preset recall/save. Schedule programming, timed-weather
 editing, and schedule previews belong in Fluval Connect.
+
+The `fluvalble.set_channels` action uses neutral `channel_1` through
+`channel_5` field names because the physical emitter assigned to each position
+depends on the product family. The device's Number entities show the exact APK
+label and are the clearest way to make individual adjustments.
 
 Classic fixtures also expose their four fixture-resident manual presets as
 **Manual preset P1** through **P4** scene entities. Activating a scene recalls
@@ -296,12 +302,12 @@ Replace `aabbccddeeff` with your device's MAC (without colons), and `person.you`
 | Issue | What to try |
 |-------|---------------------|
 | **Integration not found** | Restart HA after installation. Ensure the `fluvalble` folder is directly under `custom_components`. |
-| **Only see "Update" / "Pre-release", no light or entities** | The device wasn't in the Bluetooth cache when the integration loaded. Remove the integration (delete the config entry), ensure the light is **on** and in range, then add the integration again and select your light from the dropdown. Restart HA after updating the integration. |
+| **No light or entities yet** | Ensure the fixture is powered and advertising, then wait for its next Bluetooth advertisement or reload the Fluval integration. The entry intentionally remains loaded while it waits; deleting and re-adding it is normally unnecessary. |
 | **Cannot connect / no entities** | Confirm the light is on and in BLE range. Check that HA has Bluetooth enabled and that the adapter can see other BLE devices. Verify the MAC address (no typos, correct format AA:BB:CC:DD:EE:FF). |
 | **My light isn't in the dropdown** | Ensure the light is on and advertising. Use "My device isn't in the list" and enter the MAC manually (from phone Bluetooth settings or the Fluval app). |
 | **Lamp connected but doesn't respond to actions** | Try the Fluval app first to confirm the light works. If the app works but HA doesn't, open an issue with your model and HA logs. |
 | **ESPHome proxy is online but commands are unreliable** | Check Source for the adapter or proxy that owns the active connection, then check that proxy's Wi-Fi signal and scan settings. The integration asks HA for the best connectable route on reconnect; no adapter needs to be disabled manually. |
-| **Light entity doesn't turn the fixture on/off** | Ensure the light model uses the same BLE command set. Try toggling once from the Fluval app, then again from HA. Restart HA and retry. |
+| **Light entity doesn't turn the fixture on/off** | Confirm the detected model and Source, then reload the Fluval integration and retry. If the app currently owns the fixture's one Bluetooth connection, disconnect it and allow the active connection window to expire. |
 | **Entities show "unavailable"** | The light may be out of range or off. Move the light or HA adapter closer; check Reachable, Last seen, and RSSI. An idle GATT disconnect is expected when a finite active connection window is configured. |
 | **Colour or mode doesn't update** | Confirm that the detected model or selected lamp profile is correct, then retry in Manual mode. |
 | **Colour control doesn't change the light** | Confirm the fixture works in the Fluval app, select Manual mode, and retry. If it still fails, download diagnostics from the Fluval integration or device page and include the report with your model when opening an issue. |

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
+from typing import Any, TYPE_CHECKING
 
 import voluptuous as vol
 
@@ -16,10 +16,13 @@ try:
 except ImportError:  # Home Assistant before 2024.4
     from homeassistant.data_entry_flow import FlowResult as ConfigFlowResult
 
-try:
-    from homeassistant.config_entries import OptionsFlowWithReload as OptionsFlowBase
-except ImportError:  # Home Assistant before 2025.8
-    from homeassistant.config_entries import OptionsFlow as OptionsFlowBase  # type: ignore[no-redef]
+if TYPE_CHECKING:
+    from homeassistant.config_entries import OptionsFlow as OptionsFlowBase
+else:
+    try:
+        from homeassistant.config_entries import OptionsFlowWithReload as OptionsFlowBase
+    except ImportError:  # Home Assistant before 2025.8
+        from homeassistant.config_entries import OptionsFlow as OptionsFlowBase
 from homeassistant.const import CONF_MAC
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -195,7 +198,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any], ble_name: st
     return {"title": title, "data": config_data}
 
 
-class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg]
     """Handle a config flow for Fluval Aquarium LED."""
 
     VERSION = CONFIG_ENTRY_VERSION
@@ -282,6 +285,9 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             selected = user_input.get(CONF_MAC)
             if selected == MANUAL_ENTRY:
                 return await self.async_step_manual()
+            if not isinstance(selected, str):
+                errors["base"] = "invalid_format"
+                selected = ""
             mac = normalize_mac(selected)
             if MAC_REGEX.match(mac):
                 await self.async_set_unique_id(unique_id_from_mac(mac))

@@ -438,6 +438,10 @@ def test_downloadable_diagnostics_redact_identifiers_but_keep_protocol_fields():
             "name": "PlantPro_AABBCC",
             "connection_info": {
                 "mac": "AA:BB:CC:DD:EE:FF",
+                "active_connection_source": "Fish room proxy",
+                "active_connection_source_address": "11:22:33:44:55:66",
+                "advertisement_source": "USB adapter",
+                "advertisement_source_address": "66:55:44:33:22:11",
                 "service_uuids": ["0000fff0-0000-1000-8000-00805f9b34fb"],
                 "manufacturer_data": {"12592": "secret"},
             },
@@ -448,6 +452,10 @@ def test_downloadable_diagnostics_redact_identifiers_but_keep_protocol_fields():
     assert report["configured_mac"] == diagnostics.REDACTED
     assert report["name"] == diagnostics.REDACTED
     assert report["connection_info"]["mac"] == diagnostics.REDACTED
+    assert report["connection_info"]["active_connection_source"] == diagnostics.REDACTED
+    assert report["connection_info"]["active_connection_source_address"] == diagnostics.REDACTED
+    assert report["connection_info"]["advertisement_source"] == diagnostics.REDACTED
+    assert report["connection_info"]["advertisement_source_address"] == diagnostics.REDACTED
     assert report["connection_info"]["manufacturer_data"] == diagnostics.REDACTED
     assert report["connection_info"]["service_uuids"] == ["0000fff0-0000-1000-8000-00805f9b34fb"]
     assert report["channel_count"] == 4
