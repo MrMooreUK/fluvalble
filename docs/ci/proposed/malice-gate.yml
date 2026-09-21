@@ -1,0 +1,93 @@
+name: Malice gate
+
+# Fail-closed security checks for every PR. Required for auto-merge.
+# Secret scan + Bandit + Semgrep, plus automerge-eligibility
+# (allowlisted author + no dangerous new patterns + BLE packet path gate).
+
+on:
+  pull_request:
+    branches: [main, master, dev]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  secrets:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  bandit:
+    name: Bandit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Bandit
+        run: pip install bandit
+
+      - name: Bandit on PR diff (fail closed)
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          mapfile -t FILES < <(git diff --name-only --diff-filter=ACMR "$BASE...$HEAD" -- '*.py' || true)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No Python files changed -- Bandit skipped."
+            exit 0
+          fi
+          echo "Scanning ${#FILES[@]} Python file(s)"
+          bandit -q "${FILES[@]}"
+
+  semgrep:
+    name: Semgrep
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Semgrep security audit (fail closed)
+        run: |
+          set -euo pipefail
+          BASE="${{ github.event.pull_request.base.sha }}"
+          HEAD="${{ github.event.pull_request.head.sha }}"
+          mapfile -t FILES < <(git diff --name-only --diff-filter=ACMR "$BASE...$HEAD" -- '*.py' || true)
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "No Python files changed -- Semgrep skipped."
+            exit 0
+          fi
+          semgrep scan --error --config p/python --config p/security-audit --baseline-commit "$BASE"
+
+  automerge-eligibility:
+    name: Automerge eligibility
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Allowlist + dangerous-pattern + BLE path gate
+        env:
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/automerge_eligibility.py
