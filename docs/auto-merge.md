@@ -41,3 +41,21 @@ Typing / null-safety-only edits that do not touch packet or UUID logic can still
 
 - `.github/workflows/malice-gate.yml` — scanners + eligibility
 - `.github/workflows/auto-merge.yml` — enables `gh pr merge --auto --squash` when checks are green
+
+## Install note (workflow scope)
+
+GitHub refuses API writes under `.github/workflows/` without the `workflow` OAuth scope.
+Until that scope is available on the automation token:
+
+```bash
+# one-time: re-auth gh with workflow scope
+gh auth refresh -h github.com -s repo,workflow
+
+# install the staged workflows onto this branch or main
+cp docs/ci/proposed/malice-gate.yml .github/workflows/malice-gate.yml
+cp docs/ci/proposed/auto-merge.yml .github/workflows/auto-merge.yml
+git add .github/workflows/malice-gate.yml .github/workflows/auto-merge.yml
+git commit -m "ci: install malice gate and allowlisted auto-merge"
+```
+
+Then mark the Malice gate checks as required on `main` / `dev` branch protection.
