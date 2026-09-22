@@ -1,0 +1,83 @@
+name: Auto-merge (allowlisted)
+
+# Enables squash auto-merge only for allowlisted authors after CI + malice
+# gate are green. External contributors never auto-merge.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  check_suite:
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  enable:
+    name: Enable squash auto-merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enable auto-merge when eligible
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ALLOW='^(MrMooreUK|dependabot\[bot\]|github-actions\[bot\])$'
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            PR="${{ github.event.pull_request.number }}"
+          else
+            HEAD="${{ github.event.check_suite.head_sha }}"
+            PR=$(gh pr list --repo "${{ github.repository }}" --state open --json number,headRefOid \
+              --jq ".[] | select(.headRefOid==\"$HEAD\") | .number" | head -1)
+            if [ -z "$PR" ]; then
+              echo "No open PR for $HEAD -- skip"
+              exit 0
+            fi
+          fi
+
+          META=$(gh pr view "$PR" --repo "${{ github.repository }}" \
+            --json author,baseRefName,isDraft,autoMergeRequest)
+          AUTHOR=$(echo "$META" | jq -r '.author.login')
+          BASE=$(echo "$META" | jq -r '.baseRefName')
+          DRAFT=$(echo "$META" | jq -r '.isDraft')
+          AUTO=$(echo "$META" | jq -r '.autoMergeRequest != null')
+
+          echo "PR #$PR author=$AUTHOR base=$BASE draft=$DRAFT auto=$AUTO"
+
+          if [ "$DRAFT" = "true" ]; then
+            echo "Draft -- skip"
+            exit 0
+          fi
+          case "$BASE" in
+            main|master|dev) ;;
+            *) echo "Base $BASE not eligible -- skip"; exit 0 ;;
+          esac
+          if ! echo "$AUTHOR" | grep -Eq "$ALLOW"; then
+            echo "Author $AUTHOR not on allowlist -- no auto-merge"
+            exit 0
+          fi
+          if [ "$AUTO" = "true" ]; then
+            echo "Auto-merge already enabled"
+            exit 0
+          fi
+
+          # Wait briefly for checks to register, then require all green + eligibility
+          FAIL=$(gh pr checks "$PR" --repo "${{ github.repository }}" --json name,bucket \
+            --jq '[.[] | select(.bucket=="fail" or .bucket=="pending")] | length' || echo 1)
+          if [ "$FAIL" != "0" ]; then
+            echo "Checks not all green yet -- skip enable"
+            exit 0
+          fi
+
+          ELIG=$(gh pr checks "$PR" --repo "${{ github.repository }}" --json name,bucket \
+            --jq '[.[] | select(.name=="Automerge eligibility" and .bucket=="pass")] | length' || echo 0)
+          if [ "$ELIG" = "0" ]; then
+            echo "Automerge eligibility not green -- skip"
+            exit 0
+          fi
+
+          gh pr merge "$PR" --repo "${{ github.repository }}" --auto --squash
+          echo "Enabled squash auto-merge on #$PR"
