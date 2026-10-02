@@ -209,7 +209,7 @@ NATIVE_EFFECT_WEEKDAYS = (
     "saturday",
     "sunday",
 )
-SERVICE_TARGET_FIELDS = {
+SERVICE_TARGET_FIELDS: dict[Any, Any] = {
     vol.Optional(ATTR_DEVICE_ID): str,
     # Retain historical selectors for saved automations. They are intentionally
     # omitted from services.yaml so new action-editor calls use HA's device picker.

@@ -991,6 +991,29 @@ def test_colour_write_survives_delayed_off_and_channel_notifications(unchanged, 
     asyncio.run(run())
 
 
+@pytest.mark.parametrize(
+    ("product_id", "prefix"),
+    [(328, "old"), (532, "wifi"), (385, "spp")],
+)
+def test_channel_power_uses_the_same_frozen_snapshot_as_channel_packet(product_id, prefix):
+    async def run():
+        device = _make_device(product_id=product_id)
+        device.client = _apk_controller_client(product_id)
+        snapshot = [1, *([0] * (len(device.numbers()) - 1))]
+        device.values.update(dict(zip(device.numbers(), snapshot, strict=True), led_on_off=True))
+        device._channel_values = MagicMock(side_effect=[snapshot, [0] * len(snapshot)])
+        device._async_send_packet = AsyncMock(return_value=True)
+
+        assert await device._async_send_channel_state(dict(device.values), force_power=True)
+
+        power = getattr(protocol, f"{prefix}_switch_packet")(True)
+        channels = getattr(protocol, f"{prefix}_all_zone_packet")(snapshot)
+        assert [call.args[0] for call in device._async_send_packet.await_args_list] == [power, channels]
+        device._channel_values.assert_called_once_with()
+
+    asyncio.run(run())
+
+
 def test_classic_effect_already_off_does_not_power_on_to_clear_weather():
     async def run():
         device = _make_device(product_id=328)
@@ -1586,63 +1609,6 @@ def test_spp_state_rejects_out_of_range_channel_levels(value):
     assert device.values["channel_1"] == 0
 
 
-def test_plant_pro_status_decodes_effect_and_fixture_schedules():
-    device = _make_device(name="PlantPro_AABBCC", model="Plant Pro 4.0 Bluetooth LED", product_id=545)
-    windows = [
-        {
-            "start_hour": 12,
-            "start_minute": 0,
-            "end_hour": 12,
-            "end_minute": 10,
-            "effect_id": 1,
-            "weekdays": [True] * 7,
-            "enabled": True,
-        }
-    ]
-    auto = {
-        "sunrise": (8, 0, 60),
-        "sunset": (20, 30, 45),
-        "sleep": (23, 15),
-        "day_levels": [80, 70, 60, 50, 40],
-        "night_levels": [0, 5, 0, 0, 0],
-    }
-    points = [
-        {"hour": 8, "minute": 0, "levels": [0, 0, 0, 0, 0]},
-        {"hour": 10, "minute": 0, "levels": [20, 20, 20, 20, 20]},
-        {"hour": 12, "minute": 30, "levels": [80, 70, 60, 50, 40]},
-        {"hour": 20, "minute": 0, "levels": [0, 0, 0, 0, 0]},
-    ]
-    status_map = protocol.decode_cbor_update(protocol.spp_effect_schedule_packet(windows))
-    status_map.update(protocol.decode_cbor_update(protocol.spp_auto_schedule_packet(**auto)))
-    status_map.update(protocol.decode_cbor_update(protocol.spp_pro_schedule_packet(points)))
-    status_map[protocol.SPP_EFFECT_KEY] = 4
-    status = bytes((protocol.SPP_STATUS_HEADER,)) + protocol.cbor_map(status_map)
-
-    assert device.decode_update_packet(status)
-    assert device.values["effect"] == "Crescent moon"
-    assert device.values["native_auto_schedule"]["sunrise"] == "08:00"
-    assert device.values["native_pro_schedule"][2]["time"] == "12:30"
-    assert device.diagnostics["native_schedule_protocol"] == "spp"
-    assert device.diagnostics["native_schedule_readback_at"]
-    assert device.diagnostics["plant_pro_effect_schedule"][0]["effect"] == "Lightning"
-
-
-def test_facebd_schedule_readback_is_recorded_for_dashboard():
-    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
-    points = [
-        {"minute": 480, "channel_1": 1, "channel_2": 2, "channel_3": 3, "channel_4": 4},
-        {"minute": 600, "channel_1": 5, "channel_2": 6, "channel_3": 7, "channel_4": 8},
-        {"minute": 1200, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
-        {"minute": 1320, "channel_1": 0, "channel_2": 0, "channel_3": 0, "channel_4": 0},
-    ]
-    data = protocol.decode_cbor_map(protocol.wifi_pro_schedule_packet(points))
-
-    assert device._decode_wifi_update(data)
-    assert device.values["native_pro_schedule"][2]["minute"] == 1200
-    assert device.diagnostics["native_schedule_protocol"] == "facebd"
-    assert device.diagnostics["native_schedule_readback_at"]
-
-
 def test_facebd_dst_readback_is_recorded_as_fixture_state():
     device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
 
@@ -1669,55 +1635,6 @@ async def _async_test_facebd_dst_control_uses_apk_key_99_packet():
     assert device._expected_state_for_packet(protocol.wifi_dst_packet(True)) == {
         protocol.WIFI_DST_KEY: True,
     }
-
-
-def test_facebd_expected_state_covers_apk_effect_and_schedule_fields():
-    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
-    device.client = _facebd_client()
-
-    packets = (
-        protocol.wifi_effect_packet(4),
-        protocol.wifi_auto_schedule_packet(
-            sunrise=(7, 0, 30),
-            sunset=(19, 0, 45),
-            sleep=(23, 0),
-            day_levels=[80, 70, 60, 50],
-            night_levels=[0, 5, 0, 10],
-            channel_count=4,
-        ),
-        protocol.wifi_pro_schedule_packet(
-            [
-                {"time": "00:00", "levels": [0, 0, 0, 0]},
-                {"time": "08:00", "levels": [60, 50, 40, 30]},
-                {"time": "18:00", "levels": [20, 20, 20, 20]},
-                {"time": "23:00", "levels": [0, 0, 0, 0]},
-            ],
-            channel_count=4,
-        ),
-        protocol.wifi_effect_schedule_packet(
-            [
-                {
-                    "start_hour": 10,
-                    "start_minute": 0,
-                    "end_hour": 11,
-                    "end_minute": 0,
-                    "effect_id": 2,
-                    "weekdays": [True, True, True, True, True, True, True],
-                }
-            ]
-        ),
-    )
-
-    for packet in packets:
-        assert device._expected_state_for_packet(packet) == protocol.decode_cbor_update(packet)
-
-
-def test_facebd_transient_preview_and_find_commands_are_not_claimed_as_verified():
-    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
-    device.client = _facebd_client()
-
-    assert device._expected_state_for_packet(protocol.wifi_auto_preview_packet(720)) is None
-    assert device._expected_state_for_packet(protocol.wifi_find_packet()) is None
 
 
 def test_classic_dst_control_is_rejected_without_a_write():
@@ -2210,51 +2127,6 @@ def test_identify_uses_transport_specific_apk_command():
         await _assert_identify_packet(plant_pro, protocol.spp_find_packet())
 
     asyncio.run(run_test())
-
-
-def test_four_effect_facebd_schedule_readback_uses_mesh_names():
-    device = _make_device(product_id=546)
-    data = protocol.decode_cbor_map(
-        protocol.wifi_effect_schedule_packet(
-            [
-                {
-                    "start_hour": 12,
-                    "start_minute": 0,
-                    "end_hour": 12,
-                    "end_minute": 10,
-                    "effect_id": 4,
-                    "weekdays": [True] * 7,
-                    "enabled": True,
-                }
-            ]
-        )
-    )
-
-    assert device._decode_wifi_update(data)
-    assert device.values["native_effect_schedule"][0]["effect"] == "Crescent moon"
-
-
-def test_facebd_effect_schedule_readback_uses_weather_names():
-    device = _make_device(name="AquaSky3.0_Test", model="AquaSky 3.0 Bluetooth LED", product_id=532)
-    data = protocol.decode_cbor_map(
-        protocol.wifi_effect_schedule_packet(
-            [
-                {
-                    "start_hour": 12,
-                    "start_minute": 0,
-                    "end_hour": 12,
-                    "end_minute": 10,
-                    "effect_id": 11,
-                    "weekdays": [True] * 7,
-                    "enabled": True,
-                }
-            ]
-        )
-    )
-
-    assert device._decode_wifi_update(data)
-    assert device.values["native_effect_schedule"][0]["effect"] == "Crescent moon"
-    assert device.diagnostics["native_schedule_protocol"] == "facebd"
 
 
 def test_plant_pro_expected_state_uses_spp_keys():

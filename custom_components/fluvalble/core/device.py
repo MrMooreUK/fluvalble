@@ -612,13 +612,6 @@ class Device:
         )
         return any(levels) if levels is not None else None
 
-    def _invalidate_schedule_projection(self, mode: str) -> None:
-        """Discard old readback immediately after a successful schedule write."""
-        key = "native_auto_schedule" if mode == "automatic" else "native_pro_schedule"
-        self.values.pop(key, None)
-        self.diagnostics.pop(key, None)
-        self._reported_schedule_points.pop(mode, None)
-
     async def _async_read_schedule_projection(self, native_protocol: str) -> None:
         """Refresh classic readback after a write, never from the display timer.
 
@@ -1306,8 +1299,8 @@ class Device:
         channel_index = self.numbers().index(single_channel) if single_channel is not None else None
         # Build from a snapshot: power writes can deliver older channel state.
         channel_values = self._channel_values()
+        any_channel_on = any(channel_values)
         if self._uses_wifi_protocol():
-            any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
                 self.values["led_on_off"] = True
                 if not await self._async_send_packet(protocol.wifi_switch_packet(True)):
@@ -1324,7 +1317,6 @@ class Device:
                 if ok:
                     self.values["led_on_off"] = False
         elif self._uses_spp_protocol():
-            any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
                 self.values["led_on_off"] = True
                 if not await self._async_send_packet(protocol.spp_switch_packet(True)):
@@ -1341,7 +1333,6 @@ class Device:
                 if ok:
                     self.values["led_on_off"] = False
         else:
-            any_channel_on = any(self._channel_values())
             # The classic hardware capture showed that staging channels while
             # off did not survive the next On. Establish power first.
             if any_channel_on and (force_power or not self.values["led_on_off"]):
@@ -1750,10 +1741,6 @@ class Device:
             return True
         return getattr(self.client, "plant_pro_spp", False) is True
 
-    def _uses_plant_pro_protocol(self) -> bool:
-        """Compatibility alias for the formerly Plant-specific SPP helper."""
-        return self._uses_spp_protocol()
-
     def _uses_wifi_protocol(self) -> bool:
         """Prefer the live GATT profile over advertisement heuristics."""
         if self.client is not None and getattr(self.client, "command_write_uuid", None):
@@ -1772,15 +1759,6 @@ class Device:
                 return False
 
         return self.facebd
-
-    def _native_mode_packet(self, mode: str) -> bytes:
-        """Build the mode command for the active fixture protocol."""
-        mode_code = MODE_TO_CODE[mode]
-        if self._uses_wifi_protocol():
-            return protocol.wifi_mode_packet(mode_code)
-        if self._uses_spp_protocol():
-            return protocol.spp_mode_packet(mode_code)
-        return protocol.old_mode_packet(mode_code)
 
     async def _async_prepare_command(self) -> bool:
         """Resolve the BLE device and connect far enough to know the protocol."""
