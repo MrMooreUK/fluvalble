@@ -612,13 +612,6 @@ class Device:
         )
         return any(levels) if levels is not None else None
 
-    def _invalidate_schedule_projection(self, mode: str) -> None:
-        """Discard old readback immediately after a successful schedule write."""
-        key = "native_auto_schedule" if mode == "automatic" else "native_pro_schedule"
-        self.values.pop(key, None)
-        self.diagnostics.pop(key, None)
-        self._reported_schedule_points.pop(mode, None)
-
     async def _async_read_schedule_projection(self, native_protocol: str) -> None:
         """Refresh classic readback after a write, never from the display timer.
 
