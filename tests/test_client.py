@@ -323,37 +323,6 @@ async def _async_test_classic_write_packet_encodes_every_command_at_final_gatt_b
     assert all(write[:1] == b"\x54" for write in writes)
 
 
-def test_classic_long_write_chunks_complete_frame_once():
-    asyncio.run(_async_test_classic_long_write_chunks_complete_frame_once())
-
-
-async def _async_test_classic_long_write_chunks_complete_frame_once():
-    client = _make_client()
-    mock_client = MagicMock()
-    mock_client.write_gatt_char = AsyncMock()
-    client.client = mock_client
-    characteristic = MagicMock(properties=["write-without-response"])
-    client._get_characteristic = MagicMock(return_value=characteristic)
-    packet = protocol.old_pro_schedule_packet(
-        [
-            {"minute": 0, "channel_1": 0, "channel_2": 10, "channel_3": 20, "channel_4": 30},
-            {"minute": 720, "channel_1": 40, "channel_2": 50, "channel_3": 60, "channel_4": 70},
-            {"minute": 1439, "channel_1": 80, "channel_2": 90, "channel_3": 100, "channel_4": 0},
-            {"minute": 1080, "channel_1": 20, "channel_2": 30, "channel_3": 40, "channel_4": 50},
-            {"minute": 1200, "channel_1": 10, "channel_2": 20, "channel_3": 30, "channel_4": 40},
-        ],
-        channel_count=4,
-    )
-
-    with patch("custom_components.fluvalble.core.client.asyncio.sleep", new=AsyncMock()):
-        await client._write_packet(client_module.LEGACY_COMMAND_WRITE_UUIDS[0], packet)
-
-    writes = [bytes(call.kwargs["data"]) for call in mock_client.write_gatt_char.await_args_list]
-    decoded = [encryption.decode_message(write) for write in writes]
-    assert decoded == [packet[:15], packet[15:30], packet[30:]]
-    assert b"".join(decoded) == packet
-
-
 def test_facebd_write_packet_chunks_native_schedule_at_att_limit():
     asyncio.run(_async_test_facebd_write_packet_chunks_native_schedule_at_att_limit())
 

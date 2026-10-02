@@ -28,7 +28,6 @@ WIFI_AUTO_SUNSET_KEY = 115
 WIFI_AUTO_SLEEP_KEY = 116
 WIFI_AUTO_DAY_LEVELS_KEY = 117
 WIFI_AUTO_NIGHT_LEVELS_KEY = 118
-WIFI_AUTO_PREVIEW_KEY = 119
 WIFI_PRO_COUNT_KEY = 120
 WIFI_PRO_TIMES_KEY = 121
 WIFI_PRO_LEVELS_KEY = 122
@@ -53,7 +52,6 @@ SPP_PRO_SCHEDULE_KEY = 13
 SPP_EFFECT_KEY = 14
 SPP_MANUAL_KEY = SPP_EFFECT_KEY
 SPP_EFFECT_SCHEDULE_KEY = 15
-SPP_SCHEDULE_PREVIEW_KEY = 51
 SPP_MIN_PRO_POINTS = 4
 SPP_MAX_PRO_POINTS = 12
 SPP_MAX_EFFECT_WINDOWS = 7
@@ -148,85 +146,6 @@ def wifi_timezone_packet(now: datetime | None = None) -> bytes:
 def mesh_clock_packet(now: datetime | None = None) -> bytes:
     """Build mesh/Plant Pro clock sync (0xCD + Y M D W h m s)."""
     return bytes((MESH_OPCODE_CLOCK,)) + _clock_payload(now)
-
-
-def wifi_auto_schedule_packet(
-    *,
-    sunrise: tuple[int, int, int],
-    sunset: tuple[int, int, int],
-    sleep: tuple[int, int] | None,
-    day_levels: Iterable[int],
-    night_levels: Iterable[int],
-    channel_count: int = 4,
-) -> bytes:
-    """Build the FluvalConnect FACEBD native Auto schedule map.
-
-    Keys 114/115 contain start/end minutes, key 116 is the optional sleep
-    minute (65535 means disabled), and keys 117/118 contain channel levels.
-    The public schedule API expresses sunrise as start+ramp and sunset as
-    end+ramp, matching the mesh fixture API, so convert that representation to
-    the FACEBD controller's absolute minute pairs here.
-    """
-    if channel_count not in (4, 5):
-        raise ValueError("FACEBD Fluval schedules require four or five channels")
-    sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
-    sunrise_end = (sunrise_start + _clamp_ramp(sunrise[2])) % 1440
-    sunset_end = _minute_of_day(sunset[0], sunset[1])
-    sunset_start = (sunset_end - _clamp_ramp(sunset[2])) % 1440
-    sleep_minute = 0xFFFF if sleep is None else _minute_of_day(sleep[0], sleep[1])
-    return cbor_map(
-        {
-            WIFI_AUTO_SUNRISE_KEY: [sunrise_start, sunrise_end],
-            WIFI_AUTO_SUNSET_KEY: [sunset_start, sunset_end],
-            WIFI_AUTO_SLEEP_KEY: sleep_minute,
-            WIFI_AUTO_DAY_LEVELS_KEY: _level_bytes(day_levels, count=channel_count),
-            WIFI_AUTO_NIGHT_LEVELS_KEY: _level_bytes(night_levels, count=channel_count),
-        }
-    )
-
-
-def wifi_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: int = 4) -> bytes:
-    """Build the FluvalConnect FACEBD native Pro schedule map (keys 120-122)."""
-    normalized = _normalized_points(points, channel_count=channel_count)
-    _validate_pro_point_count(
-        len(normalized),
-        minimum=WIFI_MIN_PRO_POINTS,
-        maximum=WIFI_MAX_PRO_POINTS,
-        label="FACEBD",
-    )
-    times = [minute for minute, _levels in normalized]
-    levels = bytes(level for _minute, values in normalized for level in values)
-    return cbor_map(
-        {
-            WIFI_PRO_COUNT_KEY: len(normalized),
-            WIFI_PRO_TIMES_KEY: times,
-            WIFI_PRO_LEVELS_KEY: levels,
-        }
-    )
-
-
-def wifi_auto_preview_packet(minute: int | None) -> bytes:
-    """Build FACEBD native preview command; 1440 stops preview in the APK."""
-    return cbor_map({WIFI_AUTO_PREVIEW_KEY: 1440 if minute is None else int(minute) % 1440})
-
-
-def spp_schedule_preview_packet(minute: int | None) -> bytes:
-    """Build the APK's Plant Pro/MESH native schedule-preview command."""
-    return spp_command({SPP_SCHEDULE_PREVIEW_KEY: 1440 if minute is None else int(minute) % 1440})
-
-
-def wifi_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
-    """Build the APK-native FACEBD timed-effect byte string in CBOR key 123."""
-    return cbor_map(
-        {
-            WIFI_SCHEDULED_EFFECT_KEY: _effect_schedule_blob(
-                windows,
-                maximum=WIFI_MAX_EFFECT_WINDOWS,
-                maximum_effect_id=11,
-                label="FACEBD",
-            )
-        }
-    )
 
 
 def decode_wifi_auto_schedule(
@@ -355,65 +274,6 @@ def spp_find_packet() -> bytes:
     return spp_command({FIND_KEY: "find"})
 
 
-def spp_auto_schedule_packet(
-    *,
-    sunrise: tuple[int, int, int],
-    sunset: tuple[int, int, int],
-    sleep: tuple[int, int] | None,
-    day_levels: Iterable[int],
-    night_levels: Iterable[int],
-    channel_count: int = 5,
-) -> bytes:
-    """Build the current FFF0/SPP Auto schedule stored in keys 8-12."""
-    sunrise_data = bytes(_validate_time_with_ramp(sunrise, "sunrise"))
-    sunset_data = bytes(_validate_time_with_ramp(sunset, "sunset"))
-    sleep_data = bytes((0xFF, 0xFF) if sleep is None else _validate_time(sleep, "sleep"))
-    day_data = bytes(_validate_levels(day_levels, "day_levels", channel_count=channel_count))
-    night_data = bytes(_validate_levels(night_levels, "night_levels", channel_count=channel_count))
-    return spp_command(
-        {
-            SPP_AUTO_SUNRISE_KEY: sunrise_data,
-            SPP_AUTO_SUNSET_KEY: sunset_data,
-            SPP_AUTO_SLEEP_KEY: sleep_data,
-            SPP_AUTO_DAY_LEVELS_KEY: day_data,
-            SPP_AUTO_NIGHT_LEVELS_KEY: night_data,
-        }
-    )
-
-
-def spp_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: int = 5) -> bytes:
-    """Build the current FFF0/SPP Pro-mode schedule in CBOR key 13."""
-    normalized = list(points)
-    _validate_pro_point_count(
-        len(normalized),
-        minimum=SPP_MIN_PRO_POINTS,
-        maximum=SPP_MAX_PRO_POINTS,
-        label="FFF0/SPP",
-    )
-    blob = bytearray((len(normalized),))
-    for point in normalized:
-        hour, minute = _validate_time((point["hour"], point["minute"]), "point")
-        levels = _validate_levels(point["levels"], "point levels", channel_count=channel_count)
-        blob.extend((hour, minute, *levels))
-    return spp_command({SPP_PRO_SCHEDULE_KEY: bytes(blob)})
-
-
-def spp_effect_schedule_packet(
-    windows: Iterable[dict[str, Any]],
-    *,
-    maximum_effect_id: int = 4,
-) -> bytes:
-    """Build seven fixed current-controller effect slots in CBOR key 15."""
-    blob = _effect_schedule_blob(
-        windows,
-        maximum=SPP_MAX_EFFECT_WINDOWS,
-        maximum_effect_id=maximum_effect_id,
-        label="FFF0/SPP",
-        fixed_slots=True,
-    )
-    return spp_command({SPP_EFFECT_SCHEDULE_KEY: blob})
-
-
 def spp_command(values: Mapping[int, Any]) -> bytes:
     """Build an unencrypted current-controller FFF0/SPP command frame."""
     return bytes((SPP_COMMAND_HEADER,)) + cbor_map(values)
@@ -427,76 +287,6 @@ def old_read_params_packet() -> bytes:
 def old_switch_packet(is_on: bool) -> bytes:
     """Build the old BLE on/off packet."""
     return old_packet(bytes((0x68, OLD_SWITCH, 0x01 if is_on else 0x00)))
-
-
-def old_auto_schedule_packet(
-    *,
-    sunrise: tuple[int, int, int],
-    sunset: tuple[int, int, int],
-    sleep: tuple[int, int] | None,
-    day_levels: Iterable[int],
-    night_levels: Iterable[int],
-    channel_count: int,
-) -> bytes:
-    """Build classic ``6807`` Auto payload exactly as FluvalConnect exports it."""
-    if channel_count not in (4, 5):
-        raise ValueError("Classic Fluval schedules require four or five channels")
-    sunrise_start = _minute_of_day(sunrise[0], sunrise[1])
-    sunrise_end = (sunrise_start + _clamp_ramp(sunrise[2])) % 1440
-    sunset_end = _minute_of_day(sunset[0], sunset[1])
-    sunset_start = (sunset_end - _clamp_ramp(sunset[2])) % 1440
-    payload = bytearray((*_hour_minute(sunrise_start), *_hour_minute(sunrise_end)))
-    payload.extend(_level_bytes(day_levels, count=channel_count))
-    payload.extend((*_hour_minute(sunset_start), *_hour_minute(sunset_end)))
-    payload.extend(_level_bytes(night_levels, count=channel_count))
-    if sleep is not None:
-        payload.extend((1, *_time_bytes(sleep[0], sleep[1])))
-    return old_packet(bytes((0x68, OLD_AUTO_SCHEDULE)) + payload)
-
-
-def old_pro_schedule_packet(points: Iterable[dict[str, Any]], *, channel_count: int) -> bytes:
-    """Build classic ``6810`` Pro payload (count + hour/minute/channel points)."""
-    if channel_count not in (4, 5):
-        raise ValueError("Classic Fluval schedules require four or five channels")
-    normalized = _normalized_points(points, channel_count=channel_count)
-    _validate_pro_point_count(
-        len(normalized),
-        minimum=OLD_MIN_PRO_POINTS,
-        maximum=OLD_MAX_PRO_POINTS,
-        label="Classic Fluval",
-    )
-    payload = bytearray((len(normalized),))
-    for minute, levels in normalized:
-        payload.extend((*_hour_minute(minute), *levels))
-    return old_packet(bytes((0x68, OLD_PRO_SCHEDULE)) + payload)
-
-
-def old_effect_schedule_packet(windows: Iterable[dict[str, Any]]) -> bytes:
-    """Build classic ``6811`` timed weather-effect windows from the APK."""
-    blob = _effect_schedule_blob(
-        windows,
-        maximum=OLD_MAX_EFFECT_WINDOWS,
-        maximum_effect_id=11,
-        label="Classic Fluval",
-    )
-    return old_packet(bytes((0x68, OLD_SCHEDULED_EFFECT)) + blob)
-
-
-def _validate_pro_point_count(count: int, *, minimum: int, maximum: int, label: str) -> None:
-    """Enforce the Professional-schedule limits exposed by FluvalConnect."""
-    if not minimum <= count <= maximum:
-        raise ValueError(f"{label} schedule requires {minimum}-{maximum} points")
-
-
-def old_auto_preview_packet(levels: Iterable[int] | None) -> bytes:
-    """Build classic host-generated preview frame or the ``680C`` stop frame."""
-    if levels is None:
-        return old_packet(bytes((0x68, OLD_AUTO_PREVIEW_STOP)))
-    payload = bytearray((0x68, OLD_AUTO_PREVIEW))
-    for value in levels:
-        scaled = _clamp_percent(value) * 10
-        payload.extend(((scaled >> 8) & 0xFF, scaled & 0xFF))
-    return old_packet(payload)
 
 
 def decode_old_state_packet(packet: bytes | bytearray, *, channel_count: int) -> dict[str, Any] | None:
@@ -839,36 +629,6 @@ def decode_spp_effect_schedule(
     )
 
 
-def _effect_schedule_blob(
-    windows: Iterable[dict[str, Any]],
-    *,
-    maximum: int,
-    maximum_effect_id: int,
-    label: str,
-    fixed_slots: bool = False,
-) -> bytes:
-    """Encode the APK's shared six-byte timed-effect window records."""
-    normalized = list(windows)
-    if len(normalized) > maximum:
-        raise ValueError(f"{label} supports at most {maximum} effect windows")
-    blob = bytearray(maximum * 6 if fixed_slots else len(normalized) * 6)
-    for index, window in enumerate(normalized):
-        start_h, start_m = _validate_time((window["start_hour"], window["start_minute"]), "start")
-        end_h, end_m = _validate_time((window["end_hour"], window["end_minute"]), "end")
-        effect_id = int(window["effect_id"])
-        if not 1 <= effect_id <= maximum_effect_id:
-            raise ValueError(f"{label} effect window ID must be between 1 and {maximum_effect_id}")
-        weekdays = list(window.get("weekdays", []))
-        if len(weekdays) != 7 or any(not isinstance(value, bool) for value in weekdays):
-            raise ValueError(f"{label} effect weekdays must contain seven booleans")
-        flags = sum((1 << day) for day, enabled in enumerate(weekdays) if enabled)
-        if bool(window.get("enabled", True)):
-            flags |= 0x80
-        offset = index * 6
-        blob[offset : offset + 6] = bytes((flags, start_h, start_m, end_h, end_m, effect_id))
-    return bytes(blob)
-
-
 def _decode_effect_schedule_blob(
     blob: bytes,
     *,
@@ -946,47 +706,6 @@ def _clamp_percent(value: int) -> int:
     return max(0, min(100, int(value)))
 
 
-def _time_bytes(hour: int, minute: int) -> bytes:
-    return bytes((max(0, min(23, int(hour))), max(0, min(59, int(minute)))))
-
-
-def _validate_time(value: tuple[int, int], label: str) -> tuple[int, int]:
-    hour, minute = (int(item) for item in value)
-    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
-        raise ValueError(f"FFF0/SPP {label} time is outside the 24-hour range")
-    return hour, minute
-
-
-def _validate_time_with_ramp(value: tuple[int, int, int], label: str) -> tuple[int, int, int]:
-    hour, minute = _validate_time((value[0], value[1]), label)
-    ramp = int(value[2])
-    if not 0 <= ramp <= 240:
-        raise ValueError(f"FFF0/SPP {label} ramp must be between 0 and 240 minutes")
-    return hour, minute, ramp
-
-
-def _validate_levels(values: Iterable[int], label: str, *, channel_count: int = 5) -> list[int]:
-    levels = [int(value) for value in values]
-    if channel_count not in (4, 5):
-        raise ValueError("FFF0/SPP channel count must be four or five")
-    if len(levels) != channel_count or any(not 0 <= value <= 100 for value in levels):
-        raise ValueError(f"FFF0/SPP {label} must contain {channel_count} values from 0 to 100")
-    return levels
-
-
-def _clamp_ramp(value: int) -> int:
-    return max(0, min(240, int(value)))
-
-
-def _minute_of_day(hour: int, minute: int) -> int:
-    return max(0, min(23, int(hour))) * 60 + max(0, min(59, int(minute)))
-
-
-def _hour_minute(minute: int) -> tuple[int, int]:
-    normalized = max(0, min(1439, int(minute)))
-    return normalized // 60, normalized % 60
-
-
 def _checked_minute(hour: int, minute: int) -> int | None:
     if hour > 23 or minute > 59:
         return None
@@ -1022,23 +741,6 @@ def _decode_minute_pair(value: Any, *, sunrise: bool) -> dict[str, int] | None:
     if ramp > 240:
         return None
     return _ramp_dict(start if sunrise else end, ramp)
-
-
-def _normalized_points(points: Iterable[dict[str, Any]], *, channel_count: int) -> list[tuple[int, list[int]]]:
-    normalized: list[tuple[int, list[int]]] = []
-    for point in points:
-        minute = int(point.get("minute", 0)) % 1440
-        levels = [_clamp_percent(int(point.get(f"channel_{index}", 0))) for index in range(1, channel_count + 1)]
-        normalized.append((minute, levels))
-    if len(normalized) > 255:
-        raise ValueError("Fluval Pro schedule supports at most 255 points")
-    return normalized
-
-
-def _level_bytes(values: Iterable[int], *, count: int = 5) -> bytes:
-    levels = [_clamp_percent(value) for value in values]
-    levels = [*levels[:count], *([0] * max(0, count - len(levels)))]
-    return bytes(levels[:count])
 
 
 def _decode_time_ramp(value: Any) -> dict[str, int] | None:
