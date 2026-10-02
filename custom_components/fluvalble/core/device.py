@@ -1299,8 +1299,8 @@ class Device:
         channel_index = self.numbers().index(single_channel) if single_channel is not None else None
         # Build from a snapshot: power writes can deliver older channel state.
         channel_values = self._channel_values()
+        any_channel_on = any(channel_values)
         if self._uses_wifi_protocol():
-            any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
                 self.values["led_on_off"] = True
                 if not await self._async_send_packet(protocol.wifi_switch_packet(True)):
@@ -1317,7 +1317,6 @@ class Device:
                 if ok:
                     self.values["led_on_off"] = False
         elif self._uses_spp_protocol():
-            any_channel_on = any(self._channel_values())
             if any_channel_on and (force_power or not self.values["led_on_off"]):
                 self.values["led_on_off"] = True
                 if not await self._async_send_packet(protocol.spp_switch_packet(True)):
@@ -1334,7 +1333,6 @@ class Device:
                 if ok:
                     self.values["led_on_off"] = False
         else:
-            any_channel_on = any(self._channel_values())
             # The classic hardware capture showed that staging channels while
             # off did not survive the next On. Establish power first.
             if any_channel_on and (force_power or not self.values["led_on_off"]):
