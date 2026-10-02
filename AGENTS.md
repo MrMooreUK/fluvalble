@@ -17,8 +17,8 @@ working in this repository. Read this before you start changing code.
   is intentionally low to start — most of the platform/entity code is
   exercised via HA's own test harness rather than unit tests. A follow-up
   PR should add entity-platform tests and raise the floor to ~70%.
-- **Branch model:** `dev` → `main`. PRs target `dev`. Direct PRs to
-  `main` are blocked by CI's `branch-guard` job.
+- **Branch model:** The repository currently uses `main`. Create a feature
+  branch in your fork and open a PR to `main`; never push directly to `main`.
 
 ## Where to look
 
@@ -56,8 +56,8 @@ pytest tests/ --cov=custom_components/fluvalble --cov-report=term-missing
 
 ## What agents must NOT do
 
-- **Do not** push directly to `main`. All changes go through `dev` and
-  a PR. The CI branch-guard will reject direct PRs to `main`.
+- **Do not** push directly to `main`. All changes go through a feature branch
+  in a fork and a PR to `main`.
 - **Do not** change the BLE protocol implementation
   (`core/encryption.py`, command bytes / constants in `core/__init__.py`
   and `core/client.py`) without a protocol capture or hardware

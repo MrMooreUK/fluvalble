@@ -1741,10 +1741,6 @@ class Device:
             return True
         return getattr(self.client, "plant_pro_spp", False) is True
 
-    def _uses_plant_pro_protocol(self) -> bool:
-        """Compatibility alias for the formerly Plant-specific SPP helper."""
-        return self._uses_spp_protocol()
-
     def _uses_wifi_protocol(self) -> bool:
         """Prefer the live GATT profile over advertisement heuristics."""
         if self.client is not None and getattr(self.client, "command_write_uuid", None):
@@ -1763,15 +1759,6 @@ class Device:
                 return False
 
         return self.facebd
-
-    def _native_mode_packet(self, mode: str) -> bytes:
-        """Build the mode command for the active fixture protocol."""
-        mode_code = MODE_TO_CODE[mode]
-        if self._uses_wifi_protocol():
-            return protocol.wifi_mode_packet(mode_code)
-        if self._uses_spp_protocol():
-            return protocol.spp_mode_packet(mode_code)
-        return protocol.old_mode_packet(mode_code)
 
     async def _async_prepare_command(self) -> bool:
         """Resolve the BLE device and connect far enough to know the protocol."""

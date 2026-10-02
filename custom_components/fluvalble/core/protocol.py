@@ -743,26 +743,6 @@ def _decode_minute_pair(value: Any, *, sunrise: bool) -> dict[str, int] | None:
     return _ramp_dict(start if sunrise else end, ramp)
 
 
-def _decode_time_ramp(value: Any) -> dict[str, int] | None:
-    if not isinstance(value, bytes) or len(value) < 3:
-        return None
-    hour, minute, ramp = value[:3]
-    if hour > 23 or minute > 59:
-        return None
-    return {"hour": hour, "minute": minute, "ramp": ramp}
-
-
-def _decode_sleep_time(value: Any) -> dict[str, int] | None:
-    if not isinstance(value, bytes) or len(value) < 2:
-        return None
-    hour, minute = value[:2]
-    if (hour, minute) == (0xFF, 0xFF):
-        return None
-    if hour > 23 or minute > 59:
-        return None
-    return {"hour": hour, "minute": minute}
-
-
 def _decode_levels(value: Any, *, exact: int) -> list[int] | None:
     if not isinstance(value, bytes) or len(value) != exact:
         return None
