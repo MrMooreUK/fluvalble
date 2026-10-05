@@ -80,6 +80,16 @@ CHANNEL_NAMES_MARINE = {
     "channel_4": "Purple",
     "channel_5": "Cold White",
 }
+# Product 281 is the APK's special Fresh 281 layout. It uses the current
+# Reef spectrum asset, but DeviceUtil.getLightChannel() gives its physical
+# emitters this different order.
+CHANNEL_NAMES_FRESH_281 = {
+    "channel_1": "Red",
+    "channel_2": "Blue",
+    "channel_3": "Purple",
+    "channel_4": "Cold White",
+    "channel_5": "Warm White",
+}
 CHANNEL_NAMES_PLANT_PRO = {
     # Kept as a compatibility profile name. FluvalConnect assigns Plant PRO
     # and Plant 4.0 the same APK light type and five-channel order.
@@ -694,6 +704,8 @@ class Device:
     def _channel_labels(self) -> dict[str, str]:
         """Return channel labels for the active lamp profile."""
         if (product := product_from_id(self.product_id)) is not None:
+            if self.product_id == 281:
+                return CHANNEL_NAMES_FRESH_281
             if product.spectrum == "plant":
                 return CHANNEL_NAMES_PLANT
             if product.spectrum == "rgbw":
@@ -746,7 +758,9 @@ class Device:
         )
 
     def uses_marine_spectrum(self) -> bool:
-        """Return whether the fixture uses the five-channel Marine spectrum."""
+        """Return whether the fixture uses the five-channel Reef spectrum."""
+        if (product := product_from_id(self.product_id)) is not None:
+            return product.spectrum == "marine"
         return self._channel_labels() == CHANNEL_NAMES_MARINE
 
     def light_mode(self) -> str:

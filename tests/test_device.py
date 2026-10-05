@@ -18,6 +18,7 @@ from custom_components.fluvalble.core import protocol
 from custom_components.fluvalble.core.device import (
     AQUASKY_NUMBERS,
     CHANNEL_NAMES_AQUASKY,
+    CHANNEL_NAMES_FRESH_281,
     CHANNEL_NAMES_MARINE,
     CHANNEL_NAMES_PLANT,
     CHANNEL_NAMES_PLANT_PRO,
@@ -104,8 +105,9 @@ def test_every_apk_product_drives_all_fixture_capabilities():
 
         assert len(device.numbers()) == product.channel_count
         assert device.spectrum_profile() == product.spectrum_profile
+        expected_channel_names = CHANNEL_NAMES_FRESH_281 if product_id == 281 else channel_names[product.spectrum]
         assert [device.entity_name(channel) for channel in device.numbers()] == [
-            channel_names[product.spectrum][channel] for channel in device.numbers()
+            expected_channel_names[channel] for channel in device.numbers()
         ]
         assert device.light_mode() == ("rgb_white" if product.spectrum == "rgbw" else "rgb")
         assert device.supports_manual_presets() is (product.manual_preset_count == 4)
@@ -134,6 +136,22 @@ def test_every_apk_product_drives_all_fixture_capabilities():
             assert device.effect_list() == ["off", *PLANT_PRO_EFFECTS]
         else:
             assert device.effect_list() == []
+
+
+def test_product_281_keeps_its_apk_specific_channel_order():
+    """DeviceUtil gives product 281 a special five-channel Manual layout."""
+    device = _make_device(product_id=281)
+
+    assert [device.entity_name(channel) for channel in device.numbers()] == [
+        "Red",
+        "Blue",
+        "Purple",
+        "Cold White",
+        "Warm White",
+    ]
+    # ManFragment still selects 540_reef.txt through the APK's default type 1.
+    assert device.spectrum_profile() == "reef_current"
+    assert device.light_mode() == "rgb"
 
 
 @pytest.mark.parametrize("product_id", PRODUCTS)
