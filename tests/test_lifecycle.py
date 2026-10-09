@@ -190,3 +190,10 @@ def test_setup_does_not_load_retired_cards():
     assert "_register_static_paths" not in inspect.getsource(async_setup_entry)
     assert "_register_services" not in inspect.getsource(async_setup_entry)
     assert "_register_websocket" not in inspect.getsource(async_setup_entry)
+
+
+def test_integration_declares_config_entry_only_schema():
+    """Hassfest requires a CONFIG_SCHEMA when async_setup is implemented."""
+    import custom_components.fluvalble as integration
+
+    assert integration.CONFIG_SCHEMA.schema == {integration.DOMAIN: object}

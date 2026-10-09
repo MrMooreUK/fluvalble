@@ -367,6 +367,11 @@ def _stub_homeassistant():
     ha_event.async_track_point_in_time = MagicMock(return_value=MagicMock())
     ha_event.async_track_time_interval = MagicMock(return_value=MagicMock())
 
+    # ---- homeassistant.helpers.config_validation ----
+    ha_cv = types.ModuleType("homeassistant.helpers.config_validation")
+    ha_cv.config_entry_only_config_schema = lambda domain: _Schema({domain: object})
+    ha_helpers.config_validation = ha_cv
+
     # ---- homeassistant.util.dt ----
     ha_util = types.ModuleType("homeassistant.util")
     ha_dt = types.ModuleType("homeassistant.util.dt")
@@ -393,6 +398,7 @@ def _stub_homeassistant():
         "homeassistant.components.binary_sensor": ha_bs,
         "homeassistant.components.light": ha_light,
         "homeassistant.helpers": ha_helpers,
+        "homeassistant.helpers.config_validation": ha_cv,
         "homeassistant.helpers.device_registry": ha_dr,
         "homeassistant.helpers.redact": ha_redact,
         "homeassistant.helpers.entity": ha_entity,
