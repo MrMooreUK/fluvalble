@@ -61,8 +61,8 @@ pytest tests/ --cov=custom_components/fluvalble --cov-report=term-missing
 - **Do not** change the BLE protocol implementation
   (`core/encryption.py`, command bytes / constants in `core/__init__.py`
   and `core/client.py`) without a protocol capture or hardware
-  verification. See `docs/bug-triage.md` for the open issues
-  (#6 Aquasky 2.0, #8 RTC drift) that need protocol evidence to fix.
+  verification. See `docs/bug-triage.md` for resolved-issue evidence and
+  the remaining hardware-validation boundaries.
 - **Do not** bump the `version` in `manifest.json` without also
   updating `CHANGELOG.md`.
 - **Do not** edit the existing `dev-to-master.yml` or `release.yml`

@@ -160,6 +160,15 @@ Open the integration's **Configure** dialog to adjust its BLE connection behavio
 The **Active connection window** accepts `30`–`600` seconds, default `120`.
 Home Assistant releases an idle connection so Fluval Connect can connect.
 
+The **Keep-alive interval** accepts `5`–`60` seconds, default `10`. It controls
+how often Home Assistant reads from a fixture while the active connection window
+is open. Lower values can improve link responsiveness at the cost of more BLE
+traffic; it does not extend the active connection window.
+
+**Lamp profile** normally remains **Auto-detect (APK product ID first)**. It is
+an advanced fallback for an unidentified fixture when its confirmed family is
+known; it should not be used to override an identified product.
+
 The optional **Restore previous mode after channels reach zero** setting keeps
 exact channel-slider adjustments in Manual mode while any channel remains above
 zero. When every channel reaches zero, the fixture turns off immediately; after
