@@ -217,7 +217,7 @@ class Device:
         # manual channel caches used by commands.
         self._reported_schedule_points: dict[str, tuple[tuple[int, tuple[int, ...]], ...]] = {}
         self._scheduled_power_off = False
-        self._control_readback_revision = {"mode": 0, "led_on_off": 0}
+        self._control_readback_revision = {key: 0 for key in ("mode", "led_on_off", *NUMBERS)}
         self._clock_sync_started = False
         self._clock_sync_lock = asyncio.Lock()
         self._command_transaction_lock = asyncio.Lock()
@@ -1208,8 +1208,11 @@ class Device:
             }
             start_values = {channel: int(self.values[channel]) for channel in channels}
 
-        steps = max(1, int(transition / max(1, step_seconds)))
+        steps = max(1, -(-transition // max(1, step_seconds)))
+        started = monotonic()
         for step in range(1, steps + 1):
+            deadline = started + transition * step / steps
+            await asyncio.sleep(max(0, deadline - monotonic()))
             async with self.command_transaction(supersede_transition=False):
                 if generation != self._command_generation:
                     self.diagnostics["status"] = "transition_interrupted"
@@ -1226,8 +1229,6 @@ class Device:
                     restore_mode_on_zero=restore_mode_on_zero,
                 ):
                     return False
-            if step < steps:
-                await asyncio.sleep(step_seconds)
         return True
 
     async def _async_set_channels_now(
@@ -1254,13 +1255,11 @@ class Device:
             _LOGGER.debug("Skipping Fluval channel write because targets are unchanged: %s", targets)
             return True
 
-        old_values = dict(self.values)
-        changed_channels = [channel for channel, value in targets.items() if int(old_values.get(channel, -1)) != value]
-        single_channel = changed_channels[0] if len(changed_channels) == 1 and not force else None
         if not await self._async_prepare_command():
             _LOGGER.warning("Cannot set Fluval channel before BLE device is available")
-            self.values = old_values
             return False
+
+        old_values = dict(self.values)
 
         if self.values.get("mode") != "manual":
             previous_mode = cast(Any, self.values.get("mode"))
@@ -1271,6 +1270,7 @@ class Device:
                 and previous_mode in {"automatic", "professional"}
             ):
                 self._channel_restore_mode = previous_mode
+            mode_revision = self._control_readback_revision["mode"]
             if self._uses_wifi_protocol():
                 ok = await self._async_send_packet(protocol.wifi_mode_packet(MODE_TO_CODE["manual"]))
             elif self._uses_spp_protocol():
@@ -1278,10 +1278,17 @@ class Device:
             else:
                 ok = await self._async_send_packet(protocol.old_mode_packet(MODE_TO_CODE["manual"]))
             if not ok:
-                self.values = old_values
                 return False
-            self.values["mode"] = "manual"
+            if self._control_readback_revision["mode"] == mode_revision:
+                self.values["mode"] = "manual"
 
+        old_values = dict(self.values)
+
+        # Reconnection and mode writes can refresh untouched channels. Merge
+        # the explicit request into that current state, never the idle cache.
+        targets = {channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels}
+        changed_channels = [channel for channel, value in targets.items() if int(old_values.get(channel, -1)) != value]
+        single_channel = changed_channels[0] if len(changed_channels) == 1 and not force else None
         for channel, value in targets.items():
             self.values[channel] = value
         ok = await self._async_send_channel_state(
@@ -1313,12 +1320,32 @@ class Device:
         channel_index = self.numbers().index(single_channel) if single_channel is not None else None
         # Build from a snapshot: power writes can deliver older channel state.
         channel_values = self._channel_values()
+        revisions = dict(self._control_readback_revision)
+
+        def restore_channels() -> None:
+            for channel in self.numbers():
+                if self._control_readback_revision[channel] == revisions[channel]:
+                    self.values[channel] = old_values[channel]
+
+        async def power(value: bool) -> bool:
+            revision = self._control_readback_revision["led_on_off"]
+            builder = (
+                protocol.wifi_switch_packet
+                if self._uses_wifi_protocol()
+                else protocol.spp_switch_packet
+                if self._uses_spp_protocol()
+                else protocol.old_switch_packet
+            )
+            ok = await self._async_send_packet(builder(value))
+            if ok and self._control_readback_revision["led_on_off"] == revision:
+                self.values["led_on_off"] = value
+            return ok
+
         any_channel_on = any(channel_values)
         if self._uses_wifi_protocol():
             if any_channel_on and (force_power or not self.values["led_on_off"]):
-                self.values["led_on_off"] = True
-                if not await self._async_send_packet(protocol.wifi_switch_packet(True)):
-                    self.values = old_values
+                if not await power(True):
+                    restore_channels()
                     return False
             packet = (
                 protocol.wifi_single_zone_packet(channel_index, channel_values[channel_index])
@@ -1326,15 +1353,13 @@ class Device:
                 else protocol.wifi_all_zone_packet(channel_values)
             )
             ok = await self._async_send_packet(packet)
+            channels_written = ok
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
-                ok = await self._async_send_packet(protocol.wifi_switch_packet(False))
-                if ok:
-                    self.values["led_on_off"] = False
+                ok = await power(False)
         elif self._uses_spp_protocol():
             if any_channel_on and (force_power or not self.values["led_on_off"]):
-                self.values["led_on_off"] = True
-                if not await self._async_send_packet(protocol.spp_switch_packet(True)):
-                    self.values = old_values
+                if not await power(True):
+                    restore_channels()
                     return False
             packet = (
                 protocol.spp_single_zone_packet(channel_index, channel_values[channel_index])
@@ -1342,26 +1367,26 @@ class Device:
                 else protocol.spp_all_zone_packet(channel_values)
             )
             ok = await self._async_send_packet(packet)
+            channels_written = ok
             if ok and not any_channel_on and (force_power or self.values["led_on_off"]):
-                ok = await self._async_send_packet(protocol.spp_switch_packet(False))
-                if ok:
-                    self.values["led_on_off"] = False
+                ok = await power(False)
         else:
             # The classic hardware capture showed that staging channels while
             # off did not survive the next On. Establish power first.
             if any_channel_on and (force_power or not self.values["led_on_off"]):
-                if not await self._async_send_packet(protocol.old_switch_packet(True)):
-                    self.values = old_values
+                if not await power(True):
+                    restore_channels()
                     return False
-                self.values["led_on_off"] = True
             ok = await self._async_send_packet(protocol.old_all_zone_packet(channel_values))
+            channels_written = ok
             if ok and not any_channel_on and self.values["led_on_off"]:
-                ok = await self._async_send_packet(protocol.old_switch_packet(False))
-                if ok:
-                    self.values["led_on_off"] = False
+                ok = await power(False)
 
         if not ok:
-            self.values = old_values
+            # A power/mode command may already have succeeded. Never roll
+            # those fields back because a later channel write failed.
+            if not channels_written:
+                restore_channels()
             for handler in self.updates_component:
                 handler()
         return ok
@@ -1475,18 +1500,15 @@ class Device:
             )
             return False
 
-        previous = self.values.get("daylight_saving_time")
-        self.values["daylight_saving_time"] = enabled
+        revision = self._control_readback_revision.get("daylight_saving_time", 0)
         if not await self._async_send_packet(protocol.wifi_dst_packet(enabled)):
-            if isinstance(previous, bool):
-                self.values["daylight_saving_time"] = previous
-            else:
-                self.values.pop("daylight_saving_time", None)
-            for handler in self.updates_component:
-                handler()
             return False
 
-        self.diagnostics["daylight_saving_time"] = enabled
+        if self._control_readback_revision.get("daylight_saving_time", 0) == revision:
+            self.values["daylight_saving_time"] = enabled
+        self.diagnostics["daylight_saving_time"] = self.values["daylight_saving_time"]
+        for handler in self.updates_component:
+            handler()
         return True
 
     def _manual_preset_values(self, slot: int) -> list[int] | None:
@@ -2159,6 +2181,7 @@ class Device:
             channels = decoded["channels"]
             self._channel_count_hint = channel_count
             for index, raw in enumerate(channels):
+                self._control_readback_revision[f"channel_{index + 1}"] += 1
                 self.values[f"channel_{index + 1}"] = max(0, min(100, round(raw / 10)))
             for index in range(len(channels), 5):
                 self.values[f"channel_{index + 1}"] = 0
@@ -2211,6 +2234,9 @@ class Device:
             updated = True
 
         if protocol.WIFI_DST_KEY in data and isinstance(data[protocol.WIFI_DST_KEY], bool):
+            self._control_readback_revision["daylight_saving_time"] = (
+                self._control_readback_revision.get("daylight_saving_time", 0) + 1
+            )
             self.values["daylight_saving_time"] = data[protocol.WIFI_DST_KEY]
             self.diagnostics["daylight_saving_time"] = data[protocol.WIFI_DST_KEY]
             updated = True
@@ -2229,6 +2255,7 @@ class Device:
             value = data.get(key)
             if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 100:
                 self.values[channel] = value
+                self._control_readback_revision[channel] += 1
                 present += 1
                 updated = True
         fifth_channel = data.get(protocol.WIFI_CHANNEL_KEYS[4])
@@ -2296,6 +2323,7 @@ class Device:
             value = data.get(key)
             if not isinstance(value, bool) and isinstance(value, int) and 0 <= value <= 100:
                 self.values[channel] = value
+                self._control_readback_revision[channel] += 1
                 present += 1
                 updated = True
         if present:

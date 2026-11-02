@@ -119,6 +119,30 @@ def test_equal_time_steps_select_last_point():
     assert interpolate_levels([(0, (0,) * 4), (0, (100,) * 4)], 0) is None
 
 
+@pytest.mark.parametrize("count", [4, 5])
+@pytest.mark.parametrize("shift", [0, 137, 900, 1380])
+def test_full_day_pro_matches_apk_sorted_cyclic_segments(count, shift):
+    points = [
+        ((time + shift) % 1440, tuple([level, 1, 37, 0, 63][:count]))
+        for time, level in [(1200, 90), (60, 0), (480, 100), (1000, 1)]
+    ]
+    ordered = sorted(points)
+    segments = list(zip(ordered, ordered[1:] + ordered[:1], strict=True))
+    for minute in range(1440):
+        for (start, levels), (end, next_levels) in segments:
+            duration = (end - start) % 1440
+            elapsed = (minute - start) % 1440
+            if elapsed >= duration:
+                continue
+            expected = []
+            for low, high in zip(levels, next_levels, strict=True):
+                numerator = (high - low) * 10 * elapsed
+                delta = abs(numerator) // duration
+                expected.append(low * 10 + (delta if numerator >= 0 else -delta))
+            assert interpolate_levels(points, minute) == tuple(expected)
+            break
+
+
 def test_readback_is_immutable_and_clock_survives_idle_disconnect():
     device = device_with_schedule()
     device.values["native_auto_schedule"]["day_levels"][:] = [0] * 5

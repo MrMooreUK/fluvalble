@@ -772,7 +772,7 @@ async def _async_test_new_command_supersedes_long_channel_transition_between_fra
         release_transition.set()
         assert await transition_task
 
-    device._async_set_channels_now.assert_awaited_once()
+    device._async_set_channels_now.assert_not_awaited()
     device._async_send_packet.assert_awaited_once_with(protocol.old_switch_packet(False))
     assert device.diagnostics["status"] == "transition_interrupted"
 
