@@ -1,4 +1,4 @@
-"""Explicit colour-only editing of fixture schedules."""
+"""Explicit, verified editing of fixture schedule colours and times."""
 
 from pathlib import Path
 import asyncio
@@ -54,6 +54,7 @@ async def async_setup_editor(hass):
             vol.Required("target"): vol.Any(str, int),
             vol.Required("levels"): [int],
             vol.Required("baseline"): vol.Any(dict, list),
+            vol.Optional("times"): vol.Any(dict, int),
         }
     )
     @websocket_api.async_response
@@ -87,16 +88,21 @@ async def async_setup_editor(hass):
                     channel_count=len(device.numbers()),
                     levels=msg["levels"],
                     target=msg["target"],
+                    times=msg.get("times"),
                 )
                 if not await _write_schedule_packet(device, packet, transport):
                     raise ValueError(device.command_error_message())
                 if not await device.async_refresh_state():
                     raise ValueError("Write sent, but readback failed. Reload to confirm the result")
                 expected = replace_schedule_colours(
-                    current, channel_count=len(device.numbers()), levels=msg["levels"], target=msg["target"]
+                    current,
+                    channel_count=len(device.numbers()),
+                    levels=msg["levels"],
+                    target=msg["target"],
+                    times=msg.get("times"),
                 )
                 if device.values.get(key) != expected:
-                    raise ValueError("Fixture readback did not confirm the saved levels. Reload before retrying")
+                    raise ValueError("Fixture readback did not confirm the saved schedule. Reload before retrying")
             connection.send_result(msg["id"], True)
         except (ValueError, KeyError, TypeError) as err:
             connection.send_error(msg["id"], "save_failed", str(err))
