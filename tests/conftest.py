@@ -84,9 +84,13 @@ def _stub_homeassistant():
     class ServiceValidationError(HomeAssistantError):
         """Stub Home Assistant's user-input service error."""
 
+    class Unauthorized(HomeAssistantError):
+        """Stub Home Assistant's non-admin websocket rejection."""
+
     ha_exc = types.ModuleType("homeassistant.exceptions")
     ha_exc.HomeAssistantError = HomeAssistantError
     ha_exc.ServiceValidationError = ServiceValidationError
+    ha_exc.Unauthorized = Unauthorized
 
     # ---- homeassistant.const ----
     class Platform(str, enum.Enum):

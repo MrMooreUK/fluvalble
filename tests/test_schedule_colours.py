@@ -258,3 +258,152 @@ def test_editor_time_save_requires_exact_hardware_readback(confirmed):
     else:
         connection.send_error.assert_called_once()
         connection.send_result.assert_not_called()
+
+
+def _run_save(*, device, entry="valid", schedule="auto", baseline=None, admin_error=None):
+    """Register the editor, call the save command once and return the connection mock."""
+    from custom_components.fluvalble.schedule_editor import async_setup_editor
+
+    if entry == "valid":
+        entry_obj = SimpleNamespace(domain="fluvalble")
+    elif entry == "wrong_domain":
+        entry_obj = SimpleNamespace(domain="other")
+    else:
+        entry_obj = None
+    hass = SimpleNamespace(
+        data={"fluvalble": {}},
+        http=SimpleNamespace(register_static_path=MagicMock()),
+        config_entries=SimpleNamespace(async_get_entry=lambda _: entry_obj),
+    )
+    connection = SimpleNamespace(
+        require_admin=MagicMock(side_effect=admin_error), send_result=MagicMock(), send_error=MagicMock()
+    )
+    msg = {
+        "id": 7,
+        "entry_id": "fixture",
+        "schedule": schedule,
+        "target": "day",
+        "levels": [50] * 4,
+        "baseline": baseline if baseline is not None else auto_schedule(),
+    }
+    with (
+        patch.dict(sys.modules, {"homeassistant.components.frontend": SimpleNamespace(add_extra_js_url=MagicMock())}),
+        patch("custom_components.fluvalble.schedule_editor.vol.Any", lambda *args: object, create=True),
+        patch("custom_components.fluvalble.schedule_editor.websocket_api.async_register_command") as register,
+        patch("custom_components.fluvalble.entry_runtime_data", return_value=SimpleNamespace(device=device)),
+    ):
+        asyncio.run(async_setup_editor(hass))
+        save = register.call_args_list[1].args[1]
+        asyncio.run(save(hass, connection, msg))
+    return connection
+
+
+def _save_device(*, values, refresh_results=(True, True), send_result=True, error_message="Write failed"):
+    """Build a fake fixture whose refresh calls return the given results in order."""
+
+    @asynccontextmanager
+    async def transaction():
+        yield
+
+    results = iter(refresh_results)
+
+    async def refresh():
+        return next(results)
+
+    return SimpleNamespace(
+        command_transaction=transaction,
+        numbers=lambda: range(4),
+        _uses_wifi_protocol=lambda: True,
+        _uses_spp_protocol=lambda: False,
+        values=values,
+        async_refresh_state=refresh,
+        _async_send_packet=AsyncMock(return_value=send_result),
+        command_error_message=lambda: error_message,
+    )
+
+
+@pytest.mark.parametrize(
+    ("schedule", "mode"),
+    [
+        ("auto", "professional"),
+        ("auto", "manual"),
+        ("auto", None),
+        ("professional", "automatic"),
+        ("professional", "manual"),
+        ("professional", None),
+    ],
+)
+def test_editor_save_rejects_mode_mismatch_without_writing(schedule, mode):
+    key = "native_auto_schedule" if schedule == "auto" else "native_pro_schedule"
+    device = _save_device(values={"mode": mode, key: auto_schedule()})
+    connection = _run_save(device=device, schedule=schedule)
+    device._async_send_packet.assert_not_awaited()
+    connection.send_result.assert_not_called()
+    connection.send_error.assert_called_once_with(
+        7, "save_failed", "Select the matching schedule mode on the light before editing"
+    )
+
+
+@pytest.mark.parametrize(
+    ("schedule", "mode", "key"),
+    [
+        ("auto", "automatic", "native_auto_schedule"),
+        ("professional", "professional", "native_pro_schedule"),
+    ],
+)
+@pytest.mark.parametrize("stored", ["changed", None])
+def test_editor_save_rejects_stale_baseline_without_writing(schedule, mode, key, stored):
+    current = auto_schedule()
+    current["sunrise"]["minute"] = 45
+    device = _save_device(values={"mode": mode, key: current if stored == "changed" else None})
+    connection = _run_save(device=device, schedule=schedule, baseline=auto_schedule())
+    device._async_send_packet.assert_not_awaited()
+    connection.send_result.assert_not_called()
+    connection.send_error.assert_called_once_with(7, "save_failed", "Schedule changed. Reload it before saving")
+
+
+@pytest.mark.parametrize(
+    ("refresh_results", "send_result", "message"),
+    [
+        ((False,), True, "Unable to read the fixture before saving"),
+        ((True,), False, "Write failed"),
+        ((True, False), True, "Write sent, but readback failed. Reload to confirm the result"),
+    ],
+    ids=["pre_write_refresh_fails", "write_fails", "readback_refresh_fails"],
+)
+def test_editor_save_reports_refresh_write_and_readback_failures(refresh_results, send_result, message):
+    original = auto_schedule()
+    device = _save_device(
+        values={"mode": "automatic", "native_auto_schedule": original},
+        refresh_results=refresh_results,
+        send_result=send_result,
+    )
+    connection = _run_save(device=device, baseline=deepcopy(original))
+    assert device._async_send_packet.await_count == (0 if message.startswith("Unable") else 1)
+    connection.send_result.assert_not_called()
+    connection.send_error.assert_called_once_with(7, "save_failed", message)
+
+
+@pytest.mark.parametrize("entry", ["missing", "wrong_domain"])
+def test_editor_save_reports_not_found_for_unknown_or_foreign_entry(entry):
+    device = _save_device(values={})
+    connection = _run_save(device=device, entry=entry)
+    connection.send_error.assert_called_once_with(7, "not_found", "Fluval fixture not found")
+    connection.send_result.assert_not_called()
+    device._async_send_packet.assert_not_awaited()
+
+
+def test_editor_save_reports_unavailable_when_device_is_none():
+    connection = _run_save(device=None)
+    connection.send_error.assert_called_once_with(7, "unavailable", "Fixture unavailable")
+    connection.send_result.assert_not_called()
+
+
+def test_editor_save_raises_unauthorized_for_non_admin_before_any_work():
+    from homeassistant.exceptions import Unauthorized
+
+    original = auto_schedule()
+    device = _save_device(values={"mode": "automatic", "native_auto_schedule": original})
+    with pytest.raises(Unauthorized):
+        _run_save(device=device, baseline=deepcopy(original), admin_error=Unauthorized())
+    device._async_send_packet.assert_not_awaited()
