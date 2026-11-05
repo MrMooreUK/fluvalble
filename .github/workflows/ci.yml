@@ -34,6 +34,7 @@ jobs:
       - name: Run Ruff (linter + formatter check)
         run: |
           ruff check custom_components/ tests/
+          ruff format --check custom_components/ tests/
 
   # -----------------------------------------------------------------------
   # Validate manifest.json
@@ -229,9 +230,10 @@ jobs:
           fetch-depth: 1
 
       - name: Enforce dev-first workflow
+        env:
+          TARGET: ${{ github.base_ref }}
+          SOURCE: ${{ github.head_ref }}
         run: |
-          TARGET="${{ github.base_ref }}"
-          SOURCE="${{ github.head_ref }}"
           echo "PR: $SOURCE → $TARGET"
 
           # If a dev branch exists, require feature/fix PRs to target it first.
