@@ -7,8 +7,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.0.16] — 2026-11-05
+
 ### Fixed
 
+- Honour the full requested channel transition duration, including fades
+  shorter than the step interval.
+- Preserve fresh channel reports and successful intermediate power, mode, and
+  channel writes when a later operation fails.
+- Preserve untouched emitters from reconnect readback during partial channel
+  adjustments, and preserve FACEBD daylight-saving readback across successful
+  and failed writes.
 - Match FluvalConnect's legacy ASCII advertisement remaps for reused product
   IDs 0181/0182 while retaining current binary product identities.
 - Wait for classic schedule memory to settle before editor save readback.
