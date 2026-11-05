@@ -4,12 +4,33 @@ from copy import deepcopy
 import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.fluvalble.core.schedule_colours import colour_packet, replace_schedule_colours
 from custom_components.fluvalble.core import protocol
+
+
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+@pytest.mark.parametrize("success", [True, False])
+def test_classic_commit_settle_precedes_return(transport, success):
+    from custom_components.fluvalble.schedule_editor import _write_schedule_packet
+
+    events = []
+
+    async def send(packet):
+        events.append("write")
+        return success
+
+    async def wait(delay):
+        assert delay == 1.5
+        events.append("settled")
+
+    device = SimpleNamespace(_async_send_packet=AsyncMock(side_effect=send))
+    with patch("custom_components.fluvalble.schedule_editor.asyncio.sleep", side_effect=wait):
+        assert asyncio.run(_write_schedule_packet(device, b"packet", transport)) is success
+    assert events == (["write", "settled"] if success and transport == "classic" else ["write"])
 
 
 def test_editor_registers_static_asset_and_commands_once():

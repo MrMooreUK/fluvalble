@@ -208,6 +208,9 @@ def product_id_from_manufacturer_data(
             candidate = company_bytes + value[:2]
             if all(byte in b"0123456789abcdefABCDEF" for byte in candidate):
                 product_id = int(candidate.decode("ascii"), 16)
+                # ScanOldLightActivity remaps reused legacy ASCII IDs before
+                # selecting channels/effects; binary current IDs stay intact.
+                product_id = {0x0181: 0x7181, 0x0182: 0x7182}.get(product_id, product_id)
                 if product_id in PRODUCTS:
                     return product_id
 

@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Match FluvalConnect's legacy ASCII advertisement remaps for reused product
+  IDs 0181/0182 while retaining current binary product identities.
+- Wait for classic schedule memory to settle before editor save readback.
+
 ### Added
 
 - Automatically registered schedule-colour card for explicit editing of Auto

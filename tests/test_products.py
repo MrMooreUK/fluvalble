@@ -14,6 +14,10 @@ from custom_components.fluvalble.core.products import (
     [
         ({12592: b"480103"}, 328),  # ASCII 0148 + firmware 0103
         ({"12592": bytearray(b"310203")}, 305),  # ASCII 0131
+        ({12592: b"810209"}, 29057),  # Legacy ASCII 0181 -> 7181
+        ({12592: b"820209"}, 29058),  # Legacy ASCII 0182 -> 7182
+        ({65535: b"\x00" * 8 + b"\x01\x81"}, 385),
+        ({65535: b"\x00" * 8 + b"\x01\x82"}, 386),
         ({65535: b"\x00" * 8 + b"\x02\x14"}, 532),
         ({511: b"\x00" * 8 + b"\x02\x21"}, 545),
     ],
@@ -248,7 +252,8 @@ def test_every_apk_product_id_decodes_from_classic_advertisement(product_id):
     encoded = f"{product_id:04X}".encode("ascii")
     company_id = int.from_bytes(encoded[:2], "little")
 
-    assert product_id_from_manufacturer_data({company_id: encoded[2:] + b"0103"}) == product_id
+    expected = {385: 29057, 386: 29058}.get(product_id, product_id)
+    assert product_id_from_manufacturer_data({company_id: encoded[2:] + b"0103"}) == expected
 
 
 @pytest.mark.parametrize("product_id", PRODUCTS)

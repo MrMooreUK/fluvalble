@@ -1,11 +1,23 @@
 """Explicit colour-only editing of fixture schedules."""
 
 from pathlib import Path
+import asyncio
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
 
 from .core.schedule_colours import colour_packet, replace_schedule_colours
+
+
+async def _write_schedule_packet(device, packet, transport):
+    """Let classic firmware commit schedule memory before another command."""
+    if not await device._async_send_packet(packet):
+        return False
+    if transport == "classic":
+        # Community readback verification on CC2541 / FluvalSmart V2.9.
+        # This delay is hardware evidence, not an APK clock-format change.
+        await asyncio.sleep(1.5)
+    return True
 
 
 async def async_setup_editor(hass):
@@ -76,7 +88,7 @@ async def async_setup_editor(hass):
                     levels=msg["levels"],
                     target=msg["target"],
                 )
-                if not await device._async_send_packet(packet):
+                if not await _write_schedule_packet(device, packet, transport):
                     raise ValueError(device.command_error_message())
                 if not await device.async_refresh_state():
                     raise ValueError("Write sent, but readback failed. Reload to confirm the result")
