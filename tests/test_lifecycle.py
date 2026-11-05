@@ -51,6 +51,7 @@ def test_global_setup_registers_integration_actions_and_api_once():
     with (
         patch("custom_components.fluvalble._register_services") as register_services,
         patch("custom_components.fluvalble._register_websocket") as register_websocket,
+        patch("custom_components.fluvalble.schedule_editor.async_setup_editor", new=AsyncMock()),
     ):
         assert asyncio.run(async_setup(hass, {}))
 

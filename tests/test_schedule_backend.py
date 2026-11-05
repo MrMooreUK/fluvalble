@@ -489,7 +489,7 @@ def test_readback_payload_does_not_load_or_write_local_schedules():
     device.async_refresh_state = AsyncMock(return_value=True)
     hass = _FakeHass(device)
     payload = asyncio.run(_async_schedule_payload(hass, "entry_1"))
-    assert set(payload) == {"entry_id", "fixture", "refresh_ok"}
+    assert set(payload) == {"entry_id", "fixture", "refresh_ok", "colour_editor"}
     device.async_refresh_state.assert_not_awaited()
     payload = asyncio.run(_async_schedule_payload(hass, "entry_1", refresh=True))
     device.async_refresh_state.assert_awaited_once_with()

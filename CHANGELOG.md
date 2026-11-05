@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Automatically registered schedule-colour card for explicit editing of Auto
+  day/night and existing Professional timepoint channel levels. Saves reread
+  the fixture, reject stale edits, preserve times and verify returned levels.
+
 ## [0.0.15] — 2026-10-08
 
 ### Fixed

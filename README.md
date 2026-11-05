@@ -185,6 +185,22 @@ controller at a time.
 
 ## Native fixture schedules
 
+### Edit saved schedule colours
+
+Add the **Fluval schedule colours** card from the dashboard card picker. The
+integration registers it automatically; no resource URL or YAML is needed.
+Choose a light, select its saved Automatic or Professional mode using the
+device's mode control, then click **Read from light** on the card.
+
+Automatic exposes day/night emitter percentages. Professional lets you choose
+an existing timepoint and edit its emitter percentages. **Save to light**
+writes explicitly and checks fresh readback. Times, point counts and weather
+settings stay unchanged. If the fixture schedule changed after loading, reload
+it before saving. Schedule timing remains programmed in Fluval Connect.
+
+Saving requires a Home Assistant administrator. The card does not preview
+output or write drafts automatically.
+
 Use **Fluval Connect** to program schedules directly on the light. Home Assistant
 provides light controls, channel sliders, supported effects, mode selection and
 schedule readback.
