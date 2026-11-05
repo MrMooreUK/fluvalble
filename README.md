@@ -189,11 +189,14 @@ controller at a time.
 
 Add the **Fluval schedule colours** card from the dashboard card picker. The
 integration registers it automatically; no resource URL or YAML is needed.
-Choose a light, select its saved Automatic or Professional mode using the
-device's mode control, then click **Read from light** on the card.
+Choose the fixture once in the card's visual configuration. Select its saved
+Automatic or Professional mode using the device's mode control, then open the
+matching card tab and click **Reload** if the schedule is not already loaded.
 
-Automatic exposes day/night emitter percentages. Professional lets you choose
-an existing timepoint and edit its emitter percentages. **Save to light**
+Automatic groups channel levels into Day and Night sections. Professional
+shows the saved timepoints as selectable buttons. Changes stay in the card
+until **Save changes** is pressed; moving between timepoints keeps unsaved
+edits. Reloading or changing schedule tabs asks before discarding edits. Saving
 writes explicitly and checks fresh readback. Times, point counts and weather
 settings stay unchanged. If the fixture schedule changed after loading, reload
 it before saving. Schedule timing remains programmed in Fluval Connect.
