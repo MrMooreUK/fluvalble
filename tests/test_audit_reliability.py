@@ -58,6 +58,34 @@ def test_dst_write_preserves_fresh_readback(success, reported):
     asyncio.run(run())
 
 
+def test_dst_write_diagnostics_tolerates_missing_value_after_readback_race():
+    """A concurrent revision bump must not KeyError when DST was never stored."""
+
+    async def run():
+        device = Device("Audit", config_data={"mac": "AA:BB:CC:DD:EE:FF", "product_id": 532})
+        device.client = SimpleNamespace(
+            wifi_facebd=True, spp_transport=False, command_write_uuid="facebd02-7261-6262-6974-696f74626c65"
+        )
+        device.values.pop("daylight_saving_time", None)
+        device._async_prepare_command = AsyncMock(return_value=True)
+
+        async def send(packet):
+            assert packet == protocol.wifi_dst_packet(True)
+            # Simulate a readback revision bump without populating values, as if
+            # an earlier failed write left no stored DST key.
+            device._control_readback_revision["daylight_saving_time"] = (
+                device._control_readback_revision.get("daylight_saving_time", 0) + 1
+            )
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        assert await device.async_set_daylight_saving_time(True) is True
+        assert "daylight_saving_time" not in device.values
+        assert device.diagnostics.get("daylight_saving_time") is None
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("product", [328, 532, 545])
 @pytest.mark.parametrize("reported", [0, 90])
 def test_channel_failure_keeps_readback_even_when_equal_to_request(product, reported):

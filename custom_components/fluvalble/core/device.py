@@ -1506,7 +1506,7 @@ class Device:
 
         if self._control_readback_revision.get("daylight_saving_time", 0) == revision:
             self.values["daylight_saving_time"] = enabled
-        self.diagnostics["daylight_saving_time"] = self.values["daylight_saving_time"]
+        self.diagnostics["daylight_saving_time"] = self.values.get("daylight_saving_time")
         for handler in self.updates_component:
             handler()
         return True
