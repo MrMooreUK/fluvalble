@@ -290,6 +290,9 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
     hass.data.setdefault(DOMAIN, {})
     _register_websocket(hass)
     _register_services(hass)
+    from .schedule_editor import async_setup_editor
+
+    await async_setup_editor(hass)
     return True
 
 
@@ -869,6 +872,10 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
     return {
         "entry_id": entry_id,
         "fixture": _native_schedule_readback(device),
+        "colour_editor": {
+            "auto": device.values.get("native_auto_schedule") if device else None,
+            "professional": device.values.get("native_pro_schedule") if device else None,
+        },
         "refresh_ok": refresh_ok,
     }
 

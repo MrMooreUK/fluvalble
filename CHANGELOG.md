@@ -7,6 +7,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Match FluvalConnect's legacy ASCII advertisement remaps for reused product
+  IDs 0181/0182 while retaining current binary product identities.
+- Wait for classic schedule memory to settle before editor save readback.
+
+### Added
+
+- Automatically registered schedule-colour card for explicit editing of Auto
+  day/night and existing Professional timepoint channel levels and times.
+  Automatic exposes sunrise/sunset start and end times and existing night
+  shutoff timing. Saves reread the fixture, reject stale edits, validate timing
+  and verify returned times and levels. Point counts and weather stay unchanged.
+- Thanks to [David (tinker-zim)](https://community.home-assistant.io/t/fluval-aquasky-ble-rgb-light/259598/204)
+  for documenting hardware-verified classic schedule write and settling behavior.
+
 ## [0.0.15] — 2026-10-08
 
 ### Fixed

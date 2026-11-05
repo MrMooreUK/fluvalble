@@ -88,7 +88,9 @@
   ],
   "config_flow": true,
   "dependencies": [
-    "bluetooth_adapters"
+    "bluetooth_adapters",
+    "frontend",
+    "http"
   ],
   "documentation": "https://github.com/MrMooreUK/fluvalble",
   "integration_type": "device",

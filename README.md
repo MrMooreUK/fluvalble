@@ -10,7 +10,7 @@
 
 <p align="center">
   <strong>Premium local control for Fluval aquarium LED lights in Home Assistant.</strong><br/>
-  Everyday control over local Bluetooth. Program hardware schedules in Fluval Connect.
+  Everyday control over local Bluetooth. Edit saved schedule times and colours.
 </p>
 
 ---
@@ -185,9 +185,34 @@ controller at a time.
 
 ## Native fixture schedules
 
-Use **Fluval Connect** to program schedules directly on the light. Home Assistant
+### Edit saved schedule times and colours
+
+Add the **Fluval schedule colours** card from the dashboard card picker. The
+integration registers it automatically; no resource URL or YAML is needed.
+Choose the fixture once in the card's visual configuration. Select its saved
+Automatic or Professional mode using the device's mode control, then open the
+matching card tab and click **Reload** if the schedule is not already loaded.
+
+Automatic groups channel levels into Day and Night sections, with sunrise and
+sunset start/end times and the night shutoff time when already enabled.
+Professional shows the saved timepoints as selectable buttons, with a time
+input for the selected point. Times follow the fixture's local clock.
+Changes stay in the card
+until **Save changes** is pressed; moving between timepoints keeps unsaved
+edits. Reloading or changing schedule tabs asks before discarding edits. Saving
+writes explicitly and checks fresh readback of times and channel levels.
+Sunrise/sunset windows must not overlap and can last at most four hours.
+Professional timepoints must remain in chronological order without duplicates,
+including schedules that cross midnight. Point counts and weather settings
+stay unchanged. If the fixture schedule changed after loading, reload it before
+saving. Use Fluval Connect to create schedules or add/remove timepoints.
+
+Saving requires a Home Assistant administrator. The card does not preview
+output or write drafts automatically.
+
+Use **Fluval Connect** for full schedule setup directly on the light. Home Assistant
 provides light controls, channel sliders, supported effects, mode selection and
-schedule readback.
+schedule readback and editing of existing times and colours.
 Select Auto or Professional to run the corresponding saved hardware schedule.
 
 See [hardware schedules](docs/hardware-schedules.md) for the programming workflow.
