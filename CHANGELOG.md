@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Use recognizable device names and areas in the schedule-card selector,
+  falling back to the product model rather than a Bluetooth address.
+- Load cached schedules when opening the card, handle fixture selection after
+  creation, and bound loading requests. Bluetooth refresh is explicit via Reload.
+
 ## [0.0.16] — 2026-11-05
 
 ### Fixed

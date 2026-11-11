@@ -2,11 +2,55 @@
 
 from pathlib import Path
 import asyncio
+import re
+from collections import Counter
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
 
 from .core.schedule_colours import colour_packet, replace_schedule_colours
+from .core.products import product_from_id
+
+
+def _fixture_labels(hass, entries):
+    """Use HA device names and areas, never raw addresses as the primary label."""
+    from homeassistant.helpers import device_registry as dr, area_registry as ar
+
+    registry = dr.async_get(hass)
+    areas = ar.async_get(hass)
+    result = []
+    for entry in entries:
+        devices = dr.async_entries_for_config_entry(registry, entry.entry_id)
+        device = devices[0] if devices else None
+        product = product_from_id(entry.data.get("product_id"))
+        candidates = [
+            getattr(device, "name_by_user", None),
+            entry.title,
+            getattr(device, "name", None),
+            getattr(device, "model", None),
+            product.model if product else None,
+        ]
+        name = next(
+            (
+                name.strip()
+                for name in candidates
+                if isinstance(name, str)
+                and name.strip()
+                and not re.search(r"(?:[0-9a-f]{2}[:-]){5}[0-9a-f]{2}|(?:BLE#0x)?[0-9a-f]{12}", name, re.I)
+            ),
+            "Fluval light",
+        )
+        area = areas.async_get_area(device.area_id) if device and device.area_id else None
+        if area:
+            name = f"{name} · {area.name}"
+        result.append({"id": entry.entry_id, "name": name})
+    totals = Counter(item["name"] for item in result)
+    seen = Counter()
+    for item in result:
+        if totals[item["name"]] > 1:
+            seen[item["name"]] += 1
+            item["name"] = f"{item['name']} ({seen[item['name']]})"
+    return result
 
 
 async def _write_schedule_packet(device, packet, transport):
@@ -43,7 +87,7 @@ async def async_setup_editor(hass):
     async def devices(hass, connection, msg):
         connection.send_result(
             msg["id"],
-            [{"id": entry.entry_id, "name": entry.title} for entry in hass.config_entries.async_entries(DOMAIN)],
+            _fixture_labels(hass, hass.config_entries.async_entries(DOMAIN)),
         )
 
     @websocket_api.websocket_command(

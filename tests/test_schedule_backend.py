@@ -4,7 +4,7 @@ import asyncio
 import inspect
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 import pytest
 import voluptuous as vol
 from custom_components.fluvalble import (
@@ -494,3 +494,25 @@ def test_readback_payload_does_not_load_or_write_local_schedules():
     payload = asyncio.run(_async_schedule_payload(hass, "entry_1", refresh=True))
     device.async_refresh_state.assert_awaited_once_with()
     assert payload["refresh_ok"] is True
+
+
+def test_explicit_schedule_refresh_times_out_and_keeps_cached_readback():
+    async def run():
+        device = _make_device()
+
+        async def hang():
+            await asyncio.Event().wait()
+
+        device.async_refresh_state = hang
+        hass = _FakeHass(device)
+        cached = await _async_schedule_payload(hass, "entry_1")
+        timeout = asyncio.timeout
+        with patch(
+            "custom_components.fluvalble.asyncio.timeout", side_effect=lambda seconds: timeout(0.01)
+        ) as deadline:
+            payload = await _async_schedule_payload(hass, "entry_1", refresh=True)
+        deadline.assert_called_once_with(30)
+        assert payload["refresh_ok"] is False
+        assert payload["colour_editor"] == cached["colour_editor"]
+
+    asyncio.run(run())

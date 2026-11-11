@@ -193,6 +193,13 @@ Choose the fixture once in the card's visual configuration. Select its saved
 Automatic or Professional mode using the device's mode control, then open the
 matching card tab and click **Reload** if the schedule is not already loaded.
 
+The fixture selector uses the Home Assistant device name and area, with the
+product model as a fallback instead of a Bluetooth address. Rename devices in
+Home Assistant to distinguish similar fixtures.
+Opening the card uses cached schedule data only; it does not scan or connect
+over Bluetooth. **Reload** explicitly requests a fresh read from the selected
+fixture and reports an error if the read cannot complete.
+
 Automatic groups channel levels into Day and Night sections, with sunrise and
 sunset start/end times and the night shutoff time when already enabled.
 Professional shows the saved timepoints as selectable buttons, with a time
