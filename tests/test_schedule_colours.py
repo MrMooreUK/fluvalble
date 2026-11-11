@@ -13,6 +13,39 @@ from custom_components.fluvalble.core.schedule_colours import colour_packet, rep
 from custom_components.fluvalble.core import protocol
 
 
+def test_fixture_labels_use_device_names_areas_and_model_not_mac():
+    from custom_components.fluvalble.schedule_editor import _fixture_labels
+    from custom_components.fluvalble.core.products import product_from_id
+
+    entries = [
+        SimpleNamespace(entry_id="a", title="AA:BB:CC:DD:EE:FF", data={"product_id": 328}),
+        SimpleNamespace(entry_id="b", title="11:22:33:44:55:66", data={"product_id": 328}),
+        SimpleNamespace(entry_id="c", title="77:88:99:AA:BB:CC", data={"product_id": 328}),
+    ]
+    devices = {
+        "a": [SimpleNamespace(name_by_user="Fish tank", name="BLE#0xAABBCCDDEEFF", model="AquaSky", area_id="room")]
+    }
+    dr = SimpleNamespace(
+        async_get=lambda _: None, async_entries_for_config_entry=lambda _, entry: devices.get(entry, [])
+    )
+    ar = SimpleNamespace(
+        async_get=lambda _: SimpleNamespace(async_get_area=lambda _: SimpleNamespace(name="Chris's room"))
+    )
+    with (
+        patch.dict(sys.modules, {"homeassistant.helpers.area_registry": ar}),
+        patch("homeassistant.helpers.device_registry.async_get", dr.async_get, create=True),
+        patch(
+            "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+            dr.async_entries_for_config_entry,
+            create=True,
+        ),
+    ):
+        labels = _fixture_labels(None, entries)
+    assert labels[0] == {"id": "a", "name": "Fish tank · Chris's room"}
+    assert labels[1]["name"] == product_from_id(328).model + " (1)"
+    assert labels[2]["name"] == product_from_id(328).model + " (2)"
+
+
 @pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
 @pytest.mark.parametrize("success", [True, False])
 def test_classic_commit_settle_precedes_return(transport, success):

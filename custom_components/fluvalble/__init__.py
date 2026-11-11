@@ -868,7 +868,11 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
     device = _runtime_device(hass.data.get(DOMAIN, {}).get(entry_id))
     refresh_ok = None
     if refresh:
-        refresh_ok = bool(device is not None and await device.async_refresh_state())
+        try:
+            async with asyncio.timeout(30):
+                refresh_ok = bool(device is not None and await device.async_refresh_state())
+        except TimeoutError:
+            refresh_ok = False
     return {
         "entry_id": entry_id,
         "fixture": _native_schedule_readback(device),
