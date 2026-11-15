@@ -7,7 +7,7 @@ FluvalConnect 1.0.15 (version code 110), SHA-256
 
 - ManFragment.java, onMqttDataEvent, around lines 1059–1175: SPP keys 3–7
   update the five Manual colour controls. The same handler separately
-  processes FACEBD channel keys 110–114.
+  processes FACEBD channel keys 110–113.
 - AutoFragment.java, around lines 708–780: SPP keys 8/9 carry sunrise and
   sunset timing; keys 11/12 populate the Day/Night banks. They are not
   substituted for keys 3–7 in the Manual controls.
