@@ -322,6 +322,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
 
     runtime = FluvalRuntimeData()
     _store_entry_runtime_data(hass, entry, runtime)
+    from .manual_settings import async_manual_settings_storage
+
+    attach_manual_settings = await async_manual_settings_storage(hass, entry)
     last_discovery_log = 0.0
 
     def create_runtime_task(coroutine) -> asyncio.Task:
@@ -360,6 +363,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             active_time=active_time,
         )
         device.entry_id = entry.entry_id
+        attach_manual_settings(device)
         runtime.device = device
         device.register_update(
             "firmware_version",
@@ -969,3 +973,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> b
 
     hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete entry-owned Manual storage, but never on unload/reload."""
+    from .manual_settings import async_remove_manual_settings
+
+    await async_remove_manual_settings(hass, entry)

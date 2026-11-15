@@ -207,6 +207,9 @@ class Device:
         self.values["mode"] = "manual"
         self.values["led_on_off"] = False
         self.values["effect"] = None
+        self._last_manual_settings: dict[str, int] | None = None
+        self._manual_settings_identity = None
+        self._manual_settings_save: Callable[[dict[str, int]], Awaitable[None]] | None = None
         self.firmware_version: str | None = None
         self.diagnostics: dict[str, Any] = {
             "status": "not_run",
@@ -1227,6 +1230,7 @@ class Device:
                     step_values,
                     force=force,
                     restore_mode_on_zero=restore_mode_on_zero,
+                    remember_manual=step == steps,
                 ):
                     return False
         return True
@@ -1237,6 +1241,8 @@ class Device:
         *,
         force: bool = False,
         restore_mode_on_zero: bool = False,
+        remember_manual: bool = True,
+        expected_manual_identity=None,
     ) -> bool:
         """Apply one channel frame inside an active command transaction."""
         self.cancel_channel_mode_restore(clear_saved_mode=not restore_mode_on_zero)
@@ -1257,6 +1263,11 @@ class Device:
 
         if not await self._async_prepare_command():
             _LOGGER.warning("Cannot set Fluval channel before BLE device is available")
+            return False
+        if expected_manual_identity is not None and self._manual_identity() != expected_manual_identity:
+            self._set_diagnostic_error(
+                "manual_settings_mismatch", "Saved Manual settings do not match this fixture profile"
+            )
             return False
 
         old_values = dict(self.values)
@@ -1291,12 +1302,15 @@ class Device:
         single_channel = changed_channels[0] if len(changed_channels) == 1 and not force else None
         for channel, value in targets.items():
             self.values[channel] = value
+        manual_revisions = dict(self._control_readback_revision)
         ok = await self._async_send_channel_state(
             old_values,
             force_power=force,
             single_channel=single_channel,
         )
         if ok:
+            if remember_manual and self._manual_settings_save is not None:
+                await self._async_remember_manual(targets, manual_revisions)
             # Physical channel values are authoritative. Forget any cached RGB
             # request and refresh both exact sliders and the light's best-fit
             # display state without writing that approximation back.
@@ -1308,6 +1322,96 @@ class Device:
             if restore_mode_on_zero and not any(targets.values()):
                 self._schedule_channel_mode_restore()
         return ok
+
+    def _manual_identity(self):
+        return (self.mac, self.product_id, self.spectrum_profile(), tuple(self.numbers()))
+
+    def configure_manual_settings(self, saved, persist) -> None:
+        """Attach HA storage without connecting, writing or changing current values."""
+        self._manual_settings_save = persist
+        if not isinstance(saved, dict) or saved.get("mac") != self.mac or saved.get("product_id") != self.product_id:
+            return
+        if saved.get("spectrum_profile") != self.spectrum_profile():
+            return
+        levels = saved.get("levels")
+        if not isinstance(levels, list) or len(levels) != len(self.numbers()):
+            return
+        if any(type(value) is not int or not 0 <= value <= 100 for value in levels):
+            return
+        self._last_manual_settings = dict(zip(self.numbers(), levels, strict=True))
+        self._manual_settings_identity = self._manual_identity()
+
+    def has_last_manual_settings(self) -> bool:
+        return self._last_manual_settings is not None and self._manual_settings_identity == self._manual_identity()
+
+    async def _async_confirm_manual(self, expected, revisions) -> bool:
+        """Require a complete fresh Manual report, not optimistic command values."""
+
+        def confirmed():
+            return (
+                self.values.get("mode") == "manual"
+                and self._control_readback_revision["mode"] > revisions.get("mode", 0)
+                and all(
+                    self._control_readback_revision[channel] > revisions.get(channel, 0)
+                    and self.values.get(channel) == value
+                    for channel, value in expected.items()
+                )
+            )
+
+        if not confirmed():
+            if not await self.async_refresh_state():
+                return False
+        return confirmed()
+
+    async def _async_remember_manual(self, expected, revisions) -> None:
+        """Retain only a fully confirmed user-commanded bank."""
+        persist = self._manual_settings_save
+        if persist is None:
+            return
+        try:
+            confirmed = await self._async_confirm_manual(expected, revisions)
+        except (TimeoutError, BleakError):
+            confirmed = False
+        if not confirmed:
+            self.diagnostics["last_manual_settings_status"] = "unconfirmed"
+            return
+        snapshot = dict(expected)
+        identity = self._manual_identity()
+        try:
+            await persist(snapshot)
+        except Exception:
+            # A storage failure must not turn a successful light command into
+            # a reported BLE failure or destroy the previously saved bank.
+            _LOGGER.warning("Unable to save confirmed Fluval Manual settings", exc_info=True)
+            self.diagnostics["last_manual_settings_status"] = "storage_failed"
+            return
+        self._last_manual_settings = snapshot
+        self._manual_settings_identity = identity
+        self.diagnostics["last_manual_settings_status"] = "saved"
+
+    @serialized_device_command
+    async def async_restore_last_manual_settings(self) -> bool:
+        """Explicitly replay the saved full bank using existing native commands."""
+        if not self.has_last_manual_settings():
+            self._set_diagnostic_error("manual_settings_unavailable", "No confirmed Manual settings have been saved")
+            return False
+        assert self._last_manual_settings is not None
+        snapshot = dict(self._last_manual_settings)
+        revisions = dict(self._control_readback_revision)
+        if not await self._async_set_channels_now(
+            snapshot, force=True, remember_manual=False, expected_manual_identity=self._manual_settings_identity
+        ):
+            return False
+        try:
+            confirmed = await self._async_confirm_manual(snapshot, revisions)
+        except (TimeoutError, BleakError):
+            confirmed = False
+        if not confirmed:
+            self._set_diagnostic_error(
+                "manual_restore_unconfirmed", "Manual settings write was not confirmed by readback"
+            )
+            return False
+        return True
 
     async def _async_send_channel_state(
         self,

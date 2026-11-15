@@ -24,6 +24,7 @@ def create_entities(device: Device) -> list:
     return [
         FluvalIdentifyButton(device, "identify"),
         FluvalSyncClockButton(device, "sync_clock"),
+        FluvalRestoreManualButton(device, "restore_last_manual"),
     ]
 
 
@@ -59,4 +60,19 @@ class FluvalIdentifyButton(FluvalEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Send FluvalConnect's native Find command."""
         if not await self.device.async_identify():
+            self._raise_command_error()
+
+
+class FluvalRestoreManualButton(FluvalEntity, ButtonEntity):
+    """Explicit restore; never runs from a notification or reconnect."""
+
+    _attr_icon = "mdi:restore"
+
+    def internal_update(self) -> None:
+        self._attr_available = self.device.controls_available and self.device.has_last_manual_settings()
+        if self.hass:
+            self._async_write_ha_state()
+
+    async def async_press(self) -> None:
+        if not await self.device.async_restore_last_manual_settings():
             self._raise_command_error()
