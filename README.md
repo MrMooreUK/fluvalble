@@ -192,8 +192,9 @@ integration registers it automatically; no resource URL or YAML is needed.
 Registration waits for Home Assistant's frontend shell so the card remains
 available when Home Assistant installs its scoped custom-element registry.
 Choose the fixture once in the card's visual configuration.
-Enable **Start Day and Night collapsed** in that visual editor to start both
-Automatic sections closed. By default, Day starts open and Night closed.
+Day and Night both start collapsed. Expand whichever section you want to edit;
+the card remembers your open/closed choices during redraws and tab changes.
+A new card instance or selecting a different fixture starts both closed again.
 Opening or closing a section does not communicate with the light.
 
 Select the fixture's saved
