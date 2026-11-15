@@ -14,6 +14,41 @@ from custom_components.fluvalble.core import protocol
 from custom_components.fluvalble.core.products import PRODUCTS
 
 
+def test_issue_133_actual_spp_capture_preserves_auto_and_all_eight_pro_points():
+    # Public issue capture: no device identifiers; SPP state in Automatic mode.
+    raw = bytes.fromhex(
+        "d2 b0 00 0e 01 01 02 f5 03 00 04 18 64 05 00 06 00 07 00 "
+        "08 43 0c 1e 1e 09 43 13 1e 1e 0a 42 ff ff "
+        "0b 45 32 32 32 32 32 0c 45 00 00 00 00 00 "
+        "0d 58 39 08 06 00 00 00 00 00 00 07 00 54 14 49 64 50 "
+        "0c 00 54 14 49 64 50 0c 14 32 0c 2c 3c 30 "
+        "0d 28 32 0c 2c 3c 30 0e 00 54 14 49 64 50 "
+        "11 00 54 14 49 64 50 12 00 00 05 00 00 00 "
+        "0e 00 0f 46 7f 0c 00 0e 00 01"
+    )
+    fields = protocol.decode_cbor_update(raw)
+    auto = editor_schedule(protocol.decode_spp_auto_schedule(fields, channel_count=5))
+    pro = editor_schedule(protocol.decode_spp_pro_schedule(fields, channel_count=5))
+    assert fields[1] == 1
+    assert [fields[i] for i in range(3, 8)] == [0, 100, 0, 0, 0]
+    assert auto == {
+        "sunrise": {"hour": 12, "minute": 30, "ramp": 30},
+        "sunset": {"hour": 19, "minute": 30, "ramp": 30},
+        "sleep": None,
+        "day_levels": [50] * 5,
+        "night_levels": [0] * 5,
+    }
+    assert [p["minute"] for p in pro] == [360, 420, 720, 740, 820, 840, 1020, 1080]
+    assert [pro[1][f"channel_{i}"] for i in range(1, 6)] == [84, 20, 73, 100, 80]
+    assert [pro[-1][f"channel_{i}"] for i in range(1, 6)] == [0, 5, 0, 0, 0]
+    times = {key: deepcopy(auto[key]) for key in ("sunrise", "sunset", "sleep")}
+    packet = colour_packet(auto, transport="spp", channel_count=5, levels=[50] * 5, target="day", times=times)
+    decoded = protocol.decode_cbor_update(packet)
+    assert {key: decoded[key] for key in range(8, 13)} == {key: fields[key] for key in range(8, 13)}
+    packet = colour_packet(pro, transport="spp", channel_count=5, levels=[84, 20, 73, 100, 80], target=1)
+    assert protocol.decode_cbor_update(packet)[13] == fields[13]
+
+
 @pytest.mark.parametrize("product_id", sorted(PRODUCTS))
 @pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
 def test_all_product_profiles_native_schedules_roundtrip_through_editor(product_id, transport):
