@@ -1,3 +1,7 @@
+// HA installs its scoped-element registry before defining its application shell.
+// Defining against the earlier native registry leaves picker metadata pointing
+// to an element that the final registry cannot resolve.
+function registerFluvalScheduleCard() {
 const css = `
 :host{display:block;color:var(--primary-text-color,#202124);font-family:var(--paper-font-body1_-_font-family,Roboto,Arial,sans-serif)}
 *{box-sizing:border-box}ha-card{display:block;background:var(--ha-card-background,var(--card-background-color,#fff));border:1px solid var(--divider-color,#ddd);border-radius:var(--ha-card-border-radius,16px);overflow:hidden}
@@ -177,3 +181,17 @@ class FluvalScheduleColoursEditor extends HTMLElement {
 for(const [name,component] of [['fluval-schedule-colours-editor',FluvalScheduleColoursEditor],['fluval-schedule-colours',FluvalScheduleColours]])if(!customElements.get(name))customElements.define(name,component);
 window.customCards=window.customCards||[];
 if(!window.customCards.some(x=>x.type==='fluval-schedule-colours'))window.customCards.push({type:'fluval-schedule-colours',name:'Fluval schedule colours',description:'Edit times and colours in a saved hardware schedule.',preview:false});
+}
+
+function waitForHomeAssistant(attempt=0) {
+  if(customElements.get('home-assistant')) {
+    registerFluvalScheduleCard();
+    return;
+  }
+  if(attempt>=600) {
+    console.error('Fluval schedule card: Home Assistant frontend did not become ready; reload the page to retry.');
+    return;
+  }
+  setTimeout(()=>waitForHomeAssistant(attempt+1),100);
+}
+waitForHomeAssistant();

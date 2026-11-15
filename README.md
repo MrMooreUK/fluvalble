@@ -189,6 +189,8 @@ controller at a time.
 
 Add the **Fluval schedule colours** card from the dashboard card picker. The
 integration registers it automatically; no resource URL or YAML is needed.
+Registration waits for Home Assistant's frontend shell so the card remains
+available when Home Assistant installs its scoped custom-element registry.
 Choose the fixture once in the card's visual configuration. Select its saved
 Automatic or Professional mode using the device's mode control, then open the
 matching card tab and click **Reload** if the schedule is not already loaded.

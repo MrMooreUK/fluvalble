@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Register the schedule card after Home Assistant's frontend shell is defined,
+  avoiding an early registration against the registry replaced during startup.
+  This prevents a listed card from becoming unresolved in the card picker.
+
 - Use recognizable device names and areas in the schedule-card selector,
   falling back to the product model rather than a Bluetooth address.
 - Load cached schedules when opening the card, handle fixture selection after
