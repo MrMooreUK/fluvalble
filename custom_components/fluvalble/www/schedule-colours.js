@@ -82,7 +82,7 @@ class FluvalScheduleColours extends HTMLElement {
     const requiredMode=this.mode==='auto'?'automatic':'professional';
     if(this.fixture?.mode&&this.fixture.mode!==requiredMode){
       const note=document.createElement('p');note.className='note';
-      note.textContent='The light is currently in '+this.fixture.mode+' mode. These tabs only select a schedule to view; they do not change the light’s mode. Select '+requiredMode+' on the device mode control, then Reload to read that schedule.';
+      note.textContent='The light is currently in '+this.fixture.mode+' mode. These tabs only select a schedule to view; they do not change the light’s mode. Select '+requiredMode+' on the device mode control before saving edits to this schedule.';
       body.append(note);
     }
     if(!this.entry){const note=document.createElement('div');note.className='empty muted';note.textContent='Choose a Fluval light in this card’s visual configuration to get started.';body.append(note);}
