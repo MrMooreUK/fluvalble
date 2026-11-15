@@ -8,7 +8,7 @@ from collections import Counter
 import voluptuous as vol
 from homeassistant.components import websocket_api
 
-from .core.schedule_colours import colour_packet, replace_schedule_colours
+from .core.schedule_colours import colour_packet, replace_schedule_colours, editor_schedule
 from .core.products import product_from_id
 
 
@@ -120,7 +120,7 @@ async def async_setup_editor(hass):
                 required_mode = "automatic" if msg["schedule"] == "auto" else "professional"
                 if device.values.get("mode") != required_mode:
                     raise ValueError("Select the matching schedule mode on the light before editing")
-                current = device.values.get(key)
+                current = editor_schedule(device.values.get(key))
                 if current != msg["baseline"]:
                     raise ValueError("Schedule changed. Reload it before saving")
                 transport = (
@@ -145,7 +145,7 @@ async def async_setup_editor(hass):
                     target=msg["target"],
                     times=msg.get("times"),
                 )
-                if device.values.get(key) != expected:
+                if editor_schedule(device.values.get(key)) != expected:
                     raise ValueError("Fixture readback did not confirm the saved schedule. Reload before retrying")
             connection.send_result(msg["id"], True)
         except (ValueError, KeyError, TypeError) as err:

@@ -9,6 +9,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Normalize SPP Auto times and Professional points to the editor's shared
+  data format for display, save validation and readback confirmation. Preserve
+  original device readback and channel ordering across all product profiles.
+
 - Register the schedule card after Home Assistant's frontend shell is defined,
   avoiding an early registration against the registry replaced during startup.
   This prevents a listed card from becoming unresolved in the card picker.

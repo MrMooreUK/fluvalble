@@ -865,6 +865,8 @@ def _native_schedule_readback(device: Device | None) -> dict[str, Any]:
 
 async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh: bool = False) -> dict[str, Any]:
     """Return fixture-owned schedule readback without local draft storage."""
+    from .core.schedule_colours import editor_schedule
+
     device = _runtime_device(hass.data.get(DOMAIN, {}).get(entry_id))
     refresh_ok = None
     if refresh:
@@ -877,8 +879,8 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
         "entry_id": entry_id,
         "fixture": _native_schedule_readback(device),
         "colour_editor": {
-            "auto": device.values.get("native_auto_schedule") if device else None,
-            "professional": device.values.get("native_pro_schedule") if device else None,
+            "auto": editor_schedule(device.values.get("native_auto_schedule")) if device else None,
+            "professional": editor_schedule(device.values.get("native_pro_schedule")) if device else None,
         },
         "refresh_ok": refresh_ok,
     }

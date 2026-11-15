@@ -201,6 +201,10 @@ Home Assistant to distinguish similar fixtures.
 Opening the card uses cached schedule data only; it does not scan or connect
 over Bluetooth. **Reload** explicitly requests a fresh read from the selected
 fixture and reports an error if the read cannot complete.
+The Automatic/Professional tabs select what to view, not the light's operating
+mode. On classic fixtures, select the matching mode with the device's mode
+control and press Reload to read its schedule; the card never switches modes
+just to populate a tab.
 
 Automatic groups channel levels into Day and Night sections, with sunrise and
 sunset start/end times and the night shutoff time when already enabled.

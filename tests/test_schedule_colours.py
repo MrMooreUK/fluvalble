@@ -9,8 +9,77 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.fluvalble.core.schedule_colours import colour_packet, replace_schedule_colours
+from custom_components.fluvalble.core.schedule_colours import colour_packet, replace_schedule_colours, editor_schedule
 from custom_components.fluvalble.core import protocol
+from custom_components.fluvalble.core.products import PRODUCTS
+
+
+@pytest.mark.parametrize("product_id", sorted(PRODUCTS))
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+def test_all_product_profiles_native_schedules_roundtrip_through_editor(product_id, transport):
+    count = PRODUCTS[product_id].channel_count
+    canonical_auto = {
+        "sunrise": {"hour": 23, "minute": 30, "ramp": 60},
+        "sunset": {"hour": 18, "minute": 15, "ramp": 45},
+        "sleep": {"hour": 22, "minute": 0},
+        "day_levels": list(range(41, 41 + count)),
+        "night_levels": list(range(1, 1 + count)),
+    }
+    canonical_pro = [
+        {"minute": minute, **{f"channel_{i}": i * 10 for i in range(1, count + 1)}} for minute in (30, 480, 900, 1380)
+    ]
+
+    def decode_auto(packet):
+        if transport == "classic":
+            return protocol.decode_old_auto_schedule(bytes([1]) + packet[2:-1], channel_count=count)
+        fields = protocol.decode_cbor_map(packet) if transport == "facebd" else protocol.decode_cbor_update(packet)
+        decode = protocol.decode_wifi_auto_schedule if transport == "facebd" else protocol.decode_spp_auto_schedule
+        return decode(fields, channel_count=count)
+
+    def decode_pro(packet):
+        if transport == "classic":
+            return protocol.decode_old_pro_schedule(bytes([2]) + packet[2:-1], channel_count=count)
+        fields = protocol.decode_cbor_map(packet) if transport == "facebd" else protocol.decode_cbor_update(packet)
+        decode = protocol.decode_wifi_pro_schedule if transport == "facebd" else protocol.decode_spp_pro_schedule
+        return decode(fields, channel_count=count)
+
+    times = {key: deepcopy(canonical_auto[key]) for key in ("sunrise", "sunset", "sleep")}
+    native_auto = decode_auto(
+        colour_packet(
+            canonical_auto,
+            transport=transport,
+            channel_count=count,
+            levels=canonical_auto["day_levels"],
+            target="day",
+            times=times,
+        )
+    )
+    native_pro = decode_pro(
+        colour_packet(
+            canonical_pro,
+            transport=transport,
+            channel_count=count,
+            levels=[i * 10 for i in range(1, count + 1)],
+            target=1,
+        )
+    )
+    assert editor_schedule(native_auto) == canonical_auto
+    assert editor_schedule(native_pro) == canonical_pro
+    before = deepcopy((native_auto, native_pro))
+    times["sunrise"]["minute"] = 25
+    packet = colour_packet(
+        native_auto, transport=transport, channel_count=count, levels=[55] * count, target="day", times=times
+    )
+    expected = replace_schedule_colours(
+        native_auto, channel_count=count, levels=[55] * count, target="day", times=times
+    )
+    assert editor_schedule(decode_auto(packet)) == expected
+    packet = colour_packet(
+        native_pro, transport=transport, channel_count=count, levels=[65] * count, target=1, times=490
+    )
+    expected = replace_schedule_colours(native_pro, channel_count=count, levels=[65] * count, target=1, times=490)
+    assert editor_schedule(decode_pro(packet)) == expected
+    assert (native_auto, native_pro) == before
 
 
 def test_fixture_labels_use_device_names_areas_and_model_not_mac():
@@ -440,3 +509,24 @@ def test_editor_save_raises_unauthorized_for_non_admin_before_any_work():
     with pytest.raises(Unauthorized):
         _run_save(device=device, baseline=deepcopy(original), admin_error=Unauthorized())
     device._async_send_packet.assert_not_awaited()
+
+
+def test_editor_save_accepts_normalized_baseline_and_verifies_raw_spp_readback():
+    native = {
+        "sunrise": "08:00",
+        "sunrise_ramp": 30,
+        "sunset": "20:00",
+        "sunset_ramp": 30,
+        "sleep": "22:00",
+        "day_levels": [50] * 4,
+        "night_levels": [5] * 4,
+    }
+    device = _save_device(values={"mode": "automatic", "native_auto_schedule": deepcopy(native)})
+    device._uses_wifi_protocol = lambda: False
+    device._uses_spp_protocol = lambda: True
+    connection = _run_save(device=device, baseline=editor_schedule(native))
+    connection.send_result.assert_called_once_with(7, True)
+    connection.send_error.assert_not_called()
+    packet = device._async_send_packet.await_args.args[0]
+    assert protocol.decode_cbor_update(packet) == {11: bytes([50] * 4)}
+    assert device.values["native_auto_schedule"] == native

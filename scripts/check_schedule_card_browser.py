@@ -57,12 +57,38 @@ async def main():
             assert result["pickerRequests"] == 0
             assert len(result["calls"]) == 1 and result["calls"][0]["refresh"] is False
             assert result["busy"] is False
+            for count in (4, 5):
+                await page.evaluate(
+                    """count => {
+                    const card=document.querySelector('fluval-schedule-colours');
+                    card.fixture={mode:'automatic',channels:Array.from({length:count},(_,i)=>'Emitter '+(i+1))};
+                    card.raw={
+                        auto:{sunrise:{hour:23,minute:30,ramp:60},sunset:{hour:18,minute:15,ramp:45},
+                              sleep:{hour:22,minute:0},day_levels:Array(count).fill(50),night_levels:Array(count).fill(5)},
+                        professional:[30,480,900,1380].map(minute=>Object.assign({minute},
+                            Object.fromEntries(Array.from({length:count},(_,i)=>['channel_'+(i+1),(i+1)*10]))))
+                    };
+                    card.mode='auto';card.render();
+                }""",
+                    count,
+                )
+                assert await page.get_by_label("Sunrise starts", exact=True).input_value() == "23:30"
+                assert await page.get_by_label("Sunrise ends", exact=True).input_value() == "00:30"
+                assert await page.locator("input[type=range]").count() == count * 2
+                await page.get_by_role("button", name="Professional", exact=True).click()
+                assert await page.get_by_role("button", name="08:00", exact=True).count() == 1
+                await page.get_by_role("button", name="08:00", exact=True).click()
+                assert await page.get_by_label("Timepoint time").input_value() == "08:00"
+                assert await page.locator("input[type=range]").count() == count
+                assert "These tabs only select a schedule" in await page.locator("ha-card").inner_text()
             await page.add_script_tag(content=source)
             assert await page.evaluate("window.customCards.length") == 1
             assert errors == []
             await page.close()
         await browser.close()
-    print("PASS: early/late registration, registry replacement, picker stub, duplicate import, cached selection")
+    print(
+        "PASS: registry replacement, picker stub, duplicate import, cached selection, 4/5-channel Auto/Pro times and mode guidance"
+    )
 
 
 asyncio.run(main())
