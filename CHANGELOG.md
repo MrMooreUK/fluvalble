@@ -7,6 +7,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.0.17-1] — 2026-11-15
+
+Prerelease for schedule-card feedback.
+
 ### Fixed
 
 - Normalize SPP Auto times and Professional points to the editor's shared
@@ -21,6 +25,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   falling back to the product model rather than a Bluetooth address.
 - Load cached schedules when opening the card, handle fixture selection after
   creation, and bound loading requests. Bluetooth refresh is explicit via Reload.
+- Avoid a diagnostics exception when a daylight-saving value is absent.
 
 ## [0.0.16] — 2026-11-05
 

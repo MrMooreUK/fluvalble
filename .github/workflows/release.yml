@@ -55,4 +55,5 @@ jobs:
           files: |
             fluvalble-${{ steps.version.outputs.version }}.zip
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-beta') || contains(github.ref_name, '-rc') }}
+          # Numeric suffixes such as v0.0.17-1 are prereleases too.
+          prerelease: ${{ contains(github.ref_name, '-') }}
