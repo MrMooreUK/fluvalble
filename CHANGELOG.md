@@ -7,6 +7,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Remove the schedule-card collapse option. Day and Night now both start
+  collapsed and retain their open/closed state through redraws and tab changes,
+  including redraws before the browser delivers a toggle event.
+
 ## [0.0.17-2] — 2026-11-15
 
 ### Added

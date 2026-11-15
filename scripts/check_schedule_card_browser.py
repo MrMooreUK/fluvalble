@@ -95,20 +95,39 @@ async def main():
                 });
                 document.body.append(editor);
             }""")
-            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, False]
-            await page.get_by_label("Start Day and Night collapsed", exact=False).check()
             assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [False, False]
-            assert await page.evaluate("savedConfig") == {
-                "entry_id": "fixture",
-                "title": "My tank",
-                "collapse_sections": True,
-            }
+            assert await page.get_by_label("Start Day and Night collapsed", exact=False).count() == 0
             await page.locator("summary").filter(has_text="Day").click()
-            await page.wait_for_timeout(50)
             await page.evaluate("document.querySelector('fluval-schedule-colours').render()")
             assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, False]
-            await page.get_by_label("Start Day and Night collapsed", exact=False).uncheck()
-            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, False]
+            # A redraw in the same JS task must retain native state even before
+            # the asynchronous toggle event has been dispatched.
+            await page.evaluate("""() => {
+                const card=document.querySelector('fluval-schedule-colours');
+                card.shadowRoot.querySelectorAll('details')[1].open=true;card.render();
+            }""")
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, True]
+            await page.get_by_role("button", name="Professional", exact=True).click()
+            await page.get_by_role("button", name="Automatic", exact=True).click()
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, True]
+            await page.locator("summary").filter(has_text="Day").click()
+            await page.evaluate("document.querySelector('fluval-schedule-colours').render()")
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [False, True]
+            result = await page.evaluate("""() => {
+                const card=document.querySelector('fluval-schedule-colours');
+                const fresh=document.createElement('fluval-schedule-colours');
+                fresh.setConfig({entry_id:'fresh',collapse_sections:false});
+                fresh.fixture=card.fixture;fresh.raw=card.raw;fresh.render();
+                const initial=[...fresh.shadowRoot.querySelectorAll('details')].map(bank=>bank.open);
+                card.setConfig({entry_id:'fixture',title:'Renamed'});
+                const redraw=[...card.shadowRoot.querySelectorAll('details')].map(bank=>bank.open);
+                const fixture=card.fixture,raw=card.raw;
+                card.setConfig({entry_id:'another'});
+                card.fixture=fixture;card.raw=raw;card.render();
+                const changed=[...card.shadowRoot.querySelectorAll('details')].map(bank=>bank.open);
+                return {initial,redraw,changed};
+            }""")
+            assert result == {"initial": [False, False], "redraw": [False, True], "changed": [False, False]}
             assert errors == []
             await page.close()
         await browser.close()
