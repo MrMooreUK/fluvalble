@@ -83,6 +83,32 @@ async def main():
                 assert "These tabs only select a schedule" in await page.locator("ha-card").inner_text()
             await page.add_script_tag(content=source)
             assert await page.evaluate("window.customCards.length") == 1
+            await page.evaluate("""() => {
+                const card=document.querySelector('fluval-schedule-colours');
+                card.mode='auto';card.render();
+                const editor=document.createElement('fluval-schedule-colours-editor');
+                editor.devices=[{id:'fixture',name:'Fish tank'}];
+                editor.setConfig({entry_id:'fixture',title:'My tank'});
+                editor.addEventListener('config-changed',event=>{
+                    window.savedConfig=event.detail.config;
+                    card.setConfig(event.detail.config);
+                });
+                document.body.append(editor);
+            }""")
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, False]
+            await page.get_by_label("Start Day and Night collapsed", exact=False).check()
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [False, False]
+            assert await page.evaluate("savedConfig") == {
+                "entry_id": "fixture",
+                "title": "My tank",
+                "collapse_sections": True,
+            }
+            await page.locator("summary").filter(has_text="Day").click()
+            await page.wait_for_timeout(50)
+            await page.evaluate("document.querySelector('fluval-schedule-colours').render()")
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, False]
+            await page.get_by_label("Start Day and Night collapsed", exact=False).uncheck()
+            assert await page.locator("details").evaluate_all("(banks)=>banks.map(bank=>bank.open)") == [True, False]
             assert errors == []
             await page.close()
         await browser.close()
