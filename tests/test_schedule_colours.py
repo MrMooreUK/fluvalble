@@ -9,8 +9,145 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.fluvalble.core.schedule_colours import colour_packet, replace_schedule_colours
+from custom_components.fluvalble.core.schedule_colours import colour_packet, replace_schedule_colours, editor_schedule
 from custom_components.fluvalble.core import protocol
+from custom_components.fluvalble.core.products import PRODUCTS
+
+
+def test_issue_133_actual_spp_capture_preserves_auto_and_all_eight_pro_points():
+    # Public issue capture: no device identifiers; SPP state in Automatic mode.
+    raw = bytes.fromhex(
+        "d2 b0 00 0e 01 01 02 f5 03 00 04 18 64 05 00 06 00 07 00 "
+        "08 43 0c 1e 1e 09 43 13 1e 1e 0a 42 ff ff "
+        "0b 45 32 32 32 32 32 0c 45 00 00 00 00 00 "
+        "0d 58 39 08 06 00 00 00 00 00 00 07 00 54 14 49 64 50 "
+        "0c 00 54 14 49 64 50 0c 14 32 0c 2c 3c 30 "
+        "0d 28 32 0c 2c 3c 30 0e 00 54 14 49 64 50 "
+        "11 00 54 14 49 64 50 12 00 00 05 00 00 00 "
+        "0e 00 0f 46 7f 0c 00 0e 00 01"
+    )
+    fields = protocol.decode_cbor_update(raw)
+    auto = editor_schedule(protocol.decode_spp_auto_schedule(fields, channel_count=5))
+    pro = editor_schedule(protocol.decode_spp_pro_schedule(fields, channel_count=5))
+    assert fields[1] == 1
+    assert [fields[i] for i in range(3, 8)] == [0, 100, 0, 0, 0]
+    assert auto == {
+        "sunrise": {"hour": 12, "minute": 30, "ramp": 30},
+        "sunset": {"hour": 19, "minute": 30, "ramp": 30},
+        "sleep": None,
+        "day_levels": [50] * 5,
+        "night_levels": [0] * 5,
+    }
+    assert [p["minute"] for p in pro] == [360, 420, 720, 740, 820, 840, 1020, 1080]
+    assert [pro[1][f"channel_{i}"] for i in range(1, 6)] == [84, 20, 73, 100, 80]
+    assert [pro[-1][f"channel_{i}"] for i in range(1, 6)] == [0, 5, 0, 0, 0]
+    times = {key: deepcopy(auto[key]) for key in ("sunrise", "sunset", "sleep")}
+    packet = colour_packet(auto, transport="spp", channel_count=5, levels=[50] * 5, target="day", times=times)
+    decoded = protocol.decode_cbor_update(packet)
+    assert {key: decoded[key] for key in range(8, 13)} == {key: fields[key] for key in range(8, 13)}
+    packet = colour_packet(pro, transport="spp", channel_count=5, levels=[84, 20, 73, 100, 80], target=1)
+    assert protocol.decode_cbor_update(packet)[13] == fields[13]
+
+
+@pytest.mark.parametrize("product_id", sorted(PRODUCTS))
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+def test_all_product_profiles_native_schedules_roundtrip_through_editor(product_id, transport):
+    count = PRODUCTS[product_id].channel_count
+    canonical_auto = {
+        "sunrise": {"hour": 23, "minute": 30, "ramp": 60},
+        "sunset": {"hour": 18, "minute": 15, "ramp": 45},
+        "sleep": {"hour": 22, "minute": 0},
+        "day_levels": list(range(41, 41 + count)),
+        "night_levels": list(range(1, 1 + count)),
+    }
+    canonical_pro = [
+        {"minute": minute, **{f"channel_{i}": i * 10 for i in range(1, count + 1)}} for minute in (30, 480, 900, 1380)
+    ]
+
+    def decode_auto(packet):
+        if transport == "classic":
+            return protocol.decode_old_auto_schedule(bytes([1]) + packet[2:-1], channel_count=count)
+        fields = protocol.decode_cbor_map(packet) if transport == "facebd" else protocol.decode_cbor_update(packet)
+        decode = protocol.decode_wifi_auto_schedule if transport == "facebd" else protocol.decode_spp_auto_schedule
+        return decode(fields, channel_count=count)
+
+    def decode_pro(packet):
+        if transport == "classic":
+            return protocol.decode_old_pro_schedule(bytes([2]) + packet[2:-1], channel_count=count)
+        fields = protocol.decode_cbor_map(packet) if transport == "facebd" else protocol.decode_cbor_update(packet)
+        decode = protocol.decode_wifi_pro_schedule if transport == "facebd" else protocol.decode_spp_pro_schedule
+        return decode(fields, channel_count=count)
+
+    times = {key: deepcopy(canonical_auto[key]) for key in ("sunrise", "sunset", "sleep")}
+    native_auto = decode_auto(
+        colour_packet(
+            canonical_auto,
+            transport=transport,
+            channel_count=count,
+            levels=canonical_auto["day_levels"],
+            target="day",
+            times=times,
+        )
+    )
+    native_pro = decode_pro(
+        colour_packet(
+            canonical_pro,
+            transport=transport,
+            channel_count=count,
+            levels=[i * 10 for i in range(1, count + 1)],
+            target=1,
+        )
+    )
+    assert editor_schedule(native_auto) == canonical_auto
+    assert editor_schedule(native_pro) == canonical_pro
+    before = deepcopy((native_auto, native_pro))
+    times["sunrise"]["minute"] = 25
+    packet = colour_packet(
+        native_auto, transport=transport, channel_count=count, levels=[55] * count, target="day", times=times
+    )
+    expected = replace_schedule_colours(
+        native_auto, channel_count=count, levels=[55] * count, target="day", times=times
+    )
+    assert editor_schedule(decode_auto(packet)) == expected
+    packet = colour_packet(
+        native_pro, transport=transport, channel_count=count, levels=[65] * count, target=1, times=490
+    )
+    expected = replace_schedule_colours(native_pro, channel_count=count, levels=[65] * count, target=1, times=490)
+    assert editor_schedule(decode_pro(packet)) == expected
+    assert (native_auto, native_pro) == before
+
+
+def test_fixture_labels_use_device_names_areas_and_model_not_mac():
+    from custom_components.fluvalble.schedule_editor import _fixture_labels
+    from custom_components.fluvalble.core.products import product_from_id
+
+    entries = [
+        SimpleNamespace(entry_id="a", title="AA:BB:CC:DD:EE:FF", data={"product_id": 328}),
+        SimpleNamespace(entry_id="b", title="11:22:33:44:55:66", data={"product_id": 328}),
+        SimpleNamespace(entry_id="c", title="77:88:99:AA:BB:CC", data={"product_id": 328}),
+    ]
+    devices = {
+        "a": [SimpleNamespace(name_by_user="Fish tank", name="BLE#0xAABBCCDDEEFF", model="AquaSky", area_id="room")]
+    }
+    dr = SimpleNamespace(
+        async_get=lambda _: None, async_entries_for_config_entry=lambda _, entry: devices.get(entry, [])
+    )
+    ar = SimpleNamespace(
+        async_get=lambda _: SimpleNamespace(async_get_area=lambda _: SimpleNamespace(name="Chris's room"))
+    )
+    with (
+        patch.dict(sys.modules, {"homeassistant.helpers.area_registry": ar}),
+        patch("homeassistant.helpers.device_registry.async_get", dr.async_get, create=True),
+        patch(
+            "homeassistant.helpers.device_registry.async_entries_for_config_entry",
+            dr.async_entries_for_config_entry,
+            create=True,
+        ),
+    ):
+        labels = _fixture_labels(None, entries)
+    assert labels[0] == {"id": "a", "name": "Fish tank · Chris's room"}
+    assert labels[1]["name"] == product_from_id(328).model + " (1)"
+    assert labels[2]["name"] == product_from_id(328).model + " (2)"
 
 
 @pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
@@ -407,3 +544,24 @@ def test_editor_save_raises_unauthorized_for_non_admin_before_any_work():
     with pytest.raises(Unauthorized):
         _run_save(device=device, baseline=deepcopy(original), admin_error=Unauthorized())
     device._async_send_packet.assert_not_awaited()
+
+
+def test_editor_save_accepts_normalized_baseline_and_verifies_raw_spp_readback():
+    native = {
+        "sunrise": "08:00",
+        "sunrise_ramp": 30,
+        "sunset": "20:00",
+        "sunset_ramp": 30,
+        "sleep": "22:00",
+        "day_levels": [50] * 4,
+        "night_levels": [5] * 4,
+    }
+    device = _save_device(values={"mode": "automatic", "native_auto_schedule": deepcopy(native)})
+    device._uses_wifi_protocol = lambda: False
+    device._uses_spp_protocol = lambda: True
+    connection = _run_save(device=device, baseline=editor_schedule(native))
+    connection.send_result.assert_called_once_with(7, True)
+    connection.send_error.assert_not_called()
+    packet = device._async_send_packet.await_args.args[0]
+    assert protocol.decode_cbor_update(packet) == {11: bytes([50] * 4)}
+    assert device.values["native_auto_schedule"] == native

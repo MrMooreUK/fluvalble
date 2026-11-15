@@ -1,3 +1,7 @@
+// HA installs its scoped-element registry before defining its application shell.
+// Defining against the earlier native registry leaves picker metadata pointing
+// to an element that the final registry cannot resolve.
+function registerFluvalScheduleCard() {
 const css = `
 :host{display:block;color:var(--primary-text-color,#202124);font-family:var(--paper-font-body1_-_font-family,Roboto,Arial,sans-serif)}
 *{box-sizing:border-box}ha-card{display:block;background:var(--ha-card-background,var(--card-background-color,#fff));border:1px solid var(--divider-color,#ddd);border-radius:var(--ha-card-border-radius,16px);overflow:hidden}
@@ -11,21 +15,26 @@ input[type=time]{font:inherit;color:inherit;background:var(--secondary-backgroun
 `;
 class FluvalScheduleColours extends HTMLElement {
   constructor(){super();this.attachShadow({mode:'open'});this.mode='auto';this.edits={};this.timeEdits={};this.selected=0;}
-  setConfig(config){this.config=config;this.entry=config.entry_id;this.render();}
+  setConfig(config){const changed=this.entry!==config.entry_id;this.config=config;this.entry=config.entry_id;if(changed){this.started=false;this.busy=false;this.message='';this.fixture=null;this.raw=null;this.edits={};this.timeEdits={};this.loadGeneration=(this.loadGeneration||0)+1;}this.render();if(changed&&this._hass&&this.entry){this.started=true;this.load(false);}}
   set hass(value){this._hass=value;if(!this.started&&this.entry){this.started=true;this.load(false);}}
   static getConfigElement(){return document.createElement('fluval-schedule-colours-editor');}
   static getStubConfig(){return {type:'custom:fluval-schedule-colours'};}
   getCardSize(){return 7;}
   get dirty(){return Object.keys(this.edits).length>0;}
-  async load(discard=true){
+  async load(discard=true,refresh=false){
     if(discard&&this.dirty&&!window.confirm('Discard unsaved channel changes and reload from the light?'))return;
+    const generation=this.loadGeneration=(this.loadGeneration||0)+1;
     this.busy=true;this.message='';this.render();
     try{
-      const data=await this._hass.callWS({type:'fluvalble/get_schedule',entry_id:this.entry,refresh:true});
-      if(!data.refresh_ok)throw Error('Could not read the light. Check its connection and try Reload.');
+      const data=await this.request({type:'fluvalble/get_schedule',entry_id:this.entry,refresh},refresh?35000:10000);
+      if(generation!==this.loadGeneration)return;
+      if(refresh&&!data.refresh_ok)throw Error('Could not read the light. Check its connection and try Reload.');
       this.fixture=data.fixture;this.raw=data.colour_editor;this.edits={};this.timeEdits={};this.selected=0;
-    }catch(error){this.message=error.message||String(error);}
+    }catch(error){if(generation!==this.loadGeneration)return;this.message=error.message||String(error);}
     this.busy=false;this.render();
+  }
+  request(message,timeout){
+    let timer;return Promise.race([this._hass.callWS(message),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('The fixture request timed out. Try Reload when the light is available.')),timeout);})]).finally(()=>clearTimeout(timer));
   }
   banks(){if(!this.raw?.[this.mode])return [];return this.mode==='auto'?['day','night']:this.raw.professional.map((_,i)=>i);}
   key(target){return this.mode+':'+target;}
@@ -70,10 +79,16 @@ class FluvalScheduleColours extends HTMLElement {
       tab.setAttribute('aria-pressed',String(this.mode===mode));
     }
     if(this.message){const msg=document.createElement('div');msg.className='message';msg.setAttribute('role','status');msg.textContent=this.message;body.append(msg);}
+    const requiredMode=this.mode==='auto'?'automatic':'professional';
+    if(this.fixture?.mode&&this.fixture.mode!==requiredMode){
+      const note=document.createElement('p');note.className='note';
+      note.textContent='The light is currently in '+this.fixture.mode+' mode. These tabs only select a schedule to view; they do not change the light’s mode. Select '+requiredMode+' on the device mode control before saving edits to this schedule.';
+      body.append(note);
+    }
     if(!this.entry){const note=document.createElement('div');note.className='empty muted';note.textContent='Choose a Fluval light in this card’s visual configuration to get started.';body.append(note);}
     else if(!this.raw?.[this.mode]){
       const note=document.createElement('div');note.className='empty muted';
-      note.textContent=this.busy?'Reading the fixture…':'Select '+(this.mode==='auto'?'Automatic':'Professional')+' mode on the light, then Reload to read its saved schedule.';
+      note.textContent=this.busy?'Loading saved schedule…':'No saved '+(this.mode==='auto'?'Automatic':'Professional')+' schedule is available in Home Assistant. Select the matching mode on the light, then Reload to read it over Bluetooth.';
       body.append(note);
     }else{
       const format=minute=>String(Math.floor(minute/60)).padStart(2,'0')+':'+String(minute%60).padStart(2,'0');
@@ -151,7 +166,7 @@ class FluvalScheduleColours extends HTMLElement {
     const footer=this.shadowRoot.querySelector('footer');footer.innerHTML='';
     const status=document.createElement('span');status.className='status'+(this.dirty?' dirty':'');
     status.textContent=this.busy?'Working…':this.dirty?'Unsaved changes':this.raw?'Read from fixture':'Not loaded';footer.append(status);
-    for(const [text,action,primary,disabled] of [['Reload',()=>this.load(),false,!this.entry],['Save changes',()=>this.save(),true,!this.dirty]]){
+    for(const [text,action,primary,disabled] of [['Reload',()=>this.load(true,true),false,!this.entry],['Save changes',()=>this.save(),true,!this.dirty]]){
       const b=document.createElement('button');b.type='button';b.textContent=text;b.className='action'+(primary?' primary':'');b.disabled=this.busy||disabled;b.onclick=action;footer.append(b);
     }
   }
@@ -159,10 +174,10 @@ class FluvalScheduleColours extends HTMLElement {
 class FluvalScheduleColoursEditor extends HTMLElement {
   constructor(){super();this.attachShadow({mode:'open'});}
   setConfig(config){this.config=config;this.render();}
-  set hass(value){this._hass=value;if(!this.started){this.started=true;value.callWS({type:'fluvalble/colour_editor_devices'}).then(devices=>{this.devices=devices;this.render();}).catch(error=>{this.error=error.message;this.render();});}}
+  set hass(value){this._hass=value;if(!this.started){this.started=true;FluvalScheduleColours.prototype.request.call(this,{type:'fluvalble/colour_editor_devices'},10000).then(devices=>{this.devices=devices;this.render();}).catch(error=>{this.error=error.message;this.render();});}}
   render(){
     this.shadowRoot.innerHTML='<style>'+css+'</style>';
-    if(!this.devices){this.shadowRoot.append(document.createTextNode(this.error||'Loading Fluval lights…'));return;}
+    if(!this.devices){this.shadowRoot.append(document.createTextNode(this.error||'Loading Fluval lights…'));if(this.error){const retry=document.createElement('button');retry.textContent='Retry';retry.onclick=()=>{this.started=false;this.error='';this.hass=this._hass;};this.shadowRoot.append(retry);}return;}
     const label=document.createElement('label');label.textContent='Fluval light';const select=document.createElement('select');select.setAttribute('aria-label','Fluval light');
     select.add(new Option('Select a light',''));this.devices.forEach(d=>select.add(new Option(d.name,d.id)));select.value=this.config?.entry_id||'';
     select.onchange=()=>{this.config={...this.config,entry_id:select.value};this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:this.config},bubbles:true,composed:true}));};
@@ -172,3 +187,17 @@ class FluvalScheduleColoursEditor extends HTMLElement {
 for(const [name,component] of [['fluval-schedule-colours-editor',FluvalScheduleColoursEditor],['fluval-schedule-colours',FluvalScheduleColours]])if(!customElements.get(name))customElements.define(name,component);
 window.customCards=window.customCards||[];
 if(!window.customCards.some(x=>x.type==='fluval-schedule-colours'))window.customCards.push({type:'fluval-schedule-colours',name:'Fluval schedule colours',description:'Edit times and colours in a saved hardware schedule.',preview:false});
+}
+
+function waitForHomeAssistant(attempt=0) {
+  if(customElements.get('home-assistant')) {
+    registerFluvalScheduleCard();
+    return;
+  }
+  if(attempt>=600) {
+    console.error('Fluval schedule card: Home Assistant frontend did not become ready; reload the page to retry.');
+    return;
+  }
+  setTimeout(()=>waitForHomeAssistant(attempt+1),100);
+}
+waitForHomeAssistant();

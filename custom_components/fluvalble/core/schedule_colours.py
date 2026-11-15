@@ -6,6 +6,44 @@ from typing import Any
 from . import protocol
 
 
+def editor_schedule(schedule: Any) -> Any:
+    """Normalize decoded schedules for display, encoding and verification.
+
+    SPP uses HH:MM strings and level arrays; classic/FACEBD use clock
+    dictionaries and numbered channels. Keep device-owned readback untouched.
+    """
+    result = deepcopy(schedule)
+    if isinstance(result, dict):
+        for name in ("sunrise", "sunset", "sleep"):
+            value = result.get(name)
+            if isinstance(value, str):
+                if len(value) != 5 or value[2] != ":" or not (value[:2] + value[3:]).isdigit():
+                    raise ValueError("Invalid fixture schedule time")
+                clock = {"hour": int(value[:2]), "minute": int(value[3:])}
+                _clock_minute(clock)
+                if name != "sleep":
+                    ramp = result.pop(name + "_ramp", None)
+                    if type(ramp) is not int or not 0 <= ramp <= 240:
+                        raise ValueError("Invalid fixture schedule ramp")
+                    clock["ramp"] = ramp
+                result[name] = clock
+    elif isinstance(result, list):
+        for point in result:
+            if not isinstance(point, dict):
+                raise ValueError("Invalid fixture timepoint")
+            if "time" in point:
+                time = point.pop("time")
+                if not isinstance(time, str) or len(time) != 5 or time[2] != ":" or not (time[:2] + time[3:]).isdigit():
+                    raise ValueError("Invalid fixture timepoint time")
+                point["minute"] = _clock_minute({"hour": int(time[:2]), "minute": int(time[3:])})
+            if "levels" in point:
+                levels = point.pop("levels")
+                if not isinstance(levels, list) or len(levels) not in (4, 5):
+                    raise ValueError("Invalid fixture timepoint channels")
+                point.update({f"channel_{i}": value for i, value in enumerate(levels, 1)})
+    return result
+
+
 def colour_packet(
     schedule: Any, *, transport: str, channel_count: int, levels: list[int], target: str | int, times: Any = None
 ) -> bytes:
@@ -83,7 +121,7 @@ def replace_schedule_colours(
         raise ValueError("Levels must match the fixture's physical channels")
     if any(type(level) is not int or not 0 <= level <= 100 for level in levels):
         raise ValueError("Channel levels must be integers from 0 to 100")
-    result = deepcopy(schedule)
+    result = editor_schedule(schedule)
     if isinstance(result, dict):
         if target not in ("day", "night"):
             raise ValueError("Select the day or night bank")
