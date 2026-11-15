@@ -207,6 +207,18 @@ from the schedule's Day/Night levels and Professional points, as in the app.
 Editing a channel slider switches the fixture to Manual mode; simply viewing
 or expanding the schedule card does not.
 
+After a successful HA Manual-channel change, the integration saves the complete
+bank only when fresh fixture readback confirms it. **Restore last Manual
+settings** explicitly reapplies that bank using the native Manual commands.
+It may change the operating mode and turn the light on or off to match those
+levels. The button is unavailable until a confirmed bank has been saved.
+
+Saved settings survive reloads and restarts, separately from the current
+slider values. Physical-button changes, Auto/Pro reports, failed writes and
+intermediate fade steps do not overwrite them. There is no automatic restore
+on a button press or reconnect, and no schedule is rewritten. Deleting the
+integration entry removes its saved bank.
+
 The fixture selector uses the Home Assistant device name and area, with the
 product model as a fallback instead of a Bluetooth address. Rename devices in
 Home Assistant to distinguish similar fixtures.

@@ -30,3 +30,23 @@ keeps those fields separate and round-trips the schedule banks unchanged.
 The integration therefore preserves reported Manual channel controls rather
 than replacing them with a schedule estimate. A report is not a physical light
 measurement. This audit makes no command or channel-reporting runtime changes.
+
+## Local Manual recall
+
+LightKxtKt.java lines 384–410 saves and retrieves non-classic P1–P4 colour banks
+through LightColorCache, whose MMKV storage is local to the app. ManFragment.java
+lines 740–770 explicitly recalls a bank through createLightAllZoneData.
+onHiddenChanged (around lines 400–438) only redraws the colour adapter; it does
+not automatically restore a bank on returning to the Manual screen.
+
+The HA last-Manual feature uses the same local-bank/full-channel-recall pattern,
+not a new firmware command. It is an HA-specific single last-confirmed bank,
+not a claim that the app has an automatic last-used restore feature. Storage is
+per config entry and bound to MAC, product ID, channel count and spectrum
+profile. Only successful HA channel writes with complete fresh matching Manual
+readback are saved. An explicit restore selects Manual and applies all channels
+with fresh readback confirmation; ordinary notifications never invoke it.
+
+The APK does not contain the controller firmware or a distinct marker proving
+that a given channel report came from the top button. No automatic physical-
+button detection or firmware-reset workaround is inferred.

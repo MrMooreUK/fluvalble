@@ -7,6 +7,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.0.17-4] — 2026-11-15
+
+### Added
+
+- Save the last fully confirmed HA Manual channel bank separately from fixture
+  readback and retain it across integration reloads and Home Assistant restarts.
+- Add an explicit Restore last Manual settings button. Restoration uses native
+  full-bank commands and requires fresh matching readback. External reports,
+  failed writes and intermediate transition steps cannot replace the saved bank.
+
 ## [0.0.17-3] — 2026-11-15
 
 ### Changed

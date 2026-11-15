@@ -92,7 +92,7 @@ def test_create_entities_for_platforms():
     assert len(mode_entities) == 1
     assert mode_entities[0].attr == "mode"
     assert len(sensor.create_entities(device)) == 3
-    assert len(button.create_entities(device)) == 2
+    assert len(button.create_entities(device)) == 3
     assert len(binary_sensor.create_entities(device)) == 1
     assert len(light.create_entities(device)) == 1
     assert scene.create_entities(device) == []

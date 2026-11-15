@@ -87,6 +87,9 @@
       },
       "sync_clock": {
         "name": "Sync clock"
+      },
+      "restore_last_manual": {
+        "name": "Restore last Manual settings"
       }
     },
     "select": {
