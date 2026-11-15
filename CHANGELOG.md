@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+## [0.0.17-2] — 2026-11-15
+
+### Added
+
+- Visual schedule-card option to start both Day and Night collapsed, preserving
+  the existing Day-open default. Section expansion survives card redraws.
+
+### Documentation
+
+- Clarify that channel sliders expose the Manual values reported by the fixture,
+  separately from Auto/Pro schedule levels; no live output is inferred.
+
 ## [0.0.17-1] — 2026-11-15
 
 Prerelease for schedule-card feedback.

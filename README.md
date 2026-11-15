@@ -191,9 +191,20 @@ Add the **Fluval schedule colours** card from the dashboard card picker. The
 integration registers it automatically; no resource URL or YAML is needed.
 Registration waits for Home Assistant's frontend shell so the card remains
 available when Home Assistant installs its scoped custom-element registry.
-Choose the fixture once in the card's visual configuration. Select its saved
+Choose the fixture once in the card's visual configuration.
+Enable **Start Day and Night collapsed** in that visual editor to start both
+Automatic sections closed. By default, Day starts open and Night closed.
+Opening or closing a section does not communicate with the light.
+
+Select the fixture's saved
 Automatic or Professional mode using the device's mode control, then open the
 matching card tab and click **Reload** if the schedule is not already loaded.
+
+The device's channel sliders represent its reported Manual channel values,
+not measured live output from an Auto/Pro programme. These remain separate
+from the schedule's Day/Night levels and Professional points, as in the app.
+Editing a channel slider switches the fixture to Manual mode; simply viewing
+or expanding the schedule card does not.
 
 The fixture selector uses the Home Assistant device name and area, with the
 product model as a fallback instead of a Bluetooth address. Rename devices in

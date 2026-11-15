@@ -14,8 +14,8 @@ input[type=time]{font:inherit;color:inherit;background:var(--secondary-backgroun
 @media(max-width:380px){header,.body{padding:16px}.footer{padding:12px;gap:0}.action{padding:10px}.status{max-width:110px}}
 `;
 class FluvalScheduleColours extends HTMLElement {
-  constructor(){super();this.attachShadow({mode:'open'});this.mode='auto';this.edits={};this.timeEdits={};this.selected=0;}
-  setConfig(config){const changed=this.entry!==config.entry_id;this.config=config;this.entry=config.entry_id;if(changed){this.started=false;this.busy=false;this.message='';this.fixture=null;this.raw=null;this.edits={};this.timeEdits={};this.loadGeneration=(this.loadGeneration||0)+1;}this.render();if(changed&&this._hass&&this.entry){this.started=true;this.load(false);}}
+  constructor(){super();this.attachShadow({mode:'open'});this.mode='auto';this.edits={};this.timeEdits={};this.selected=0;this.bankOpen={};}
+  setConfig(config){if(config.collapse_sections!==undefined&&typeof config.collapse_sections!=='boolean')throw Error('collapse_sections must be a boolean');if(this.config?.collapse_sections!==config.collapse_sections)this.bankOpen={};const changed=this.entry!==config.entry_id;this.config=config;this.entry=config.entry_id;if(changed){this.started=false;this.busy=false;this.message='';this.fixture=null;this.raw=null;this.edits={};this.timeEdits={};this.loadGeneration=(this.loadGeneration||0)+1;this.bankOpen={};}this.render();if(changed&&this._hass&&this.entry){this.started=true;this.load(false);}}
   set hass(value){this._hass=value;if(!this.started&&this.entry){this.started=true;this.load(false);}}
   static getConfigElement(){return document.createElement('fluval-schedule-colours-editor');}
   static getStubConfig(){return {type:'custom:fluval-schedule-colours'};}
@@ -125,7 +125,9 @@ class FluvalScheduleColours extends HTMLElement {
       };
       if(this.mode==='auto'){
         for(const [target,title,icon] of [['day','Day','☀'],['night','Night','☾']]){
-          const bank=document.createElement('details');bank.className='bank';bank.open=target==='day';
+          const bank=document.createElement('details');bank.className='bank';
+          bank.open=this.bankOpen[target]??(target==='day'&&!this.config?.collapse_sections);
+          bank.ontoggle=()=>{if(bank.isConnected)this.bankOpen[target]=bank.open;};
           const summary=document.createElement('summary');const glyph=document.createElement('span');glyph.className='bank-icon';glyph.textContent=icon;
           const name=document.createElement('span');name.className='bank-title';name.textContent=title;summary.append(glyph,name);bank.append(summary);channels(bank,target);body.append(bank);
           const timing=document.createElement('div');timing.className='channels';bank.insertBefore(timing,bank.querySelector('.channels'));
@@ -182,6 +184,10 @@ class FluvalScheduleColoursEditor extends HTMLElement {
     select.add(new Option('Select a light',''));this.devices.forEach(d=>select.add(new Option(d.name,d.id)));select.value=this.config?.entry_id||'';
     select.onchange=()=>{this.config={...this.config,entry_id:select.value};this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:this.config},bubbles:true,composed:true}));};
     label.append(select);this.shadowRoot.append(label);
+    const option=document.createElement('label');option.style.display='block';option.style.marginTop='16px';
+    const collapse=document.createElement('input');collapse.type='checkbox';collapse.checked=this.config?.collapse_sections===true;
+    collapse.onchange=()=>{this.config={...this.config,collapse_sections:collapse.checked};this.dispatchEvent(new CustomEvent('config-changed',{detail:{config:this.config},bubbles:true,composed:true}));};
+    option.append(collapse,document.createTextNode(' Start Day and Night collapsed'));this.shadowRoot.append(option);
   }
 }
 for(const [name,component] of [['fluval-schedule-colours-editor',FluvalScheduleColoursEditor],['fluval-schedule-colours',FluvalScheduleColours]])if(!customElements.get(name))customElements.define(name,component);
