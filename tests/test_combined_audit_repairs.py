@@ -127,6 +127,56 @@ def test_unknown_facebd_four_channels_arrive_separately_from_mode_and_power(orde
     assert len(d.numbers()) == 5
 
 
+@pytest.mark.parametrize("channels_first", [False, True])
+def test_facebd_initialization_collects_split_state_characteristics(channels_first):
+    """Exercise the complete client gate, not only its completion predicate."""
+
+    async def run():
+        d = make_device(None, "facebd")
+        c = _make_client()
+        c.raw_facebd = True
+        c.spp_transport = False
+        c.wake_read_uuid = None
+        c.notify_uuid = "notify"
+        mode_uuid, channels_uuid = "mode-state", "channel-state"
+        c.state_read_uuids = [channels_uuid, mode_uuid] if channels_first else [mode_uuid, channels_uuid]
+        mode = protocol.cbor_map({protocol.WIFI_MODE_KEY: 0, protocol.WIFI_SWITCH_KEY: True})
+        channels = protocol.cbor_map(dict(zip(protocol.WIFI_CHANNEL_KEYS, [10, 20, 30, 40])))
+        payloads = {mode_uuid: mode, channels_uuid: channels}
+
+        async def read(uuid):
+            # Yield as a GATT read does; initialization cannot finish after
+            # receiving just the first half of the required settings.
+            await asyncio.sleep(0)
+            assert not c._session_initialized
+            c.state_ready_callback.assert_not_awaited()
+            return payloads[uuid]
+
+        c.client = SimpleNamespace(is_connected=True, read_gatt_char=AsyncMock(side_effect=read))
+        c._ensure_client = AsyncMock(return_value=c.client)
+        c.update_callback = d.decode_update_packet
+        c.state_validator = d._initial_state_complete
+        c.state_ready_callback = AsyncMock()
+        c.request_state = AsyncMock(wraps=c.request_state)
+        assert await c._initialize_session(c.client)
+        assert c._session_initialized
+        assert len(d.numbers()) == 4
+        assert [d.values[key] for key in d.numbers()] == [10, 20, 30, 40]
+        assert d.values["mode"] == "manual"
+        assert d.values["led_on_off"] is True
+        assert [call.args[0] for call in c.client.read_gatt_char.await_args_list] == c.state_read_uuids
+        c.request_state.assert_awaited_once()
+        c.state_ready_callback.assert_awaited_once_with(
+            {
+                protocol.WIFI_MODE_KEY: 0,
+                protocol.WIFI_SWITCH_KEY: True,
+                **dict(zip(protocol.WIFI_CHANNEL_KEYS, [10, 20, 30, 40])),
+            }
+        )
+
+    asyncio.run(run())
+
+
 def test_provisional_channel_hint_preserves_existing_registry_rows_and_entities():
     from custom_components.fluvalble.number import setup_channel_entities
 
