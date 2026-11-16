@@ -8,7 +8,13 @@ from collections import Counter
 import voluptuous as vol
 from homeassistant.components import websocket_api
 
-from .core.schedule_colours import colour_packet, replace_schedule_colours, editor_schedule
+from .core.schedule_colours import (
+    colour_packet,
+    replace_schedule_colours,
+    editor_schedule,
+    professional_batch_packet,
+    replace_professional_batch,
+)
 from .core.products import product_from_id
 
 
@@ -95,8 +101,9 @@ async def async_setup_editor(hass):
             vol.Required("type"): "fluvalble/save_schedule_colours",
             vol.Required("entry_id"): str,
             vol.Required("schedule"): vol.In(["auto", "professional"]),
-            vol.Required("target"): vol.Any(str, int),
-            vol.Required("levels"): [int],
+            vol.Optional("target"): vol.Any(str, int),
+            vol.Optional("levels"): [int],
+            vol.Optional("changes"): [dict],
             vol.Required("baseline"): vol.Any(dict, list),
             vol.Optional("times"): vol.Any(dict, int),
         }
@@ -108,15 +115,18 @@ async def async_setup_editor(hass):
         if entry is None or entry.domain != DOMAIN:
             connection.send_error(msg["id"], "not_found", "Fluval fixture not found")
             return
-        device = entry_runtime_data(hass, entry).device
-        if device is None:
+        runtime = entry_runtime_data(hass, entry)
+        device = runtime.device if runtime is not None else None
+        if device is None or getattr(runtime, "unloading", False):
             connection.send_error(msg["id"], "unavailable", "Fixture unavailable")
             return
         try:
             async with device.command_transaction():
-                if not await device.async_refresh_state():
-                    raise ValueError("Unable to read the fixture before saving")
+                if entry_runtime_data(hass, entry) is not runtime or getattr(runtime, "unloading", False):
+                    raise ValueError("Fixture unavailable")
                 key = "native_auto_schedule" if msg["schedule"] == "auto" else "native_pro_schedule"
+                if not await device.async_refresh_state(schedule=key):
+                    raise ValueError("Unable to read the fixture before saving")
                 required_mode = "automatic" if msg["schedule"] == "auto" else "professional"
                 if device.values.get("mode") != required_mode:
                     raise ValueError("Select the matching schedule mode on the light before editing")
@@ -126,25 +136,37 @@ async def async_setup_editor(hass):
                 transport = (
                     "facebd" if device._uses_wifi_protocol() else "spp" if device._uses_spp_protocol() else "classic"
                 )
-                packet = colour_packet(
-                    current,
-                    transport=transport,
-                    channel_count=len(device.numbers()),
-                    levels=msg["levels"],
-                    target=msg["target"],
-                    times=msg.get("times"),
-                )
+                if "changes" in msg:
+                    if msg["schedule"] != "professional" or any(key in msg for key in ("target", "levels", "times")):
+                        raise ValueError("Batch edits apply only to Professional timepoints")
+                    expected = replace_professional_batch(
+                        current, channel_count=len(device.numbers()), changes=msg["changes"]
+                    )
+                    packet = professional_batch_packet(
+                        current, transport=transport, channel_count=len(device.numbers()), changes=msg["changes"]
+                    )
+                else:
+                    expected = replace_schedule_colours(
+                        current,
+                        channel_count=len(device.numbers()),
+                        levels=msg["levels"],
+                        target=msg["target"],
+                        times=msg.get("times"),
+                    )
+                    packet = colour_packet(
+                        current,
+                        transport=transport,
+                        channel_count=len(device.numbers()),
+                        levels=msg["levels"],
+                        target=msg["target"],
+                        times=msg.get("times"),
+                    )
+                if entry_runtime_data(hass, entry) is not runtime or getattr(runtime, "unloading", False):
+                    raise ValueError("Fixture unavailable")
                 if not await _write_schedule_packet(device, packet, transport):
                     raise ValueError(device.command_error_message())
-                if not await device.async_refresh_state():
+                if not await device.async_refresh_state(schedule=key):
                     raise ValueError("Write sent, but readback failed. Reload to confirm the result")
-                expected = replace_schedule_colours(
-                    current,
-                    channel_count=len(device.numbers()),
-                    levels=msg["levels"],
-                    target=msg["target"],
-                    times=msg.get("times"),
-                )
                 if editor_schedule(device.values.get(key)) != expected:
                     raise ValueError("Fixture readback did not confirm the saved schedule. Reload before retrying")
             connection.send_result(msg["id"], True)

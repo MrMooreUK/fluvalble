@@ -143,6 +143,8 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def _async_turn_on(self, **kwargs) -> None:
         """Apply one complete turn-on transaction."""
+        if not await self.device._async_prepare_command():
+            self._raise_command_error()
         requested_effect = kwargs.get(ATTR_EFFECT)
         if requested_effect == EFFECT_NONE:
             if not await self.device.async_stop_effect():
@@ -263,32 +265,11 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def _async_set_brightness(self, brightness: int) -> bool:
         """Scale the current colour mix without changing its hue."""
-        if self.device.master_brightness() == 0:
-            channels, rgb = self._default_color(brightness)
-            if not await self.device.async_apply_light_channels(channels):
-                return False
-            self.device.remember_commanded_light(
-                channels,
-                rgb=rgb,
-                brightness=brightness,
-            )
-            return True
-
-        if self.device.light_mode() == "rgb":
-            rgb = self.device.light_rgb_255()
-        elif not self.device.aquasky_white_mode():
-            rgb = self.device.aquasky_rgb_255()
-        else:
-            rgb = None
-        if not await self.device.async_set_master_brightness(round(brightness / 255 * 100)):
+        if not await self.device.async_set_master_brightness(
+            round(brightness / 255 * 100), default_channels=lambda: self._default_color(brightness)[0]
+        ):
             return False
         self.device.clear_commanded_light()
-        channels = {channel: int(self.device.values[channel]) for channel in self.device.numbers()}
-        self.device.remember_commanded_light(
-            channels,
-            rgb=rgb,
-            brightness=brightness,
-        )
         return True
 
     async def async_turn_off(self, **kwargs) -> None:

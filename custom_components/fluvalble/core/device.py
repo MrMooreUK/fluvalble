@@ -13,6 +13,7 @@ from bleak import AdvertisementData, BLEDevice, BleakError, BleakScanner
 from homeassistant.components import bluetooth
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.util import dt as dt_util
 
 from . import (
     CONF_LAMP_PROFILE,
@@ -79,16 +80,6 @@ CHANNEL_NAMES_MARINE = {
     "channel_3": "Blue",
     "channel_4": "Purple",
     "channel_5": "Cold White",
-}
-# Product 281 is the APK's special Fresh 281 layout. It uses the current
-# Reef spectrum asset, but DeviceUtil.getLightChannel() gives its physical
-# emitters this different order.
-CHANNEL_NAMES_FRESH_281 = {
-    "channel_1": "Red",
-    "channel_2": "Blue",
-    "channel_3": "Purple",
-    "channel_4": "Cold White",
-    "channel_5": "Warm White",
 }
 CHANNEL_NAMES_PLANT_PRO = {
     # Kept as a compatibility profile name. FluvalConnect assigns Plant PRO
@@ -179,6 +170,7 @@ class Device:
         )
         self.lamp_profile = config_data.get(CONF_LAMP_PROFILE, DEFAULT_LAMP_PROFILE)
         self._channel_count_hint: int | None = None
+        self._schedule_revisions = {"native_auto_schedule": 0, "native_pro_schedule": 0}
         self.address = (config_data.get("mac") or (device.address if device else "")).upper()
         self.client: Client | None = None
         self._ping_interval = ping_interval
@@ -207,6 +199,7 @@ class Device:
         self.values["mode"] = "manual"
         self.values["led_on_off"] = False
         self.values["effect"] = None
+        self._effect_readback_revision = 0
         # Raw stored payload, validated lazily because the channel count of an
         # unidentified fixture can change after the first readback.
         self._stored_manual_settings: Any = None
@@ -572,9 +565,11 @@ class Device:
         if auto is None and professional is None:
             return False
         if auto is not None:
+            self._schedule_revisions["native_auto_schedule"] += 1
             self.values["native_auto_schedule"] = auto
             self.diagnostics["native_auto_schedule"] = auto
         if professional is not None:
+            self._schedule_revisions["native_pro_schedule"] += 1
             self.values["native_pro_schedule"] = professional
             self.diagnostics["native_pro_schedule"] = professional
         if protocol_name == "classic":
@@ -621,7 +616,7 @@ class Device:
             return False
         if not self.diagnostics.get("clock_synced_at"):
             return None
-        moment = now or datetime.now().astimezone()
+        moment = now or self._local_now()
         # Static ramps do not describe the instantaneous weather animation.
         effect_schedule = self.values.get("native_effect_schedule", [])
         if isinstance(effect_schedule, list) and weather_may_be_active(effect_schedule, moment):
@@ -714,8 +709,6 @@ class Device:
     def _channel_labels(self) -> dict[str, str]:
         """Return channel labels for the active lamp profile."""
         if (product := product_from_id(self.product_id)) is not None:
-            if self.product_id == 281:
-                return CHANNEL_NAMES_FRESH_281
             if product.spectrum == "plant":
                 return CHANNEL_NAMES_PLANT
             if product.spectrum == "rgbw":
@@ -991,11 +984,13 @@ class Device:
     def _store_native_effect_code(self, effect_code: int) -> bool:
         """Store only the APK's explicit off sentinel or a catalogued effect."""
         if effect_code == 0:
+            self._effect_readback_revision += 1
             self.values["effect"] = None
             return True
         effect = self._native_effect_name(effect_code)
         if effect is None:
             return False
+        self._effect_readback_revision += 1
         self.values["effect"] = effect
         return True
 
@@ -1038,7 +1033,6 @@ class Device:
             )
             return False
 
-        old_values = dict(self.values)
         old_restore = self._effect_restore_channels
         if not self.values.get("effect"):
             static_channels = self._channel_snapshot()
@@ -1075,14 +1069,45 @@ class Device:
         )
 
         for packet in packets:
+            revisions = dict(self._control_readback_revision)
+            effect_revision = self._effect_readback_revision
             if not await self._async_send_packet(packet):
-                self.values = old_values
-                self._effect_restore_channels = old_restore
+                if not self.values.get("effect"):
+                    self._effect_restore_channels = old_restore
                 return False
+            # Each command commits independently; later failure cannot undo it.
+            if packet == (
+                protocol.spp_mode_packet(0)
+                if spp
+                else protocol.wifi_mode_packet(0)
+                if facebd
+                else protocol.old_mode_packet(0)
+            ):
+                if self._control_readback_revision["mode"] == revisions["mode"]:
+                    self.values["mode"] = "manual"
+                elif self.values.get("mode") != "manual":
+                    self._set_diagnostic_error(
+                        "manual_mode_unconfirmed", "Fixture readback did not confirm Manual mode"
+                    )
+                    return False
+            elif packet == (
+                protocol.spp_switch_packet(True)
+                if spp
+                else protocol.wifi_switch_packet(True)
+                if facebd
+                else protocol.old_switch_packet(True)
+            ):
+                if self._control_readback_revision["led_on_off"] == revisions["led_on_off"]:
+                    self.values["led_on_off"] = True
+                elif not self.values.get("led_on_off"):
+                    self._set_diagnostic_error("power_unconfirmed", "Fixture readback did not confirm power On")
+                    return False
 
-        self.values["mode"] = "manual"
-        self.values["led_on_off"] = True
-        self.values["effect"] = effect
+        if self._effect_readback_revision == effect_revision:
+            self.values["effect"] = effect
+        elif self.values.get("effect") != effect:
+            self._set_diagnostic_error("effect_unconfirmed", "Fixture readback did not confirm the requested effect")
+            return False
         self.clear_commanded_light()
         for handler in self.updates_component:
             handler()
@@ -1096,17 +1121,12 @@ class Device:
         return await self.async_set_channels(self._channels_after_effect(), force=True)
 
     @serialized_device_command
-    async def async_set_master_brightness(self, level: int) -> bool:
+    async def async_set_master_brightness(
+        self, level: int, *, default_channels: Callable[[], dict[str, int]] | None = None
+    ) -> bool:
         """Scale all supported channels to level, preserving ratios."""
         level = min(100, max(0, round(level / 10) if level > 100 else int(level)))
-        chans = self.numbers()
-        current_max = max((self.values.get(ch, 0) for ch in chans), default=0)
-        if current_max <= 0:
-            targets = {channel: level for channel in chans}
-        else:
-            factor = level / current_max
-            targets = {channel: min(100, max(0, round(self.values.get(channel, 0) * factor))) for channel in chans}
-        return await self.async_set_channels(targets)
+        return await self._async_set_channels_now({}, brightness=level, default_channels=default_channels)
 
     def entity_name(self, attr: str) -> str:
         """Return a user-facing entity suffix for this device attribute."""
@@ -1202,6 +1222,8 @@ class Device:
         restore_mode_on_zero: bool = False,
     ) -> bool:
         """Set multiple channel values, optionally ramping over time."""
+        if not self._valid_channel_request(values):
+            return False
         if transition <= 0:
             async with self.command_transaction():
                 return await self._async_set_channels_now(
@@ -1216,6 +1238,8 @@ class Device:
             # before the ramp start is taken.
             if not await self._async_prepare_command():
                 _LOGGER.warning("Cannot start Fluval channel transition before BLE device is available")
+                return False
+            if not self._valid_channel_request(values):
                 return False
             # Ramp only the requested channels. Untouched channels are merged
             # from live state by each frame, never replayed from this snapshot.
@@ -1249,6 +1273,7 @@ class Device:
                     force=force,
                     restore_mode_on_zero=restore_mode_on_zero,
                     remember_manual=step == steps,
+                    allow_noop=step != steps,
                 ):
                     return False
         return True
@@ -1262,10 +1287,26 @@ class Device:
         remember_manual: bool = True,
         expected_manual_identity=None,
         require_manual_mode: bool = False,
+        allow_noop: bool = True,
+        brightness: int | None = None,
+        default_channels: Callable[[], dict[str, int]] | None = None,
     ) -> bool:
         """Apply one channel frame inside an active command transaction."""
+        if brightness is None and not self._valid_channel_request(values):
+            return False
         self.cancel_channel_mode_restore(clear_saved_mode=not restore_mode_on_zero)
+        readback_revisions = dict(self._control_readback_revision)
+        ready = (
+            await self._async_prepare_command(refresh_state=True)
+            if brightness is not None
+            else await self._async_prepare_command()
+        )
+        if not ready:
+            _LOGGER.warning("Cannot set Fluval channels before BLE device is available")
+            return False
         channels = self.numbers()
+        if brightness is None and not self._valid_channel_request(values):
+            return False
         effect_active = bool(self.values.get("effect"))
         force = force or effect_active
         targets = {channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels}
@@ -1274,15 +1315,15 @@ class Device:
 
         if (
             not force
+            and allow_noop
+            and brightness is None
+            and self.values.get("mode") == "manual"
             and bool(any(targets.values())) == bool(self.values.get("led_on_off"))
             and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items())
         ):
             _LOGGER.debug("Skipping Fluval channel write because targets are unchanged: %s", targets)
             return True
 
-        if not await self._async_prepare_command():
-            _LOGGER.warning("Cannot set Fluval channel before BLE device is available")
-            return False
         if expected_manual_identity is not None and self._manual_identity() != expected_manual_identity:
             self._set_diagnostic_error(
                 "manual_settings_mismatch", "Saved Manual settings do not match this fixture profile"
@@ -1293,8 +1334,11 @@ class Device:
             return False
 
         old_values = dict(self.values)
+        needs_manual_bank = brightness is not None
 
         if self.values.get("mode") != "manual":
+            readback_revisions = dict(self._control_readback_revision)
+            needs_manual_bank = needs_manual_bank or set(values) != set(self.numbers())
             previous_mode = cast(Any, self.values.get("mode"))
             if (
                 restore_mode_on_zero
@@ -1314,11 +1358,41 @@ class Device:
                 return False
             if self._control_readback_revision["mode"] == mode_revision:
                 self.values["mode"] = "manual"
+            elif self.values.get("mode") != "manual":
+                self._set_diagnostic_error("manual_mode_unconfirmed", "Fixture readback did not confirm Manual mode")
+                return False
 
         old_values = dict(self.values)
 
         # Reconnection and mode writes can refresh untouched channels. Merge
         # the explicit request into that current state, never the idle cache.
+        channels = self.numbers()
+        if needs_manual_bank and not self._fresh_manual_bank(readback_revisions):
+            if not await self.async_refresh_state(manual=True):
+                self._set_diagnostic_error("manual_channels_unavailable", "Unable to read current Manual channels")
+                return False
+            channels = self.numbers()
+        if brightness is None:
+            if not self._valid_channel_request(values):
+                return False
+        else:
+            channels = self.numbers()
+            peak = max(int(self.values[channel]) for channel in channels)
+            values = (
+                {
+                    channel: min(100, max(0, round(int(self.values[channel]) * brightness / peak)))
+                    for channel in channels
+                }
+                if peak
+                else default_channels()
+                if default_channels is not None
+                else dict.fromkeys(channels, brightness)
+            )
+            if not self._valid_channel_request(values):
+                return False
+        # A requested Manual read can refresh untouched emitters too. Failure
+        # rollback must preserve that bank, not the pre-read scheduled cache.
+        old_values = dict(self.values)
         targets = {channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels}
         changed_channels = [channel for channel, value in targets.items() if int(old_values.get(channel, -1)) != value]
         single_channel = changed_channels[0] if len(changed_channels) == 1 and not force else None
@@ -1344,6 +1418,19 @@ class Device:
             if restore_mode_on_zero and not any(targets.values()):
                 self._schedule_channel_mode_restore()
         return ok
+
+    def _valid_channel_request(self, values: dict[str, int]) -> bool:
+        if not values or set(values) - set(self.numbers()):
+            self._set_diagnostic_error(
+                "invalid_channels", "Requested channels do not match this fixture's physical layout"
+            )
+            return False
+        return True
+
+    def _fresh_manual_bank(self, revisions: dict[str, int]) -> bool:
+        return self.values.get("mode") == "manual" and all(
+            self._control_readback_revision[key] > revisions.get(key, 0) for key in ("mode", *self.numbers())
+        )
 
     def _manual_identity(self) -> tuple[Any, ...]:
         return (self.mac, self.product_id, self.spectrum_profile(), tuple(self.numbers()))
@@ -1442,6 +1529,8 @@ class Device:
         snapshot, identity = bank
         # Restore never changes mode: switching to Manual would stop the
         # fixture's schedule, so the user must choose Manual first.
+        if not await self._async_prepare_command(refresh_state=True):
+            return False
         if not self._manual_mode_for_restore():
             return False
         revisions = dict(self._control_readback_revision)
@@ -1895,19 +1984,19 @@ class Device:
     async def _async_send_clock_command(self) -> bool:
         """Send only the fixture clock command used before the APK state read."""
         if self._uses_wifi_protocol():
-            packet = protocol.wifi_clock_packet()
+            packet = protocol.wifi_clock_packet(self._local_now())
         elif self._uses_spp_protocol():
             # FluvalConnect treats current Plant and Reef fixtures as mesh
             # lights and writes the raw clock frame to their FFF2 endpoint.
-            packet = protocol.mesh_clock_packet()
+            packet = protocol.mesh_clock_packet(self._local_now())
         else:
-            packet = protocol.old_clock_packet()
+            packet = protocol.old_clock_packet(self._local_now())
         return await self._async_send_packet(packet, verify=False)
 
     async def _async_finish_clock_sync(self, state: dict[int, object]) -> bool:
         """Apply the APK's FACEBD timezone follow-up and record completion."""
         if self._uses_wifi_protocol() and protocol.WIFI_TZ_OFFSET_KEY in state:
-            if not await self._async_send_packet(protocol.wifi_timezone_packet(), verify=False):
+            if not await self._async_send_packet(protocol.wifi_timezone_packet(self._local_now()), verify=False):
                 self._set_diagnostic_error("clock_sync_failed", "Unable to sync lamp timezone")
                 return False
 
@@ -1951,18 +2040,30 @@ class Device:
 
         return self.facebd
 
-    async def _async_prepare_command(self) -> bool:
+    async def _async_prepare_command(self, *, refresh_state: bool = False) -> bool:
         """Resolve the BLE device and connect far enough to know the protocol."""
         if not await self._async_ensure_client() or self.client is None:
             self._set_diagnostic_error("device_not_found", "BLE device is not available")
             return False
         client = self.client
+        mode_revision = self._control_readback_revision["mode"]
         ok = await client.ensure_connected()
         if not ok:
             self._set_diagnostic_error(
                 "connect_failed",
                 client.last_error or "Unable to connect to BLE device",
             )
+        if ok and refresh_state and self._control_readback_revision["mode"] == mode_revision:
+            try:
+                ok = bool(
+                    await client.request_state(
+                        state_validator=lambda _state: self._control_readback_revision["mode"] > mode_revision
+                    )
+                )
+            except (TimeoutError, BleakError):
+                ok = False
+            if not ok:
+                self._set_diagnostic_error("state_read_failed", "Unable to read current fixture mode")
         return ok
 
     async def _async_send_packet(self, packet: bytes, *, verify: bool = True) -> bool:
@@ -2055,7 +2156,7 @@ class Device:
         return expected or None
 
     @serialized_device_command
-    async def async_refresh_state(self) -> bool:
+    async def async_refresh_state(self, *, schedule: str | None = None, manual: bool = False) -> bool:
         """Resolve the controller and request its current state."""
         if not await self._async_ensure_client() or self.client is None:
             return False
@@ -2064,7 +2165,19 @@ class Device:
         if not await client.ensure_connected():
             return False
 
+        revision = self._schedule_revisions.get(schedule, 0) if schedule else 0
+        revisions = dict(self._control_readback_revision)
         try:
+            if manual:
+                return bool(
+                    await client.request_state(state_validator=lambda _state: self._fresh_manual_bank(revisions))
+                )
+            if schedule:
+                return bool(
+                    await client.request_state(
+                        state_validator=lambda _state: self._schedule_revisions.get(schedule, 0) > revision
+                    )
+                )
             return bool(await client.request_state())
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Unable to refresh Fluval state", exc_info=err)
@@ -2166,6 +2279,26 @@ class Device:
             connection_ready_callback=self._record_active_connection_source,
             ready_callback=self._async_on_client_ready,
             state_ready_callback=self._async_on_client_state_ready,
+            state_validator=self._initial_state_complete,
+        )
+
+    def _local_now(self) -> datetime:
+        """HA configuration owns the fixture clock, not the container timezone."""
+        return dt_util.now() if self.hass is not None else datetime.now().astimezone()
+
+    def _initial_state_complete(self, state: dict[int, object]) -> bool:
+        """Require fresh mode and, in Manual, the complete physical bank."""
+        spp = self._uses_spp_protocol()
+        mode = state.get(protocol.SPP_MODE_KEY if spp else protocol.WIFI_MODE_KEY)
+        if type(mode) is not int or mode not in (0, 1, 2):
+            return False
+        if mode != 0:
+            return True
+        power = state.get(protocol.SPP_SWITCH_KEY if spp else protocol.WIFI_SWITCH_KEY)
+        keys = protocol.SPP_CHANNEL_KEYS if spp else protocol.WIFI_CHANNEL_KEYS
+        return isinstance(power, bool) and all(
+            type(value := state.get(key)) is int and isinstance(value, int) and 0 <= value <= 100
+            for key in keys[: len(self.numbers())]
         )
 
     async def _async_ensure_client(self) -> bool:
@@ -2416,7 +2549,12 @@ class Device:
         fifth_channel = data.get(protocol.WIFI_CHANNEL_KEYS[4])
         if not isinstance(fifth_channel, bool) and isinstance(fifth_channel, int) and 0 <= fifth_channel <= 100:
             self._channel_count_hint = 5
-        elif present >= 4:
+        elif (
+            present >= 4
+            and self._channel_count_hint is None
+            and protocol.WIFI_MODE_KEY in data
+            and protocol.WIFI_SWITCH_KEY in data
+        ):
             self._channel_count_hint = 4
 
         unambiguous_facebd_schedule_keys = (
@@ -2481,8 +2619,15 @@ class Device:
                 self._control_readback_revision[channel] += 1
                 present += 1
                 updated = True
-        if present:
-            self._channel_count_hint = 5 if present >= 5 else 4
+        if present >= 5:
+            self._channel_count_hint = 5
+        elif (
+            present == 4
+            and self._channel_count_hint is None
+            and protocol.SPP_MODE_KEY in data
+            and protocol.SPP_SWITCH_KEY in data
+        ):
+            self._channel_count_hint = 4
 
         if (
             protocol.SPP_EFFECT_KEY in data

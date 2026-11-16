@@ -22,6 +22,32 @@ def create_entities(device: Device) -> list:
     return [FluvalDaylightSavingSwitch(device, "daylight_saving_time")]
 
 
+def setup_switch_entities(hass, entry, device, add_entities):
+    """Add a transport-specific control when GATT resolves after setup."""
+    runtime = require_entry_runtime_data(hass, entry)
+    added = False
+    active = True
+
+    def sync():
+        nonlocal added
+        if not active or runtime.unloading or added:
+            return
+        entities = create_entities(device)
+        if entities:
+            added = True
+            add_entities(entities)
+
+    def stop():
+        nonlocal active
+        active = False
+        device.deregister_update("transport_capabilities", sync)
+
+    device.register_update("transport_capabilities", sync)
+    entry.async_on_unload(stop)
+    runtime.unload_callbacks.append(stop)
+    sync()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -32,7 +58,7 @@ async def async_setup_entry(
     device = runtime.device
 
     if device:
-        add_entities(create_entities(device))
+        setup_switch_entities(hass, config_entry, device, add_entities)
     else:
         runtime.pending_add_entities[Platform.SWITCH] = add_entities
 

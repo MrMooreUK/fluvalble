@@ -174,7 +174,7 @@ def test_restore_rechecks_identity_after_reconnecting_before_any_write():
         device.values["mode"] = "manual"
         device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
 
-        async def reconnect():
+        async def reconnect(**kwargs):
             device.product_id = 532
             return True
 
@@ -420,7 +420,7 @@ def test_restore_refuses_outside_manual_mode_without_sending(mode):
         device._async_send_packet = AsyncMock(return_value=True)
         assert not await device.async_restore_last_manual_settings()
         device._async_send_packet.assert_not_awaited()
-        device._async_prepare_command.assert_not_awaited()
+        device._async_prepare_command.assert_awaited_once()
         assert device.values["mode"] == mode
         assert device.diagnostics["status"] == "manual_restore_requires_manual_mode"
         assert device.command_error_message() == RESTORE_MODE_ERROR
@@ -438,7 +438,7 @@ def test_restore_rechecks_mode_after_reconnecting():
         device.values["mode"] = "manual"
         device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
 
-        async def reconnect():
+        async def reconnect(**kwargs):
             device.values["mode"] = "automatic"
             return True
 
@@ -585,7 +585,7 @@ def test_fade_on_one_channel_keeps_live_untouched_channel_instead_of_stale_cache
         device.configure_manual_settings(saved(device, [10] * count), persist)
         frames = []
 
-        async def reconnect():
+        async def reconnect(**kwargs):
             # Connecting delivers the lamp's real state as readback.
             report(device, transport, lamp)
             return True

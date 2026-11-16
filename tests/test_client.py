@@ -622,6 +622,7 @@ async def _async_test_classic_connect_initialization_follows_apk_order():
 
     async def write_state(_uuid, _packet):
         events.append("state")
+        client._state_update_event.set()
 
     async def finish_state(state):
         assert state == {}
@@ -651,6 +652,7 @@ async def _async_test_session_initialization_runs_once_per_physical_connection()
     state_ready = AsyncMock()
     client.ready_callback = ready
     client.state_ready_callback = state_ready
+    client.request_state = AsyncMock(return_value=True)
 
     assert await client._initialize_session(connected)
     assert await client._initialize_session(connected)
@@ -772,6 +774,7 @@ def test_finite_heartbeat_reconnects_once_after_command_releases():
 
 async def _async_test_finite_heartbeat_reconnects_once_after_command_releases():
     client = _make_client(active_time=120, ping_interval=60)
+    client.request_state = AsyncMock(return_value=True)
     client.connect_task = None
     client.wake_read_uuid = "wake"
     client.ping_time = time.time() + 120

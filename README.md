@@ -31,7 +31,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. Turning off an active classic weather effect clears its manual channels before powering off, so the effect is not retained for the next On. |
 | **Native fixture schedules** | Select and read back schedules saved on the fixture using Fluval Connect. The fixture runs them independently of Home Assistant. |
 | **Scheduled on/off indication** | Classic lights show expected Auto/Pro on/off state from the fixture's read-back schedule and synchronized clock, marked as assumed state. No lighting commands are sent to update the display. |
-| **Daylight-saving control** | Supported fixtures expose their onboard daylight-saving setting as a configuration switch. |
+| **Daylight-saving control** | FACEBD fixtures expose their onboard daylight-saving setting as a configuration switch, including when the transport is identified after setup. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |
@@ -210,8 +210,9 @@ or expanding the schedule card does not.
 After a successful HA Manual-channel change, the integration saves the complete
 bank only when fresh fixture readback confirms it. **Restore last Manual
 settings** explicitly reapplies that bank using the native Manual commands.
-Restore only works in Manual mode: it never switches the mode, so switch the
-fixture to Manual first or it refuses without sending anything. It may turn
+Restore checks the fixture's current mode before applying the bank. It only
+works in Manual mode and never changes the mode or stops an Auto/Pro programme.
+Switch the fixture to Manual first if needed. It may turn
 the light on or off to match the saved levels. The button is unavailable until
 a confirmed bank has been saved.
 
@@ -220,6 +221,11 @@ slider values. Physical-button changes, Auto/Pro reports, failed writes and
 intermediate fade steps do not overwrite them. There is no automatic restore
 on a button press or reconnect, and no schedule is rewritten. Deleting the
 integration entry removes its saved bank.
+
+For fixtures identified after connecting, channel controls appear once their
+physical layout is known; obsolete extra channel controls are cleaned up.
+Clock synchronization and scheduled-state reporting use Home Assistant's
+configured timezone, including when the container uses a different timezone.
 
 The fixture selector uses the Home Assistant device name and area, with the
 product model as a fallback instead of a Bluetooth address. Rename devices in
