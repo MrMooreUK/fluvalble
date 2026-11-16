@@ -214,6 +214,9 @@ class Device:
         self._session_manual_settings: dict[str, int] | None = None
         self._session_manual_identity: tuple[Any, ...] | None = None
         self._manual_settings_save: Callable[[dict[str, int]], Awaitable[None]] | None = None
+        # Set only when the latest Restore was refused for not being in Manual,
+        # so the button shows that message instead of a stale BLE client error.
+        self.restore_refusal_message: str | None = None
         self.firmware_version: str | None = None
         self.diagnostics: dict[str, Any] = {
             "status": "not_run",
@@ -1378,10 +1381,8 @@ class Device:
     def _manual_mode_for_restore(self) -> bool:
         if self.values.get("mode") == "manual":
             return True
-        self._set_diagnostic_error(
-            "manual_restore_requires_manual_mode",
-            "Switch the fixture to Manual mode before restoring saved Manual settings",
-        )
+        self.restore_refusal_message = "Switch the fixture to Manual mode before restoring saved Manual settings"
+        self._set_diagnostic_error("manual_restore_requires_manual_mode", self.restore_refusal_message)
         return False
 
     def has_last_manual_settings(self) -> bool:
@@ -1433,6 +1434,7 @@ class Device:
     @serialized_device_command
     async def async_restore_last_manual_settings(self) -> bool:
         """Explicitly replay the saved full bank using existing native commands."""
+        self.restore_refusal_message = None
         bank = self._current_manual_bank()
         if bank is None:
             self._set_diagnostic_error("manual_settings_unavailable", "No confirmed Manual settings have been saved")

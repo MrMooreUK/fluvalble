@@ -75,4 +75,4 @@ class FluvalRestoreManualButton(FluvalEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         if not await self.device.async_restore_last_manual_settings():
-            self._raise_command_error()
+            self._raise_command_error(self.device.restore_refusal_message)

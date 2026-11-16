@@ -56,12 +56,12 @@ class FluvalEntity(Entity):
             )
         )
 
-    def _raise_command_error(self) -> NoReturn:
+    def _raise_command_error(self, message: str | None = None) -> NoReturn:
         """Raise a translated Home Assistant error for a failed device command."""
         raise HomeAssistantError(
             translation_domain=DOMAIN,
             translation_key="command_failed",
-            translation_placeholders={"error": self.device.command_error_message()},
+            translation_placeholders={"error": message or self.device.command_error_message()},
         )
 
     def internal_update(self):

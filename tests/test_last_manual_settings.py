@@ -616,3 +616,29 @@ def test_fade_on_one_channel_keeps_live_untouched_channel_instead_of_stale_cache
         assert device._last_manual_settings == bank
 
     asyncio.run(run())
+
+
+def test_restore_refusal_message_wins_over_stale_ble_client_error():
+    from homeassistant.exceptions import HomeAssistantError
+
+    async def run():
+        device = make_device()
+        device.client = SimpleNamespace(last_error="connect failed: TimeoutError: stale")
+        device.values["mode"] = "automatic"
+        device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
+        device._async_send_packet = AsyncMock(return_value=True)
+        button = FluvalRestoreManualButton(device, "restore_last_manual")
+        with pytest.raises(HomeAssistantError) as err:
+            await button.async_press()
+        assert str(err.value) == RESTORE_MODE_ERROR
+        assert err.value.translation_placeholders == {"error": RESTORE_MODE_ERROR}
+        device._async_send_packet.assert_not_awaited()
+
+        # A later non-refusal failure falls back to the normal error source.
+        device.values["mode"] = "manual"
+        device._async_send_packet = AsyncMock(return_value=False)
+        with pytest.raises(HomeAssistantError) as err:
+            await button.async_press()
+        assert str(err.value) == "connect failed: TimeoutError: stale"
+
+    asyncio.run(run())
