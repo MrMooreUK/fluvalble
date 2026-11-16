@@ -136,6 +136,7 @@ def test_channel_transition_uses_full_duration(duration, interval):
             writes.append((clock[0], values["channel_1"]))
             return True
 
+        device._async_prepare_command = AsyncMock(return_value=True)
         device._async_set_channels_now = AsyncMock(side_effect=write)
         with (
             patch("custom_components.fluvalble.core.device.monotonic", side_effect=lambda: clock[0]),
@@ -267,5 +268,19 @@ def test_unload_tasks_without_discovered_device(unload_ok):
         finally:
             pending.cancel()
             await asyncio.gather(pending, return_exceptions=True)
+
+    asyncio.run(run())
+
+
+def test_channel_transition_fails_fast_when_fixture_is_unreachable():
+    async def run():
+        device = make_device()
+        device._async_prepare_command = AsyncMock(return_value=False)
+        device._async_set_channels_now = AsyncMock(return_value=True)
+        sleep = AsyncMock()
+        with patch("custom_components.fluvalble.core.device.asyncio.sleep", new=sleep):
+            assert not await device.async_set_channels({"channel_1": 100}, transition=60, step_seconds=30)
+        device._async_set_channels_now.assert_not_awaited()
+        sleep.assert_not_awaited()
 
     asyncio.run(run())
