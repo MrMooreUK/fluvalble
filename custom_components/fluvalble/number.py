@@ -46,7 +46,7 @@ def setup_channel_entities(hass, entry, device, add_entities):
                 await entity.async_remove()
             registry = er.async_get(hass)
             entity_id = registry.async_get_entity_id("number", "fluvalble", entity.unique_id)
-            if entity_id:
+            if entity_id and product_from_id(device.product_id) is not None and entity.attr not in device.numbers():
                 registry.async_remove(entity_id)
         finally:
             removing.discard(entity.attr)
@@ -57,12 +57,15 @@ def setup_channel_entities(hass, entry, device, add_entities):
         if not active or runtime.unloading:
             return
         desired = set(_layout_channels(device))
-        for channel in set(entities) - desired:
+        authoritative = product_from_id(device.product_id) is not None
+        # A provisional width must not erase user customizations or references.
+        # Existing controls remain unavailable until their channel returns.
+        for channel in (set(entities) - desired) if authoritative else ():
             removing.add(channel)
             task = hass.async_create_task(remove(entities.pop(channel)))
             runtime.background_tasks.add(task)
             task.add_done_callback(runtime.background_tasks.discard)
-        if desired:
+        if desired and authoritative:
             registry = er.async_get(hass)
             for channel in set(NUMBERS) - desired - removing:
                 unique_id = device.mac.upper().replace(":", "") + "_" + channel

@@ -26,6 +26,7 @@ WRITE_DELAY = 0.3
 COMMAND_GAP = 0.2
 POST_WRITE_STATE_DELAY = 0.8
 STATE_NOTIFY_TIMEOUT = 0.75
+INITIAL_STATE_TIMEOUT = 5.0
 # BleKxt configures a 5 ms delay between MTU-sized GATT write packages.
 CHUNK_WRITE_GAP = 0.005
 MAX_RAW_RECEIVE_BUFFER = 4096
@@ -525,11 +526,19 @@ class Client:
             if self.ready_callback:
                 await self.ready_callback()
 
-            read_ok = (
-                await self.request_state(state_validator=self.state_validator)
-                if self.raw_facebd and self.state_validator is not None
-                else await self.request_state()
-            )
+            # Startup can cross a busy BLE proxy. Keep normal verification
+            # short, but allow a separate initialization budget and one retry.
+            read_ok = False
+            for attempt in range(2):
+                try:
+                    read_ok = await self.request_state(
+                        timeout=INITIAL_STATE_TIMEOUT,
+                        state_validator=self.state_validator if self.raw_facebd else None,
+                    )
+                except (TimeoutError, BleakError) as err:
+                    _LOGGER.debug("Fluval initial state attempt %s failed", attempt + 1, exc_info=err)
+                if read_ok or self._stopping or self.client is not current_client or not current_client.is_connected:
+                    break
             if not read_ok:
                 self.last_error = "Initial fixture state was not received"
                 return False
@@ -662,6 +671,7 @@ class Client:
         expected_state: dict[int, object] | None = None,
         *,
         state_validator: Callable[[dict[int, object]], bool] | None = None,
+        timeout: float | None = None,
     ) -> bool:
         """Read current controller state and optionally verify requested values."""
         client = await self._ensure_client()
@@ -706,7 +716,7 @@ class Client:
         # A valid partial notification is not necessarily the requested state.
         # Keep collecting until all prerequisites match or the deadline expires.
         with contextlib.suppress(TimeoutError):
-            async with asyncio.timeout(STATE_NOTIFY_TIMEOUT):
+            async with asyncio.timeout(STATE_NOTIFY_TIMEOUT if timeout is None else timeout):
                 while not complete():
                     self._state_update_event.clear()
                     await self._state_update_event.wait()

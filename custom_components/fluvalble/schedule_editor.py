@@ -111,6 +111,9 @@ async def async_setup_editor(hass):
     @websocket_api.async_response
     async def save(hass, connection, msg):
         connection.require_admin()
+        if "changes" not in msg and ("target" not in msg or "levels" not in msg):
+            connection.send_error(msg["id"], "invalid_format", "Provide a schedule target and channel levels")
+            return
         entry = hass.config_entries.async_get_entry(msg["entry_id"])
         if entry is None or entry.domain != DOMAIN:
             connection.send_error(msg["id"], "not_found", "Fluval fixture not found")
