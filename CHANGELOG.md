@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Allow five seconds for each initial state read and retry once before releasing
+  an unready connection; normal command-verification timeouts are unchanged.
+- Preserve existing channel entities and their customizations when the channel
+  layout is only provisional. Registry cleanup requires a known catalogue model.
+- Recognize unidentified four-channel FACEBD reports when channel levels arrive
+  separately from mode and power, without shrinking an established five-channel bank.
+- Reject incomplete schedule-edit requests before reading the fixture.
 - Confirm each effect command against only its own newer readback, so a
   preceding mode response cannot incorrectly reject a successful power write.
 - Resolve channel width after switching to Manual, and derive relative

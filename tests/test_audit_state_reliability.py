@@ -219,7 +219,7 @@ def test_initial_state_timeout_does_not_mark_session_ready():
         c._wait_for_command_gap = AsyncMock()
         c._write_packet = AsyncMock()
         c.state_ready_callback = AsyncMock()
-        with patch("custom_components.fluvalble.core.client.STATE_NOTIFY_TIMEOUT", 0.001):
+        with patch("custom_components.fluvalble.core.client.INITIAL_STATE_TIMEOUT", 0.001):
             assert not await c._initialize_session(c.client)
         assert not c._session_initialized
         c.state_ready_callback.assert_not_awaited()

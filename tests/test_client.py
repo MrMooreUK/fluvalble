@@ -582,7 +582,7 @@ async def _async_test_raw_connect_initialization_follows_apk_order():
     async def send_clock():
         events.append("clock")
 
-    async def read_state(_expected_state=None):
+    async def read_state(_expected_state=None, **kwargs):
         events.append("state")
         client._observed_state = {protocol.WIFI_TZ_OFFSET_KEY: 0}
         return True

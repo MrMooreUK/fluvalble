@@ -39,6 +39,11 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 
 Entities are created per device around one native colour light, with exact physical-channel sliders, mode, and connection status alongside it. Everything updates from the device when it sends state, so the UI stays in sync.
 
+While a fixture's identity is unresolved, a provisional channel layout does not
+delete existing channel entities or their customizations. A channel outside that
+layout is unavailable until it is reported again. Obsolete channel records are
+only cleaned up when a recognized product establishes the physical layout.
+
 ---
 
 ## Supported devices

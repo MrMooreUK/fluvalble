@@ -1039,36 +1039,45 @@ class Device:
             if any(static_channels.values()):
                 self._effect_restore_channels = static_channels
 
-        packets: list[bytes] = []
+        packets: list[tuple[str, bytes]] = []
         if self.values.get("mode") != "manual":
             packets.append(
-                protocol.spp_mode_packet(MODE_TO_CODE["manual"])
-                if spp
-                else protocol.wifi_mode_packet(MODE_TO_CODE["manual"])
-                if facebd
-                else protocol.old_mode_packet(MODE_TO_CODE["manual"])
+                (
+                    "mode",
+                    protocol.spp_mode_packet(MODE_TO_CODE["manual"])
+                    if spp
+                    else protocol.wifi_mode_packet(MODE_TO_CODE["manual"])
+                    if facebd
+                    else protocol.old_mode_packet(MODE_TO_CODE["manual"]),
+                )
             )
         if not self.values.get("led_on_off"):
             packets.append(
-                protocol.spp_switch_packet(True)
-                if spp
-                else protocol.wifi_switch_packet(True)
-                if facebd
-                else protocol.old_switch_packet(True)
+                (
+                    "power",
+                    protocol.spp_switch_packet(True)
+                    if spp
+                    else protocol.wifi_switch_packet(True)
+                    if facebd
+                    else protocol.old_switch_packet(True),
+                )
             )
         product = product_from_id(self.product_id)
         packets.append(
-            protocol.spp_effect_packet(
-                effect_code,
-                maximum_effect_id=product.native_effect_count if product is not None else 4,
+            (
+                "effect",
+                protocol.spp_effect_packet(
+                    effect_code,
+                    maximum_effect_id=product.native_effect_count if product is not None else 4,
+                )
+                if spp
+                else protocol.wifi_effect_packet(effect_code)
+                if facebd
+                else protocol.old_weather_effect_packet(effect_code),
             )
-            if spp
-            else protocol.wifi_effect_packet(effect_code)
-            if facebd
-            else protocol.old_weather_effect_packet(effect_code)
         )
 
-        for packet in packets:
+        for kind, packet in packets:
             revisions = dict(self._control_readback_revision)
             effect_revision = self._effect_readback_revision
             if not await self._async_send_packet(packet):
@@ -1076,13 +1085,7 @@ class Device:
                     self._effect_restore_channels = old_restore
                 return False
             # Each command commits independently; later failure cannot undo it.
-            if packet == (
-                protocol.spp_mode_packet(0)
-                if spp
-                else protocol.wifi_mode_packet(0)
-                if facebd
-                else protocol.old_mode_packet(0)
-            ):
+            if kind == "mode":
                 if self._control_readback_revision["mode"] == revisions["mode"]:
                     self.values["mode"] = "manual"
                 elif self.values.get("mode") != "manual":
@@ -1090,13 +1093,7 @@ class Device:
                         "manual_mode_unconfirmed", "Fixture readback did not confirm Manual mode"
                     )
                     return False
-            elif packet == (
-                protocol.spp_switch_packet(True)
-                if spp
-                else protocol.wifi_switch_packet(True)
-                if facebd
-                else protocol.old_switch_packet(True)
-            ):
+            elif kind == "power":
                 if self._control_readback_revision["led_on_off"] == revisions["led_on_off"]:
                     self.values["led_on_off"] = True
                 elif not self.values.get("led_on_off"):
@@ -2549,12 +2546,7 @@ class Device:
         fifth_channel = data.get(protocol.WIFI_CHANNEL_KEYS[4])
         if not isinstance(fifth_channel, bool) and isinstance(fifth_channel, int) and 0 <= fifth_channel <= 100:
             self._channel_count_hint = 5
-        elif (
-            present >= 4
-            and self._channel_count_hint is None
-            and protocol.WIFI_MODE_KEY in data
-            and protocol.WIFI_SWITCH_KEY in data
-        ):
+        elif present >= 4 and self._channel_count_hint is None:
             self._channel_count_hint = 4
 
         unambiguous_facebd_schedule_keys = (

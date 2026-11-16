@@ -15,8 +15,155 @@ from custom_components.fluvalble.core.products import PRODUCTS
 from custom_components.fluvalble.core.schedule_colours import professional_batch_packet, replace_professional_batch
 from tests.test_last_manual_settings import make_device, report
 from tests.test_device import _old_manual_status
+from tests.test_client import _make_client
 
 ROUTES = [("classic", 328), ("facebd", 532), ("spp", 545)]
+
+
+@pytest.mark.parametrize("transport,product", ROUTES)
+def test_startup_accepts_reply_after_normal_verification_deadline(transport, product):
+    async def run():
+        d = make_device(product, transport)
+        c = _make_client()
+        c.raw_facebd = transport != "classic"
+        c.spp_transport = transport == "spp"
+        c.init_write_uuid = "init" if transport == "classic" else None
+        c.wake_read_uuid = None
+        c.notify_uuid = "notify"
+        c.state_read_uuids = ["state"]
+        c.client = SimpleNamespace(is_connected=True)
+        c._ensure_client = AsyncMock(return_value=c.client)
+        c._wait_for_command_gap = AsyncMock()
+        c.update_callback = d.decode_update_packet
+        c.state_validator = d._initial_state_complete
+        c.state_ready_callback = AsyncMock()
+        tasks = []
+
+        async def later():
+            await asyncio.sleep(0.8)
+            if transport == "classic":
+                payload = _old_manual_status([10] * 4)
+            else:
+                keys = protocol.SPP_CHANNEL_KEYS if transport == "spp" else protocol.WIFI_CHANNEL_KEYS
+                payload = protocol.cbor_map(
+                    {
+                        1 if transport == "spp" else 103: 0,
+                        2 if transport == "spp" else 104: True,
+                        **dict(zip(keys, [10] * len(d.numbers()))),
+                    }
+                )
+            if transport == "spp":
+                payload = bytes([protocol.SPP_STATUS_HEADER]) + payload
+            c._dispatch_update(payload)
+
+        async def trigger(*args):
+            tasks.append(asyncio.create_task(later()))
+            return b"\x00"
+
+        c._write_packet = AsyncMock(side_effect=trigger)
+        c.client.read_gatt_char = AsyncMock(side_effect=trigger)
+        assert await c._initialize_session(c.client)
+        await asyncio.gather(*tasks)
+        assert c._session_initialized
+        c.state_ready_callback.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("first", [False, "exception"])
+def test_startup_retries_one_failed_read_with_its_own_budget(first):
+    from bleak import BleakError
+
+    async def run():
+        c = _make_client()
+        c.client = SimpleNamespace(is_connected=True)
+        c.wake_read_uuid = None
+        c.ready_callback = AsyncMock()
+        c.state_ready_callback = AsyncMock()
+        c.request_state = AsyncMock(side_effect=[BleakError("busy") if first == "exception" else False, True])
+        assert await c._initialize_session(c.client)
+        assert c.request_state.await_count == 2
+        assert all(call.kwargs["timeout"] == 5.0 for call in c.request_state.await_args_list)
+        c.ready_callback.assert_awaited_once()
+        c.state_ready_callback.assert_awaited_once()
+
+    asyncio.run(run())
+
+
+def test_failed_initialization_stops_after_two_reads_and_discards_session():
+    async def run():
+        c = _make_client()
+        c.client = SimpleNamespace(is_connected=True)
+        c.wake_read_uuid = None
+        c._ensure_client = AsyncMock(return_value=c.client)
+        c.request_state = AsyncMock(return_value=False)
+        c._safe_disconnect = AsyncMock()
+        assert not await c.ensure_connected()
+        assert c.request_state.await_count == 2
+        c._safe_disconnect.assert_awaited_once()
+        assert not c._session_initialized
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("order", ["channels_first", "mode_first"])
+def test_unknown_facebd_four_channels_arrive_separately_from_mode_and_power(order):
+    d = make_device(None, "facebd")
+    c = _make_client()
+    c.raw_facebd = True
+    c.update_callback = d.decode_update_packet
+    channels = dict(zip(protocol.WIFI_CHANNEL_KEYS, [10, 20, 30, 40]))
+    pieces = [channels, {103: 0}, {104: True}]
+    if order == "mode_first":
+        pieces = [{103: 0}, {104: True}, channels]
+    for index, fields in enumerate(pieces):
+        c._dispatch_update(protocol.cbor_map(fields))
+        assert d._initial_state_complete(c.observed_state) is (index == 2)
+    assert len(d.numbers()) == 4
+    # A later fifth emitter upgrades the provisional layout; a partial four
+    # emitter report must never shrink an established five-channel fixture.
+    d._decode_wifi_update({protocol.WIFI_CHANNEL_KEYS[4]: 50})
+    d._decode_wifi_update(channels)
+    assert len(d.numbers()) == 5
+
+
+def test_provisional_channel_hint_preserves_existing_registry_rows_and_entities():
+    from custom_components.fluvalble.number import setup_channel_entities
+
+    async def run():
+        d = make_device(None, "facebd")
+        d._channel_count_hint = 5
+        runtime = FluvalRuntimeData(device=d)
+        registry = SimpleNamespace(
+            async_get_entity_id=MagicMock(return_value="number.custom_fifth"), async_remove=MagicMock()
+        )
+        added = []
+        with (
+            patch("custom_components.fluvalble.number.require_entry_runtime_data", return_value=runtime),
+            patch.dict(
+                sys.modules, {"homeassistant.helpers.entity_registry": SimpleNamespace(async_get=lambda _: registry)}
+            ),
+        ):
+            setup_channel_entities(
+                SimpleNamespace(async_create_task=asyncio.create_task),
+                SimpleNamespace(async_on_unload=MagicMock()),
+                d,
+                added.extend,
+            )
+            assert len(added) == 5
+            d._channel_count_hint = 4
+            for handler in list(d.updates_component):
+                handler()
+            assert not runtime.background_tasks
+            added[-1].internal_update()
+            assert added[-1]._attr_available is False
+            registry.async_remove.assert_not_called()
+            d._channel_count_hint = 5
+            for handler in list(d.updates_component):
+                handler()
+            assert len(added) == 5
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("transport,product", ROUTES)
@@ -212,6 +359,33 @@ async def setup_editor_for_test(runtime, run):
     return connection
 
 
+@pytest.mark.parametrize("missing", ["target", "levels", "both"])
+def test_incomplete_schedule_edit_is_rejected_before_any_device_read(missing):
+    async def run():
+        d = make_device()
+        message = {
+            "id": 1,
+            "entry_id": "fixture",
+            "schedule": "auto",
+            "baseline": {},
+            "target": "day",
+            "levels": [50] * 5,
+        }
+        for field in ["target", "levels"] if missing == "both" else [missing]:
+            del message[field]
+
+        async def call(save, hass, connection):
+            await save(hass, connection, message)
+
+        connection = await setup_editor_for_test([FluvalRuntimeData(device=d)], call)
+        connection.send_error.assert_called_once_with(
+            1, "invalid_format", "Provide a schedule target and channel levels"
+        )
+        d.async_refresh_state.assert_not_awaited()
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("state", ["absent", "unloading", "replaced_while_waiting"])
 def test_schedule_save_handles_unloaded_or_replaced_runtime(state):
     async def run():
@@ -230,7 +404,18 @@ def test_schedule_save_handles_unloaded_or_replaced_runtime(state):
         d._async_send_packet = AsyncMock()
 
         async def call(save, hass, connection):
-            await save(hass, connection, {"id": 1, "entry_id": "fixture", "schedule": "auto"})
+            await save(
+                hass,
+                connection,
+                {
+                    "id": 1,
+                    "entry_id": "fixture",
+                    "schedule": "auto",
+                    "target": "day",
+                    "levels": [50] * 5,
+                    "baseline": {},
+                },
+            )
 
         connection = await setup_editor_for_test(runtime, call)
         connection.send_error.assert_called_once()
