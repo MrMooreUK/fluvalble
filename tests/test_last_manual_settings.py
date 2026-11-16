@@ -10,7 +10,15 @@ import pytest
 from custom_components.fluvalble.core import protocol
 from custom_components.fluvalble.core.device import Device
 from custom_components.fluvalble.core.products import PRODUCTS
+from custom_components.fluvalble import manual_settings
 from custom_components.fluvalble.button import FluvalRestoreManualButton
+
+
+@pytest.fixture(autouse=True)
+def _fresh_manual_stores():
+    manual_settings._STORES.clear()
+    yield
+    manual_settings._STORES.clear()
 
 
 def saved(device, levels):
@@ -92,12 +100,12 @@ def test_confirmed_bank_survives_unsolicited_reports_and_explicitly_restores(pro
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("kind", ["write_failed", "no_readback", "mismatched", "partial", "storage_failed"])
+@pytest.mark.parametrize("kind", ["write_failed", "no_readback", "mismatched", "partial"])
 def test_bad_confirmation_or_storage_never_overwrites_saved_bank(kind):
     async def run():
         device = make_device()
         old = [10] * 5
-        persist = AsyncMock(side_effect=OSError("disk unavailable") if kind == "storage_failed" else None)
+        persist = AsyncMock()
         device.configure_manual_settings(saved(device, old), persist)
         targets = dict(zip(device.numbers(), [60] * 5))
 
@@ -105,8 +113,6 @@ def test_bad_confirmation_or_storage_never_overwrites_saved_bank(kind):
             if packet == protocol.spp_all_zone_packet([60] * 5):
                 if kind == "mismatched":
                     report(device, "spp", [70] * 5)
-                if kind == "storage_failed":
-                    report(device, "spp", [60] * 5)
                 if kind == "partial":
                     device.decode_update_packet(bytes([protocol.SPP_STATUS_HEADER]) + protocol.cbor_map({1: 0, 3: 60}))
                 if kind == "write_failed":
@@ -116,7 +122,7 @@ def test_bad_confirmation_or_storage_never_overwrites_saved_bank(kind):
         device._async_send_packet = AsyncMock(side_effect=send)
         assert await device.async_set_channels(targets, force=True) is (kind != "write_failed")
         assert device._last_manual_settings == dict(zip(device.numbers(), old))
-        assert persist.await_count == (1 if kind == "storage_failed" else 0)
+        persist.assert_not_awaited()
 
     asyncio.run(run())
 
@@ -165,6 +171,7 @@ def test_invalid_or_foreign_saved_bank_is_rejected_without_writes(bad):
 def test_restore_rechecks_identity_after_reconnecting_before_any_write():
     async def run():
         device = make_device()
+        device.values["mode"] = "manual"
         device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
 
         async def reconnect():
@@ -181,6 +188,7 @@ def test_restore_rechecks_identity_after_reconnecting_before_any_write():
 
 def test_restore_does_not_report_success_without_confirming_readback():
     device = make_device()
+    device.values["mode"] = "manual"
     device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
     device._async_send_packet = AsyncMock(return_value=True)
     assert not asyncio.run(device.async_restore_last_manual_settings())
@@ -202,6 +210,9 @@ def test_storage_survives_new_device_and_is_removed_only_on_entry_deletion():
 
             async def async_save(self, data):
                 disk[self.key] = deepcopy(data)
+
+            def async_delay_save(self, data_func, delay):
+                disk[self.key] = deepcopy(data_func())
 
             async def async_remove(self):
                 disk.pop(self.key, None)
@@ -368,6 +379,183 @@ def test_all_off_write_keeps_previous_bank_and_skips_persist(path):
     asyncio.run(run())
 
 
+def test_stored_four_channel_bank_restores_after_spp_readback_without_product_id():
+    transport = "spp"
+
+    async def run():
+        device = make_device(product=None, transport=transport)
+        assert len(device.numbers()) == 5
+        levels = [25, 35, 45, 55]
+        device.configure_manual_settings(saved(device, levels), AsyncMock())
+        assert not device.has_last_manual_settings()
+        report(device, transport, [0, 0, 0, 0])
+        assert len(device.numbers()) == 4
+        assert device.has_last_manual_settings()
+        packet = protocol.spp_all_zone_packet(levels)
+
+        async def send(value):
+            if value == packet:
+                report(device, transport, levels)
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        assert await device.async_restore_last_manual_settings()
+        assert packet in [call.args[0] for call in device._async_send_packet.await_args_list]
+
+    asyncio.run(run())
+
+
+RESTORE_MODE_ERROR = "Switch the fixture to Manual mode before restoring saved Manual settings"
+
+
+@pytest.mark.parametrize("mode", ["automatic", "professional"])
+def test_restore_refuses_outside_manual_mode_without_sending(mode):
+    from homeassistant.exceptions import HomeAssistantError
+
+    async def run():
+        device = make_device()
+        device.client = SimpleNamespace(last_error=None)
+        device.values["mode"] = mode
+        device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
+        device._async_send_packet = AsyncMock(return_value=True)
+        assert not await device.async_restore_last_manual_settings()
+        device._async_send_packet.assert_not_awaited()
+        device._async_prepare_command.assert_not_awaited()
+        assert device.values["mode"] == mode
+        assert device.diagnostics["status"] == "manual_restore_requires_manual_mode"
+        assert device.command_error_message() == RESTORE_MODE_ERROR
+        button = FluvalRestoreManualButton(device, "restore_last_manual")
+        with pytest.raises(HomeAssistantError, match="Switch the fixture to Manual mode"):
+            await button.async_press()
+        device._async_send_packet.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+def test_restore_rechecks_mode_after_reconnecting():
+    async def run():
+        device = make_device()
+        device.values["mode"] = "manual"
+        device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
+
+        async def reconnect():
+            device.values["mode"] = "automatic"
+            return True
+
+        device._async_prepare_command = AsyncMock(side_effect=reconnect)
+        device._async_send_packet = AsyncMock(return_value=True)
+        assert not await device.async_restore_last_manual_settings()
+        device._async_send_packet.assert_not_awaited()
+        assert device.diagnostics["status"] == "manual_restore_requires_manual_mode"
+
+    asyncio.run(run())
+
+
+def test_restore_in_manual_mode_sends_bank_and_no_mode_packet():
+    async def run():
+        device = make_device()
+        device.values["mode"] = "manual"
+        levels = [40, 50, 60, 70, 80]
+        device.configure_manual_settings(saved(device, levels), AsyncMock())
+        packet = protocol.spp_all_zone_packet(levels)
+
+        async def send(value):
+            if value == packet:
+                report(device, "spp", levels)
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        assert await device.async_restore_last_manual_settings()
+        sent = [call.args[0] for call in device._async_send_packet.await_args_list]
+        assert packet in sent
+        assert protocol.spp_mode_packet(0) not in sent
+        assert all(1 not in protocol.decode_cbor_update(value) for value in sent)
+
+    asyncio.run(run())
+
+
+class DelayStore:
+    """Mimic HA Store debouncing: the last data func wins and is written once on flush."""
+
+    instances: list["DelayStore"] = []
+
+    def __init__(self, hass, version, key):
+        self.key = key
+        self.disk = None
+        self.pending = None
+        self.delays = []
+        self.writes = 0
+        self.async_save = AsyncMock()
+        DelayStore.instances.append(self)
+
+    async def async_load(self):
+        return deepcopy(self.disk)
+
+    def async_delay_save(self, data_func, delay):
+        self.pending = data_func
+        self.delays.append(delay)
+
+    def flush(self):
+        if self.pending is not None:
+            self.disk = deepcopy(self.pending())
+            self.pending = None
+            self.writes += 1
+
+    async def async_remove(self):
+        self.pending = None
+        self.disk = None
+
+
+def test_rapid_confirmed_writes_produce_one_debounced_save():
+    from custom_components.fluvalble.manual_settings import async_manual_settings_storage
+
+    async def run():
+        DelayStore.instances.clear()
+        with patch("custom_components.fluvalble.manual_settings.Store", DelayStore):
+            attach = await async_manual_settings_storage(None, SimpleNamespace(entry_id="one"))
+        (store,) = DelayStore.instances
+        device = make_device()
+        attach(device)
+
+        async def send(packet):
+            fields = protocol.decode_cbor_update(packet)
+            if all(key in fields for key in range(3, 8)):
+                report(device, "spp", [fields[key] for key in range(3, 8)])
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        for level in (20, 30, 40):
+            targets = dict(zip(device.numbers(), [level] * 5))
+            assert await device.async_set_channels(targets, force=True)
+            assert device._last_manual_settings == targets
+        store.async_save.assert_not_awaited()
+        assert store.delays == [manual_settings.SAVE_DELAY] * 3
+        store.flush()
+        assert store.writes == 1
+        assert store.disk["levels"] == [40] * 5
+
+    asyncio.run(run())
+
+
+def test_entry_removal_cancels_pending_delayed_save():
+    from custom_components.fluvalble.manual_settings import async_manual_settings_storage, async_remove_manual_settings
+
+    async def run():
+        DelayStore.instances.clear()
+        entry = SimpleNamespace(entry_id="one")
+        with patch("custom_components.fluvalble.manual_settings.Store", DelayStore):
+            attach = await async_manual_settings_storage(None, entry)
+            device = make_device()
+            attach(device)
+            await device._manual_settings_save(dict(zip(device.numbers(), [35] * 5)))
+            await async_remove_manual_settings(None, entry)
+        (store,) = DelayStore.instances
+        store.flush()
+        assert store.writes == 0
+        assert store.disk is None
+        assert "one" not in manual_settings._STORES
+
+
 def channel_frame(transport, packet, count):
     """Return the channel levels carried by one frame, or None for other packets."""
     if transport == "classic":
@@ -426,5 +614,31 @@ def test_fade_on_one_channel_keeps_live_untouched_channel_instead_of_stale_cache
         assert bank["channel_1"] == 60
         assert bank["channel_2"] == 80
         assert device._last_manual_settings == bank
+
+    asyncio.run(run())
+
+
+def test_restore_refusal_message_wins_over_stale_ble_client_error():
+    from homeassistant.exceptions import HomeAssistantError
+
+    async def run():
+        device = make_device()
+        device.client = SimpleNamespace(last_error="connect failed: TimeoutError: stale")
+        device.values["mode"] = "automatic"
+        device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
+        device._async_send_packet = AsyncMock(return_value=True)
+        button = FluvalRestoreManualButton(device, "restore_last_manual")
+        with pytest.raises(HomeAssistantError) as err:
+            await button.async_press()
+        assert str(err.value) == RESTORE_MODE_ERROR
+        assert err.value.translation_placeholders == {"error": RESTORE_MODE_ERROR}
+        device._async_send_packet.assert_not_awaited()
+
+        # A later non-refusal failure falls back to the normal error source.
+        device.values["mode"] = "manual"
+        device._async_send_packet = AsyncMock(return_value=False)
+        with pytest.raises(HomeAssistantError) as err:
+            await button.async_press()
+        assert str(err.value) == "connect failed: TimeoutError: stale"
 
     asyncio.run(run())
