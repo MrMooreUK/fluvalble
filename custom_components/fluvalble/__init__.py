@@ -403,6 +403,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
                     from .number import setup_channel_entities
 
                     setup_channel_entities(hass, entry, device, add_fn)
+                elif platform == Platform.SWITCH:
+                    from .switch import setup_switch_entities
+
+                    setup_switch_entities(hass, entry, device, add_fn)
                 else:
                     add_fn(factory(device))
         runtime.pending_add_entities.clear()

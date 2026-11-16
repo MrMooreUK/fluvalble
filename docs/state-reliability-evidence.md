@@ -48,6 +48,48 @@ Tests exercise classic, FACEBD and SPP paths and complete initial Manual-state
 requirements for every product in the 54-product APK-derived catalogue. These
 checks establish source/transport behaviour, not optical colour measurements.
 
+## Combined follow-up review
+
+The complete combined implementation was reviewed again, including our earlier
+contributions. Nine reproducible gaps were corrected on the same repair branch:
+
+1. Effect revisions are captured separately for mode, power and effect writes.
+   An earlier mode response cannot reject a later power-on command when there
+   is no contradictory new response.
+2. Physical channel width is resolved again after the Manual-mode response,
+   before constructing and confirming the channel bank.
+3. Relative brightness and partial mode-switch edits require a fresh Manual
+   bank; scheduled/cached channels cannot substitute for that readback.
+4. Empty requests and requests containing unsupported channel keys fail before
+   any mode, power or channel command on a known layout.
+5. The final fade step is confirmed and saved even if rounding reached its
+   target during an earlier, deliberately unsaved step.
+6. Schedule saves require a runtime that remains loaded and unchanged, checked
+   after acquiring the command lock and again before writing.
+7. Professional drafts are validated together and sent in one existing native
+   bank command. Validation/batching changes; wire layouts do not.
+8. Deferred FACEBD identification adds its DST control once. Unload cancels
+   the subscription and prevents later entity creation.
+9. Product 281 follows the active screen's Reef labels, not the older unused
+   DeviceUtil table. ManFragment.initColor calls LightDeviceUtils.getColors;
+   getLightType defaults product 281 to type 1. Auto/Pro likewise use
+   LightDeviceUtils.getLightChannel. Spectrum is unchanged.
+
+Additional regressions cover classic, FACEBD and SPP, every known product's
+invalid-channel rejection, late four/five-channel resolution, runtime replacement,
+both Professional edit orders and malformed batches. Server-isolated browser
+checks cover batching, failed-save drafts and stale fixture responses. No
+physical fixture is controlled.
+
+The repeat review also checked failure after the new Manual read. Rollback now
+uses that post-read bank, preserving newly reported untouched channels rather
+than replaying the pre-read cache. Three transport-specific regressions cover it.
+
+Final offline verification: 1,683 tests passed and two optional image checks
+skipped on both Python 3.11 and 3.12. Ruff lint/format, mypy and the isolated
+headless card checks passed. Coverage is 79.76%. These are source and simulated
+transport results, not a claim of physical testing on all fixtures.
+
 ## Scope
 
 The broader failures predate PRs #139–#141. The stale cached-mode refusal was

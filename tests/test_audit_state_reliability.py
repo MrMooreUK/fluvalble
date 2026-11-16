@@ -20,7 +20,12 @@ def test_equal_slider_in_auto_still_selects_manual():
     async def run():
         d = make_device(545, "spp")
         d.values["channel_1"] = 50
-        d._async_send_packet = AsyncMock(return_value=True)
+
+        async def send(packet):
+            report(d, "spp", [50, 0, 0, 0, 0])
+            return True
+
+        d._async_send_packet = AsyncMock(side_effect=send)
         assert await d.async_set_value("channel_1", 50)
         d._async_prepare_command.assert_awaited()
         assert protocol.spp_mode_packet(0) in [c.args[0] for c in d._async_send_packet.await_args_list]
@@ -36,7 +41,7 @@ def test_brightness_uses_reconnect_mix(transport, product):
         d.values.update(mode="manual", channel_1=100, channel_2=10)
 
         async def prepare(**kwargs):
-            d.values.update(channel_1=10, channel_2=100)
+            report(d, transport, [10, 100] + [0] * (len(d.numbers()) - 2))
             return True
 
         d._async_prepare_command = AsyncMock(side_effect=prepare)
@@ -397,7 +402,7 @@ def test_light_brightness_refreshes_before_reading_the_colour_mix():
         d.values.update(mode="manual", channel_1=100, channel_2=10)
 
         async def prepare(**kwargs):
-            d.values.update(channel_1=10, channel_2=100)
+            report(d, "facebd", [10, 100, 0, 0])
             return True
 
         d._async_prepare_command = AsyncMock(side_effect=prepare)

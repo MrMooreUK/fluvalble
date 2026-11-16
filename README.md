@@ -31,7 +31,7 @@ Fluval BLE turns compatible Fluval aquarium lights into first-class Home Assista
 | **Native effects** | Use the light card to select the weather and lighting effects supported by the detected fixture. Turning off an active classic weather effect clears its manual channels before powering off, so the effect is not retained for the next On. |
 | **Native fixture schedules** | Select and read back schedules saved on the fixture using Fluval Connect. The fixture runs them independently of Home Assistant. |
 | **Scheduled on/off indication** | Classic lights show expected Auto/Pro on/off state from the fixture's read-back schedule and synchronized clock, marked as assumed state. No lighting commands are sent to update the display. |
-| **Daylight-saving control** | Supported fixtures expose their onboard daylight-saving setting as a configuration switch. |
+| **Daylight-saving control** | FACEBD fixtures expose their onboard daylight-saving setting as a configuration switch, including when the transport is identified after setup. |
 | **Mode** | Select **Manual**, **Automatic**, or **Professional** from a dropdown. Setting a colour automatically switches the fixture to Manual mode. |
 | **Reachability** | Shows whether the fixture was seen recently over BLE instead of treating an expected idle GATT disconnect as a failure. |
 | **Auto-discovery** | Home Assistant detects nearby Fluval lights and prompts you to add them—no manual searching required. |

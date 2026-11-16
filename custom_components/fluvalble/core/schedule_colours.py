@@ -90,6 +90,11 @@ def colour_packet(
         if edited.get("sleep") is not None:
             payload.extend((1, edited["sleep"]["hour"], edited["sleep"]["minute"]))
         return protocol.old_packet(bytes(payload))
+    return _professional_packet(edited, transport=transport, channel_count=channel_count)
+
+
+def _professional_packet(edited, *, transport, channel_count):
+    """Encode an already validated final bank using the existing native layout."""
     pro_times = [point["minute"] for point in edited]
     flat = bytes(point[f"channel_{index}"] for point in edited for index in range(1, channel_count + 1))
     if transport == "facebd":
@@ -102,6 +107,48 @@ def colour_packet(
     if transport == "spp":
         return protocol.spp_command({13: bytes(blob)})
     return protocol.old_packet(bytes((0x68, 0x10)) + blob)
+
+
+def replace_professional_batch(schedule, *, channel_count: int, changes: list[dict[str, Any]]):
+    """Apply existing-point edits together, then validate final chronological order."""
+    result = editor_schedule(schedule)
+    if not isinstance(result, list) or not isinstance(changes, list) or not changes or len(changes) > len(result):
+        raise ValueError("Provide edits to existing Professional timepoints")
+    seen = set()
+    for change in changes:
+        if (
+            not isinstance(change, dict)
+            or not {"target", "levels"} <= change.keys()
+            or change.keys() - {"target", "levels", "times"}
+        ):
+            raise ValueError("Provide a target and levels for every timepoint edit")
+        target = change["target"]
+        if type(target) is not int or not 0 <= target < len(result) or target in seen:
+            raise ValueError("Select each existing Professional timepoint only once")
+        seen.add(target)
+        result = replace_schedule_colours(result, channel_count=channel_count, levels=change["levels"], target=target)
+        assert isinstance(result, list)
+        if "times" in change:
+            minute = change["times"]
+            if type(minute) is not int or not 0 <= minute < 1440:
+                raise ValueError("Timepoints must be minutes from 00:00 to 23:59")
+            result[target]["minute"] = minute
+    _validate_professional_order(result)
+    return result
+
+
+def professional_batch_packet(schedule, *, transport, channel_count, changes):
+    edited = replace_professional_batch(schedule, channel_count=channel_count, changes=changes)
+    return _professional_packet(edited, transport=transport, channel_count=channel_count)
+
+
+def _validate_professional_order(points):
+    minutes = [point["minute"] for point in points]
+    if (
+        len(set(minutes)) != len(minutes)
+        or sum((minutes[(i + 1) % len(minutes)] - minute) % 1440 for i, minute in enumerate(minutes)) != 1440
+    ):
+        raise ValueError("Timepoints must remain in chronological order without duplicates")
 
 
 def replace_schedule_colours(
@@ -166,12 +213,7 @@ def replace_schedule_colours(
             if type(times) is not int or not 0 <= times < 1440:
                 raise ValueError("Timepoints must be minutes from 00:00 to 23:59")
             point["minute"] = times
-            minutes = [item["minute"] for item in result]
-            if (
-                len(set(minutes)) != len(minutes)
-                or sum((minutes[(i + 1) % len(minutes)] - minute) % 1440 for i, minute in enumerate(minutes)) != 1440
-            ):
-                raise ValueError("Timepoints must remain in chronological order without duplicates")
+            _validate_professional_order(result)
     else:
         raise ValueError("Fixture schedule readback is required")
     return result

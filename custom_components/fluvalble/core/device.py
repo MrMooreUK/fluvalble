@@ -81,16 +81,6 @@ CHANNEL_NAMES_MARINE = {
     "channel_4": "Purple",
     "channel_5": "Cold White",
 }
-# Product 281 is the APK's special Fresh 281 layout. It uses the current
-# Reef spectrum asset, but DeviceUtil.getLightChannel() gives its physical
-# emitters this different order.
-CHANNEL_NAMES_FRESH_281 = {
-    "channel_1": "Red",
-    "channel_2": "Blue",
-    "channel_3": "Purple",
-    "channel_4": "Cold White",
-    "channel_5": "Warm White",
-}
 CHANNEL_NAMES_PLANT_PRO = {
     # Kept as a compatibility profile name. FluvalConnect assigns Plant PRO
     # and Plant 4.0 the same APK light type and five-channel order.
@@ -719,8 +709,6 @@ class Device:
     def _channel_labels(self) -> dict[str, str]:
         """Return channel labels for the active lamp profile."""
         if (product := product_from_id(self.product_id)) is not None:
-            if self.product_id == 281:
-                return CHANNEL_NAMES_FRESH_281
             if product.spectrum == "plant":
                 return CHANNEL_NAMES_PLANT
             if product.spectrum == "rgbw":
@@ -1080,8 +1068,8 @@ class Device:
             else protocol.old_weather_effect_packet(effect_code)
         )
 
-        revisions = dict(self._control_readback_revision)
         for packet in packets:
+            revisions = dict(self._control_readback_revision)
             effect_revision = self._effect_readback_revision
             if not await self._async_send_packet(packet):
                 if not self.values.get("effect"):
@@ -1133,19 +1121,12 @@ class Device:
         return await self.async_set_channels(self._channels_after_effect(), force=True)
 
     @serialized_device_command
-    async def async_set_master_brightness(self, level: int) -> bool:
+    async def async_set_master_brightness(
+        self, level: int, *, default_channels: Callable[[], dict[str, int]] | None = None
+    ) -> bool:
         """Scale all supported channels to level, preserving ratios."""
-        if not await self._async_prepare_command():
-            return False
         level = min(100, max(0, round(level / 10) if level > 100 else int(level)))
-        chans = self.numbers()
-        current_max = max((self.values.get(ch, 0) for ch in chans), default=0)
-        if current_max <= 0:
-            targets = {channel: level for channel in chans}
-        else:
-            factor = level / current_max
-            targets = {channel: min(100, max(0, round(self.values.get(channel, 0) * factor))) for channel in chans}
-        return await self.async_set_channels(targets)
+        return await self._async_set_channels_now({}, brightness=level, default_channels=default_channels)
 
     def entity_name(self, attr: str) -> str:
         """Return a user-facing entity suffix for this device attribute."""
@@ -1241,6 +1222,8 @@ class Device:
         restore_mode_on_zero: bool = False,
     ) -> bool:
         """Set multiple channel values, optionally ramping over time."""
+        if not self._valid_channel_request(values):
+            return False
         if transition <= 0:
             async with self.command_transaction():
                 return await self._async_set_channels_now(
@@ -1255,6 +1238,8 @@ class Device:
             # before the ramp start is taken.
             if not await self._async_prepare_command():
                 _LOGGER.warning("Cannot start Fluval channel transition before BLE device is available")
+                return False
+            if not self._valid_channel_request(values):
                 return False
             # Ramp only the requested channels. Untouched channels are merged
             # from live state by each frame, never replayed from this snapshot.
@@ -1288,6 +1273,7 @@ class Device:
                     force=force,
                     restore_mode_on_zero=restore_mode_on_zero,
                     remember_manual=step == steps,
+                    allow_noop=step != steps,
                 ):
                     return False
         return True
@@ -1301,13 +1287,26 @@ class Device:
         remember_manual: bool = True,
         expected_manual_identity=None,
         require_manual_mode: bool = False,
+        allow_noop: bool = True,
+        brightness: int | None = None,
+        default_channels: Callable[[], dict[str, int]] | None = None,
     ) -> bool:
         """Apply one channel frame inside an active command transaction."""
+        if brightness is None and not self._valid_channel_request(values):
+            return False
         self.cancel_channel_mode_restore(clear_saved_mode=not restore_mode_on_zero)
-        if not await self._async_prepare_command():
+        readback_revisions = dict(self._control_readback_revision)
+        ready = (
+            await self._async_prepare_command(refresh_state=True)
+            if brightness is not None
+            else await self._async_prepare_command()
+        )
+        if not ready:
             _LOGGER.warning("Cannot set Fluval channels before BLE device is available")
             return False
         channels = self.numbers()
+        if brightness is None and not self._valid_channel_request(values):
+            return False
         effect_active = bool(self.values.get("effect"))
         force = force or effect_active
         targets = {channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels}
@@ -1316,6 +1315,8 @@ class Device:
 
         if (
             not force
+            and allow_noop
+            and brightness is None
             and self.values.get("mode") == "manual"
             and bool(any(targets.values())) == bool(self.values.get("led_on_off"))
             and all(int(self.values.get(channel, -1)) == value for channel, value in targets.items())
@@ -1333,8 +1334,11 @@ class Device:
             return False
 
         old_values = dict(self.values)
+        needs_manual_bank = brightness is not None
 
         if self.values.get("mode") != "manual":
+            readback_revisions = dict(self._control_readback_revision)
+            needs_manual_bank = needs_manual_bank or set(values) != set(self.numbers())
             previous_mode = cast(Any, self.values.get("mode"))
             if (
                 restore_mode_on_zero
@@ -1362,6 +1366,33 @@ class Device:
 
         # Reconnection and mode writes can refresh untouched channels. Merge
         # the explicit request into that current state, never the idle cache.
+        channels = self.numbers()
+        if needs_manual_bank and not self._fresh_manual_bank(readback_revisions):
+            if not await self.async_refresh_state(manual=True):
+                self._set_diagnostic_error("manual_channels_unavailable", "Unable to read current Manual channels")
+                return False
+            channels = self.numbers()
+        if brightness is None:
+            if not self._valid_channel_request(values):
+                return False
+        else:
+            channels = self.numbers()
+            peak = max(int(self.values[channel]) for channel in channels)
+            values = (
+                {
+                    channel: min(100, max(0, round(int(self.values[channel]) * brightness / peak)))
+                    for channel in channels
+                }
+                if peak
+                else default_channels()
+                if default_channels is not None
+                else dict.fromkeys(channels, brightness)
+            )
+            if not self._valid_channel_request(values):
+                return False
+        # A requested Manual read can refresh untouched emitters too. Failure
+        # rollback must preserve that bank, not the pre-read scheduled cache.
+        old_values = dict(self.values)
         targets = {channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels}
         changed_channels = [channel for channel, value in targets.items() if int(old_values.get(channel, -1)) != value]
         single_channel = changed_channels[0] if len(changed_channels) == 1 and not force else None
@@ -1387,6 +1418,19 @@ class Device:
             if restore_mode_on_zero and not any(targets.values()):
                 self._schedule_channel_mode_restore()
         return ok
+
+    def _valid_channel_request(self, values: dict[str, int]) -> bool:
+        if not values or set(values) - set(self.numbers()):
+            self._set_diagnostic_error(
+                "invalid_channels", "Requested channels do not match this fixture's physical layout"
+            )
+            return False
+        return True
+
+    def _fresh_manual_bank(self, revisions: dict[str, int]) -> bool:
+        return self.values.get("mode") == "manual" and all(
+            self._control_readback_revision[key] > revisions.get(key, 0) for key in ("mode", *self.numbers())
+        )
 
     def _manual_identity(self) -> tuple[Any, ...]:
         return (self.mac, self.product_id, self.spectrum_profile(), tuple(self.numbers()))
@@ -2112,7 +2156,7 @@ class Device:
         return expected or None
 
     @serialized_device_command
-    async def async_refresh_state(self, *, schedule: str | None = None) -> bool:
+    async def async_refresh_state(self, *, schedule: str | None = None, manual: bool = False) -> bool:
         """Resolve the controller and request its current state."""
         if not await self._async_ensure_client() or self.client is None:
             return False
@@ -2122,7 +2166,12 @@ class Device:
             return False
 
         revision = self._schedule_revisions.get(schedule, 0) if schedule else 0
+        revisions = dict(self._control_readback_revision)
         try:
+            if manual:
+                return bool(
+                    await client.request_state(state_validator=lambda _state: self._fresh_manual_bank(revisions))
+                )
             if schedule:
                 return bool(
                     await client.request_state(

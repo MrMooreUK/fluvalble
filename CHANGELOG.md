@@ -9,6 +9,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Confirm each effect command against only its own newer readback, so a
+  preceding mode response cannot incorrectly reject a successful power write.
+- Resolve channel width after switching to Manual, and derive relative
+  brightness and partial adjustments from fresh Manual channels.
+- Reject empty or unsupported channel requests without changing mode or power.
+- Confirm and retain the final fade bank even when rounding reaches its target
+  before the last transition step.
+- Handle schedule saves during entry unload or replacement without an exception.
+- Validate Professional timepoint edits together and save one complete native
+  bank, allowing valid edits regardless of their draft order.
+- Add the daylight-saving control when FACEBD transport is identified after
+  entity setup, and remove its subscription on unload.
+- Match product 281's emitter labels to the active FluvalConnect screen route.
 - Wait for initial fixture state before deriving channel operations; collect
   partial readback until the required fields arrive, and release failed sessions.
 - Scale brightness and evaluate unchanged channel requests after connecting,
