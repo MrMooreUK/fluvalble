@@ -537,7 +537,11 @@ class Client:
                     )
                 except (TimeoutError, BleakError) as err:
                     _LOGGER.debug("Fluval initial state attempt %s failed", attempt + 1, exc_info=err)
-                if read_ok or self._stopping or self.client is not current_client or not current_client.is_connected:
+                if read_ok or self._stopping:
+                    break
+                if self.client is None or self.client is not client:
+                    break
+                if not self.client.is_connected:
                     break
             if not read_ok:
                 self.last_error = "Initial fixture state was not received"
