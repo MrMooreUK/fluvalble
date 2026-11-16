@@ -92,6 +92,35 @@ transport results, not a claim of physical testing on all fixtures.
 
 ## Scope
 
+### Follow-up to the PR #142 review
+
+Initialization now has its own five-second response window and one retry before
+the unready connection is released. The normal 0.75-second verification window
+is unchanged. This is a host-side tolerance for delayed transport responses,
+not an APK-derived timing guarantee or a different firmware command.
+
+Four FACEBD channel keys can establish an initial four-channel hint without
+mode/power keys in that same map. The client accumulates the separate reports
+before accepting complete Manual state. A valid fifth key upgrades the hint;
+four-key partial reports cannot shrink an established five-channel hint.
+
+Entity-registry pruning requires a recognized catalogue product. Provisional
+hints leave existing controls and their IDs/customizations intact, marking
+out-of-layout channels unavailable instead of deleting their records. Deferred
+removal also rechecks the current identified layout before deleting a row.
+
+Effect operations carry an explicit kind instead of identifying their purpose
+by rebuilding and comparing bytes. Incomplete non-batch schedule edits fail
+before any read. Brightness retains its fresh Manual read deliberately: a
+connected session alone does not prove that cached ratios are current. The
+light's preparation remains inside its existing command transaction and is
+needed before selecting a product-dependent colour conversion.
+
+Regression tests cover replies delayed beyond the normal deadline on all three
+transports, one retry after timeout/read error, finite failure and disconnect,
+both orders of split FACEBD mode/power/channel reports, provisional entity
+preservation and incomplete editor requests. No physical light is contacted.
+
 The broader failures predate PRs #139–#141. The stale cached-mode refusal was
 introduced by #140. This repair preserves its Manual-only restore policy,
 the zero-bank protection, debounced storage and the live-state fade changes.
