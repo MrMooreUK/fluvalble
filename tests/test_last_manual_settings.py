@@ -282,3 +282,87 @@ def test_storage_load_failure_does_not_prevent_integration_setup():
         device._async_prepare_command.assert_not_awaited()
 
     asyncio.run(run())
+
+
+def make_unidentified_facebd_device():
+    device = make_device(product=None, transport="facebd")
+    assert device.lamp_profile == "auto"
+    assert len(device.numbers()) == 5
+    return device
+
+
+def test_stored_four_channel_bank_becomes_restorable_after_facebd_readback():
+    async def run():
+        device = make_unidentified_facebd_device()
+        levels = [30, 40, 50, 60]
+        payload = saved(device, levels)
+        device.configure_manual_settings(payload, AsyncMock())
+        device.client = SimpleNamespace()
+        button = FluvalRestoreManualButton(device, "restore_last_manual")
+        device._async_send_packet = AsyncMock(return_value=True)
+        assert not device.has_last_manual_settings()
+        assert not button._attr_available
+        assert not await device.async_restore_last_manual_settings()
+        device._async_send_packet.assert_not_awaited()
+
+        report(device, "facebd", [0, 0, 0, 0])
+        assert len(device.numbers()) == 4
+        assert device.has_last_manual_settings()
+        button.internal_update()
+        assert button._attr_available
+
+        packet = protocol.wifi_all_zone_packet(levels)
+
+        async def send(value):
+            if value == packet:
+                report(device, "facebd", levels)
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        assert await device.async_restore_last_manual_settings()
+        assert packet in [call.args[0] for call in device._async_send_packet.await_args_list]
+        assert [device.values[c] for c in device.numbers()] == levels
+
+    asyncio.run(run())
+
+
+def test_stored_five_channel_bank_is_dropped_when_readback_resolves_four_channels():
+    async def run():
+        device = make_unidentified_facebd_device()
+        device.configure_manual_settings(saved(device, [40] * 5), AsyncMock())
+        assert device.has_last_manual_settings()
+        report(device, "facebd", [0, 0, 0, 0])
+        assert len(device.numbers()) == 4
+        assert not device.has_last_manual_settings()
+        device._async_send_packet = AsyncMock(return_value=True)
+        assert not await device.async_restore_last_manual_settings()
+        device._async_send_packet.assert_not_awaited()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("path", ["channels", "slider"])
+def test_all_off_write_keeps_previous_bank_and_skips_persist(path):
+    async def run():
+        device = make_device()
+        old = [10] * 5
+        persist = AsyncMock()
+        device.configure_manual_settings(saved(device, old), persist)
+
+        async def send(packet):
+            report(device, "spp", [0] * 5)
+            return True
+
+        device._async_send_packet = AsyncMock(side_effect=send)
+        if path == "channels":
+            assert await device.async_set_channels(dict(zip(device.numbers(), [0] * 5)), force=True)
+        else:
+            device.values.update({channel: 0 for channel in device.numbers()}, channel_1=50, mode="manual")
+            assert await device.async_set_value("channel_1", 0)
+            device.cancel_channel_mode_restore()
+        device._async_send_packet.assert_awaited()
+        persist.assert_not_awaited()
+        assert device._last_manual_settings == dict(zip(device.numbers(), old))
+        assert device.diagnostics["last_manual_settings_status"] == "skipped_all_off"
+
+    asyncio.run(run())
