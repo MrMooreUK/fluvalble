@@ -45,26 +45,12 @@ class FluvalScheduleColours extends HTMLElement {
   }
   async save(){
     if([...this.shadowRoot.querySelectorAll('input[type=time]')].some(input=>!input.reportValidity()))return;
-    const generation=this.loadGeneration,entry=this.entry;
-    const stale=()=>generation!==this.loadGeneration||entry!==this.entry;
     this.busy=true;this.message='';this.render();
     try{
-      const drafts=Object.entries({...this.edits});
-      if(this.mode==='professional'){
-        const changes=drafts.map(([key,levels])=>({target:Number(key.split(':')[1]),levels:[...levels],...(this.timeEdits[key]===undefined?{}:{times:this.timeEdits[key]})}));
-        await this._hass.callWS({type:'fluvalble/save_schedule_colours',entry_id:entry,schedule:'professional',changes,baseline:structuredClone(this.raw.professional)});
-        if(stale())return;
-        for(const change of changes){
-          const point=this.raw.professional[change.target];
-          change.levels.forEach((v,i)=>point['channel_'+(i+1)]=v);
-          if(change.times!==undefined)point.minute=change.times;
-          delete this.edits['professional:'+change.target];delete this.timeEdits['professional:'+change.target];
-        }
-      }else for(const [key,levels] of drafts){
+      for(const [key,levels] of Object.entries({...this.edits})){
         const [mode,targetValue]=key.split(':');const target=mode==='auto'?targetValue:Number(targetValue);
         const times=this.timeEdits[key];
-        await this._hass.callWS({type:'fluvalble/save_schedule_colours',entry_id:entry,schedule:mode,target,levels,baseline:structuredClone(this.raw[mode]),...(times===undefined?{}:{times})});
-        if(stale())return;
+        await this._hass.callWS({type:'fluvalble/save_schedule_colours',entry_id:this.entry,schedule:mode,target,levels,baseline:this.raw[mode],...(times===undefined?{}:{times})});
         // Backend confirms this one write. Advance the baseline for the next
         // bank without discarding any still-unsaved drafts.
         if(mode==='auto')this.raw.auto[target+'_levels']=[...levels];
@@ -74,7 +60,7 @@ class FluvalScheduleColours extends HTMLElement {
         delete this.timeEdits[key];
       }
       this.message='Changes saved to the light.';
-    }catch(error){if(stale())return;this.message=error.message||String(error);}
+    }catch(error){this.message=error.message||String(error);}
     this.busy=false;this.render();
   }
   render(){

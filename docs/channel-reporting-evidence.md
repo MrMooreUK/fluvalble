@@ -29,7 +29,7 @@ The regression test_issue_133_actual_spp_capture_preserves_auto_and_all_eight_pr
 keeps those fields separate and round-trips the schedule banks unchanged.
 The integration therefore preserves reported Manual channel controls rather
 than replacing them with a schedule estimate. A report is not a physical light
-measurement. That channel-reporting review did not change native command formats.
+measurement. This audit makes no command or channel-reporting runtime changes.
 
 ## Local Manual recall
 
@@ -44,9 +44,8 @@ not a new firmware command. It is an HA-specific single last-confirmed bank,
 not a claim that the app has an automatic last-used restore feature. Storage is
 per config entry and bound to MAC, product ID, channel count and spectrum
 profile. Only successful HA channel writes with complete fresh matching Manual
-readback are saved. An explicit restore reads the current mode, requires Manual
-without selecting it, and applies all channels with fresh readback confirmation;
-ordinary notifications never invoke it.
+readback are saved. An explicit restore selects Manual and applies all channels
+with fresh readback confirmation; ordinary notifications never invoke it.
 
 The APK does not contain the controller firmware or a distinct marker proving
 that a given channel report came from the top button. No automatic physical-

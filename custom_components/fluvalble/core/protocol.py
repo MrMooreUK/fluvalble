@@ -686,7 +686,7 @@ def decode_cbor_update(data: bytes | bytearray) -> dict[Any, Any] | None:
 
 def _clock_payload(now: datetime | None = None) -> bytes:
     """Return Y M D W h m s used by old and mesh clock sync."""
-    moment = now or datetime.now().astimezone()
+    moment = (now or datetime.now().astimezone()).astimezone()
     # FluvalConnect TimeUtil.getWeeks(): Monday = 1 through Sunday = 7.
     weekday = moment.isoweekday()
     return bytes(

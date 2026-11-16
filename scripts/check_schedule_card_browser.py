@@ -128,44 +128,11 @@ async def main():
                 return {initial,redraw,changed};
             }""")
             assert result == {"initial": [False, False], "redraw": [False, True], "changed": [False, False]}
-            batch = await page.evaluate("""async () => {
-                const card=document.querySelector('fluval-schedule-colours');
-                card.mode='professional';
-                card.fixture={mode:'professional',channels:['Pink','Blue','Cold White','Pure White','Warm White']};
-                card.raw.professional=[60,480,900,1200].map(minute=>({minute,
-                    ...Object.fromEntries(card.fixture.channels.map((_,i)=>['channel_'+(i+1),50]))}));
-                const count=card.fixture.channels.length,calls=[];
-                card.edits={'professional:1':Array(count).fill(60),'professional:2':Array(count).fill(70)};
-                card.timeEdits={'professional:1':1000,'professional:2':1100};
-                card._hass={callWS:async message=>{calls.push(structuredClone(message));return true;}};
-                await card.save();
-                const success={calls,minutes:card.raw.professional.map(p=>p.minute),dirty:card.dirty};
-                card.edits={'professional:1':Array(count).fill(20)};card.timeEdits={};
-                card._hass={callWS:async ()=>{throw Error('Readback did not confirm');}};
-                await card.save();
-                const failure={dirty:card.dirty,message:card.message,level:card.raw.professional[1].channel_1};
-                let finish;
-                card._hass={callWS:()=>new Promise(resolve=>finish=resolve)};
-                const pending=card.save();
-                // Model entry selection while the old write acknowledgement is pending.
-                card.entry='different-fixture';card.loadGeneration=(card.loadGeneration||0)+1;
-                card.raw={professional:[{minute:30,channel_1:99}]};card.edits={};card.timeEdits={};
-                card.message='New fixture';card.busy=false;
-                finish(true);await pending;
-                return {success,failure,stale:{message:card.message,minute:card.raw.professional[0].minute,
-                    level:card.raw.professional[0].channel_1,busy:card.busy}};
-            }""")
-            assert len(batch["success"]["calls"]) == 1
-            assert [edit["times"] for edit in batch["success"]["calls"][0]["changes"]] == [1000, 1100]
-            assert batch["success"]["minutes"] == [60, 1000, 1100, 1200]
-            assert batch["success"]["dirty"] is False
-            assert batch["failure"] == {"dirty": True, "message": "Readback did not confirm", "level": 60}, batch
-            assert batch["stale"] == {"message": "New fixture", "minute": 30, "level": 99, "busy": False}
             assert errors == []
             await page.close()
         await browser.close()
     print(
-        "PASS: registration, picker, cached selection, 4/5-channel layouts, section state, Pro batch save, failed drafts and stale responses"
+        "PASS: registry replacement, picker stub, duplicate import, cached selection, 4/5-channel Auto/Pro times and mode guidance"
     )
 
 

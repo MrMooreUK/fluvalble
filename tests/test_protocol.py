@@ -261,7 +261,7 @@ def test_old_save_manual_preset_packet_rejects_invalid_slots(slot_index):
 
 def test_old_clock_packet_shape():
     moment = datetime(2026, 7, 19, 12, 30, 45, tzinfo=timezone.utc)
-    local = moment
+    local = moment.astimezone()
     packet = protocol.old_clock_packet(moment)
 
     assert packet[0] == 0x68
@@ -313,7 +313,7 @@ def test_classic_native_pro_decoder_rejects_invalid_count_and_shape():
 
 def test_mesh_clock_packet_shape():
     moment = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
-    local = moment
+    local = moment.astimezone()
     clock = protocol.mesh_clock_packet(moment)
     assert clock[0] == protocol.MESH_OPCODE_CLOCK
     assert list(clock[1:8]) == [

@@ -43,7 +43,6 @@ def _make_device(*, active_time: int = 120):
         active_time=active_time,
     )
     device.connected = True
-    device._async_prepare_command = AsyncMock(return_value=True)
     device.conn_info["rssi"] = -70
     device.conn_info["rssi_updated_at"] = now
     device.conn_info["advertisement_source"] = "Aquarium USB adapter"
@@ -625,7 +624,6 @@ async def _async_test_marine_light_uses_standard_rgb_control_for_all_five_channe
     )
     device.connected = True
     device.async_apply_light_channels = AsyncMock(return_value=True)
-    device._async_prepare_command = AsyncMock(return_value=True)
     entity = light.FluvalLight(device, "light")
 
     assert entity._attr_color_mode == ColorMode.RGB
