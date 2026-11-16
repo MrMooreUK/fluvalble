@@ -1209,10 +1209,21 @@ class Device:
 
         async with self.command_transaction():
             generation = self._command_generation
-            channels = self.numbers()
-            targets = {
-                channel: max(0, min(100, int(values.get(channel, self.values[channel])))) for channel in channels
-            }
+            # Connect first so a reconnect readback replaces any idle cache
+            # before the ramp start is taken.
+            if not await self._async_prepare_command():
+                _LOGGER.warning("Cannot start Fluval channel transition before BLE device is available")
+                return False
+            # Ramp only the requested channels. Untouched channels are merged
+            # from live state by each frame, never replayed from this snapshot.
+            channels = [channel for channel in self.numbers() if channel in values]
+            if not channels:
+                return await self._async_set_channels_now(
+                    values,
+                    force=force,
+                    restore_mode_on_zero=restore_mode_on_zero,
+                )
+            targets = {channel: max(0, min(100, int(values[channel]))) for channel in channels}
             start_values = {channel: int(self.values[channel]) for channel in channels}
 
         steps = max(1, -(-transition // max(1, step_seconds)))
