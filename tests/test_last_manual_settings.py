@@ -555,4 +555,64 @@ def test_entry_removal_cancels_pending_delayed_save():
         assert store.disk is None
         assert "one" not in manual_settings._STORES
 
+
+def channel_frame(transport, packet, count):
+    """Return the channel levels carried by one frame, or None for other packets."""
+    if transport == "classic":
+        if packet[:2] != bytes([0x68, protocol.OLD_ALL_ZONE]):
+            return None
+        words = packet[2:-1]
+        return {index: ((words[2 * index] << 8) | words[2 * index + 1]) // 10 for index in range(count)}
+    fields = protocol.decode_cbor_update(packet)
+    keys = protocol.SPP_CHANNEL_KEYS if transport == "spp" else protocol.WIFI_CHANNEL_KEYS
+    levels = {index: fields[key] for index, key in enumerate(keys[:count]) if key in fields}
+    return levels or None
+
+
+@pytest.mark.parametrize("transport", ["classic", "facebd", "spp"])
+def test_fade_on_one_channel_keeps_live_untouched_channel_instead_of_stale_cache(transport):
+    """The #124 ch2=80 gate: a ch1 fade must never replay a stale cached ch2."""
+
+    async def run():
+        device = make_device(transport=transport)
+        channels = device.numbers()
+        count = len(channels)
+        # Home Assistant's idle cache is stale: it still believes ch2 is 10.
+        device.values.update({channel: 10 for channel in channels})
+        # The lamp really has ch2 at 80.
+        lamp = [10, 80] + [10] * (count - 2)
+        persist = AsyncMock()
+        device.configure_manual_settings(saved(device, [10] * count), persist)
+        frames = []
+
+        async def reconnect():
+            # Connecting delivers the lamp's real state as readback.
+            report(device, transport, lamp)
+            return True
+
+        async def send(packet):
+            levels = channel_frame(transport, packet, count)
+            if levels is not None:
+                frames.append(levels)
+                for index, value in levels.items():
+                    lamp[index] = value
+                report(device, transport, lamp)
+            return True
+
+        device._async_prepare_command = AsyncMock(side_effect=reconnect)
+        device._async_send_packet = AsyncMock(side_effect=send)
+        with patch("custom_components.fluvalble.core.device.asyncio.sleep", new=AsyncMock()):
+            assert await device.async_set_channels({"channel_1": 60}, transition=3, step_seconds=1)
+
+        assert frames
+        assert all(frame.get(1, 80) == 80 for frame in frames), frames
+        assert frames[-1][0] == 60
+        assert lamp[:2] == [60, 80]
+        assert device.values["channel_2"] == 80
+        persist.assert_awaited_once()
+        bank = persist.await_args.args[0]
+        assert bank["channel_1"] == 60
+        assert bank["channel_2"] == 80
+        assert device._last_manual_settings == bank
+
     asyncio.run(run())

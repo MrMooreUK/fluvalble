@@ -15,6 +15,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Do not save an all-off write as the last Manual bank.
 - Restore last Manual settings now refuses unless the fixture is already in
   Manual mode, and never sends a mode change.
+- Fade only the requested channels during a transition and take the ramp start
+  from live readback, so a stale cached value can no longer overwrite an
+  untouched channel or be saved as the last Manual bank (#124, #138).
 
 ### Changed
 
