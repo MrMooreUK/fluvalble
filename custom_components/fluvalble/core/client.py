@@ -88,6 +88,7 @@ class Client:
         connection_ready_callback: ConnectionReadyCallback | None = None,
         ready_callback: Callable[[], Awaitable[None]] | None = None,
         state_ready_callback: StateReadyCallback | None = None,
+        state_validator: Callable[[dict[int, object]], bool] | None = None,
     ) -> None:
         """Initialize the client."""
         self.device = device
@@ -97,6 +98,7 @@ class Client:
         self.connection_ready_callback = connection_ready_callback
         self.ready_callback = ready_callback
         self.state_ready_callback = state_ready_callback
+        self.state_validator = state_validator
         self._ping_interval = ping_interval
         self._active_time = active_time
 
@@ -370,7 +372,10 @@ class Client:
         """Connect far enough to resolve the live GATT profile."""
         try:
             client = await self._ensure_client()
-            return await self._initialize_session(client)
+            if await self._initialize_session(client):
+                return True
+            await self._discard_unready_session(client)
+            return False
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval connect for profile resolution failed", exc_info=err)
         except Exception as err:  # pylint: disable=broad-except
@@ -379,6 +384,8 @@ class Client:
                 exc_info=err,
             )
 
+        if self.client is not None:
+            await self._discard_unready_session(self.client)
         if self.status_callback:
             self.status_callback(False)
         return False
@@ -478,6 +485,8 @@ class Client:
         try:
             client = await self._ensure_client()
             connected = await self._initialize_session(client)
+            if not connected:
+                await self._discard_unready_session(client)
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Fluval initial connection failed", exc_info=err)
             if self.status_callback:
@@ -487,8 +496,16 @@ class Client:
             if self.status_callback:
                 self.status_callback(False)
         finally:
+            if not connected and self.client is not None:
+                await self._discard_unready_session(self.client)
             if not self._stopping and connected:
                 self.ping()
+
+    async def _discard_unready_session(self, client: BleakClient) -> None:
+        """Release a failed initialization without closing a newer ready session."""
+        async with self._initialization_lock:
+            if self.client is client and not self._session_initialized:
+                await self._safe_disconnect()
 
     async def _initialize_session(self, client: BleakClient) -> bool:
         """Run the APK initialization once for every physical GATT session."""
@@ -508,12 +525,14 @@ class Client:
             if self.ready_callback:
                 await self.ready_callback()
 
-            if self.raw_facebd:
-                await self.request_state()
-            elif self.init_write_uuid:
-                await self._wait_for_command_gap()
-                await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
-                self.last_command_at = time.time()
+            read_ok = (
+                await self.request_state(state_validator=self.state_validator)
+                if self.raw_facebd and self.state_validator is not None
+                else await self.request_state()
+            )
+            if not read_ok:
+                self.last_error = "Initial fixture state was not received"
+                return False
 
             if self.state_ready_callback:
                 await self.state_ready_callback(dict(self._observed_state))
@@ -543,6 +562,7 @@ class Client:
                 async with self._command_lock:
                     client = await self._ensure_client()
                 if not await self._initialize_session(client):
+                    await self._discard_unready_session(client)
                     raise BleakError("Fluval BLE session initialization failed")
 
                 # heartbeat loop
@@ -637,7 +657,12 @@ class Client:
             if index + 1 < len(payloads):
                 await asyncio.sleep(CHUNK_WRITE_GAP)
 
-    async def request_state(self, expected_state: dict[int, object] | None = None) -> bool:
+    async def request_state(
+        self,
+        expected_state: dict[int, object] | None = None,
+        *,
+        state_validator: Callable[[dict[int, object]], bool] | None = None,
+    ) -> bool:
         """Read current controller state and optionally verify requested values."""
         client = await self._ensure_client()
         self._state_update_event.clear()
@@ -671,12 +696,21 @@ class Client:
             await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
             self.last_command_at = time.time()
 
-        if observed and self._state_matches(expected_state):
-            return True
+        def complete() -> bool:
+            return (
+                (observed or self._state_update_event.is_set())
+                and self._state_matches(expected_state)
+                and (state_validator is None or state_validator(self.observed_state))
+            )
+
+        # A valid partial notification is not necessarily the requested state.
+        # Keep collecting until all prerequisites match or the deadline expires.
         with contextlib.suppress(TimeoutError):
             async with asyncio.timeout(STATE_NOTIFY_TIMEOUT):
-                await self._state_update_event.wait()
-        return self._state_update_event.is_set() and self._state_matches(expected_state)
+                while not complete():
+                    self._state_update_event.clear()
+                    await self._state_update_event.wait()
+        return complete()
 
     @property
     def observed_state(self) -> dict[int, object]:

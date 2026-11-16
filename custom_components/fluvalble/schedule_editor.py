@@ -114,9 +114,9 @@ async def async_setup_editor(hass):
             return
         try:
             async with device.command_transaction():
-                if not await device.async_refresh_state():
-                    raise ValueError("Unable to read the fixture before saving")
                 key = "native_auto_schedule" if msg["schedule"] == "auto" else "native_pro_schedule"
+                if not await device.async_refresh_state(schedule=key):
+                    raise ValueError("Unable to read the fixture before saving")
                 required_mode = "automatic" if msg["schedule"] == "auto" else "professional"
                 if device.values.get("mode") != required_mode:
                     raise ValueError("Select the matching schedule mode on the light before editing")
@@ -136,7 +136,7 @@ async def async_setup_editor(hass):
                 )
                 if not await _write_schedule_packet(device, packet, transport):
                     raise ValueError(device.command_error_message())
-                if not await device.async_refresh_state():
+                if not await device.async_refresh_state(schedule=key):
                     raise ValueError("Write sent, but readback failed. Reload to confirm the result")
                 expected = replace_schedule_colours(
                     current,

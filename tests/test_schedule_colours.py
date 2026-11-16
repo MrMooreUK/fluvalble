@@ -352,7 +352,7 @@ def test_editor_time_save_requires_exact_hardware_readback(confirmed):
         _async_send_packet=AsyncMock(return_value=True),
     )
 
-    async def refresh():
+    async def refresh(**kwargs):
         if device._async_send_packet.await_count and confirmed:
             device.values["native_auto_schedule"] = expected
         return True
@@ -444,7 +444,7 @@ def _save_device(*, values, refresh_results=(True, True), send_result=True, erro
 
     results = iter(refresh_results)
 
-    async def refresh():
+    async def refresh(**kwargs):
         return next(results)
 
     return SimpleNamespace(

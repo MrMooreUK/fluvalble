@@ -9,6 +9,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Wait for initial fixture state before deriving channel operations; collect
+  partial readback until the required fields arrive, and release failed sessions.
+- Scale brightness and evaluate unchanged channel requests after connecting,
+  preserving the freshly reported colour mix and the switch-to-Manual behaviour.
+- Preserve successful mode/power commands and newer readback when a later effect
+  command fails; report contradictory Manual-mode readback rather than continuing.
+- Use Home Assistant's configured timezone for fixture clocks and schedule display.
+- Keep channel layouts stable across partial notifications, save the resolved
+  physical width, and reconcile deferred/obsolete channel entities.
+- Require fresh selected-schedule readback for editor conflict checking and save
+  confirmation, rather than accepting unrelated mode/power updates.
+- Refresh current mode before refusing Restore, including an already-connected
+  session whose cached Auto/Pro mode has changed outside Home Assistant.
+
 - Re-check the saved Manual bank against the fixture as currently identified,
   so a 4-channel bank on an unidentified FACEBD fixture becomes restorable once
   readback resolves the channel count, instead of being dropped at startup.

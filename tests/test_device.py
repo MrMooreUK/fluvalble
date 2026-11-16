@@ -1425,6 +1425,7 @@ def test_master_brightness_writes_every_scaled_channel():
 
 async def _async_test_master_brightness_writes_every_scaled_channel():
     device = _make_device(name="AquaSky2.0_Test", model="AquaSky 2.0 Bluetooth LED", product_id=328)
+    device._async_prepare_command = AsyncMock(return_value=True)
     device.values.update(
         {
             "channel_1": 20,
@@ -2290,11 +2291,11 @@ async def _async_test_facebd_clock_action_reports_timezone_write_failure():
     assert device.diagnostics["last_error"] == "Unable to sync lamp timezone"
 
 
-def test_set_channels_skips_unchanged_targets_before_ble_connect():
-    asyncio.run(_async_test_set_channels_skips_unchanged_targets_before_ble_connect())
+def test_set_channels_skips_unchanged_targets_after_ble_connect():
+    asyncio.run(_async_test_set_channels_skips_unchanged_targets_after_ble_connect())
 
 
-async def _async_test_set_channels_skips_unchanged_targets_before_ble_connect():
+async def _async_test_set_channels_skips_unchanged_targets_after_ble_connect():
     device = _make_device()
     device.values["led_on_off"] = True
     device.values.update(
@@ -2315,7 +2316,7 @@ async def _async_test_set_channels_skips_unchanged_targets_before_ble_connect():
             "channel_4": 40,
         }
     )
-    device._async_prepare_command.assert_not_called()
+    device._async_prepare_command.assert_awaited_once()
 
 
 def test_set_channels_switches_to_manual_before_write():

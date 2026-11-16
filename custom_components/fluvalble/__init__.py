@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 import inspect
 import logging
 from dataclasses import dataclass, field
@@ -89,6 +90,8 @@ class FluvalRuntimeData:
     device: Device | None = None
     pending_add_entities: dict[Platform, Any] = field(default_factory=dict)
     background_tasks: set[asyncio.Task] = field(default_factory=set, repr=False)
+    unload_callbacks: list[Callable[[], None]] = field(default_factory=list, repr=False)
+    unloading: bool = False
 
 
 if TYPE_CHECKING:
@@ -396,7 +399,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         for platform, add_fn in runtime.pending_add_entities.items():
             factory = factories.get(platform)
             if factory:
-                add_fn(factory(device))
+                if platform == Platform.NUMBER:
+                    from .number import setup_channel_entities
+
+                    setup_channel_entities(hass, entry, device, add_fn)
+                else:
+                    add_fn(factory(device))
         runtime.pending_add_entities.clear()
 
         _LOGGER.info("Device %s ready", mac)
@@ -947,13 +955,26 @@ def _entry_id_from_message(hass: HomeAssistant, msg: dict) -> str:
 
 async def async_unload_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
     """Unload a config entry and tear down BLE / platform resources."""
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    runtime = entry_runtime_data(hass, entry)
+    if isinstance(runtime, FluvalRuntimeData):
+        runtime.unloading = True
+    try:
+        unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    except BaseException:
+        if isinstance(runtime, FluvalRuntimeData):
+            runtime.unloading = False
+        raise
     if not unload_ok:
+        if isinstance(runtime, FluvalRuntimeData):
+            runtime.unloading = False
         return False
 
     runtime = entry_runtime_data(hass, entry)
 
     if isinstance(runtime, FluvalRuntimeData):
+        for cleanup in runtime.unload_callbacks:
+            cleanup()
+        runtime.unload_callbacks.clear()
         tasks = list(runtime.background_tasks)
         for task in tasks:
             task.cancel()

@@ -143,6 +143,8 @@ class FluvalLight(FluvalEntity, LightEntity):
 
     async def _async_turn_on(self, **kwargs) -> None:
         """Apply one complete turn-on transaction."""
+        if not await self.device._async_prepare_command():
+            self._raise_command_error()
         requested_effect = kwargs.get(ATTR_EFFECT)
         if requested_effect == EFFECT_NONE:
             if not await self.device.async_stop_effect():
