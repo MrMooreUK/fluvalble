@@ -13,6 +13,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   so a 4-channel bank on an unidentified FACEBD fixture becomes restorable once
   readback resolves the channel count, instead of being dropped at startup.
 - Do not save an all-off write as the last Manual bank.
+- Restore last Manual settings now refuses unless the fixture is already in
+  Manual mode, and never sends a mode change.
+
+### Changed
+
+- Saving the confirmed Manual bank is debounced to one disk write after 5
+  seconds, and deleting the integration entry cancels any pending save.
 
 ## [0.0.17-4] — 2026-11-15
 

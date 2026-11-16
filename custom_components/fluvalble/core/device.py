@@ -1247,6 +1247,7 @@ class Device:
         restore_mode_on_zero: bool = False,
         remember_manual: bool = True,
         expected_manual_identity=None,
+        require_manual_mode: bool = False,
     ) -> bool:
         """Apply one channel frame inside an active command transaction."""
         self.cancel_channel_mode_restore(clear_saved_mode=not restore_mode_on_zero)
@@ -1272,6 +1273,9 @@ class Device:
             self._set_diagnostic_error(
                 "manual_settings_mismatch", "Saved Manual settings do not match this fixture profile"
             )
+            return False
+        # Reconnecting can refresh the mode, so re-check before any write.
+        if require_manual_mode and not self._manual_mode_for_restore():
             return False
 
         old_values = dict(self.values)
@@ -1360,6 +1364,15 @@ class Device:
         bank = self._current_manual_bank()
         return None if bank is None else bank[0]
 
+    def _manual_mode_for_restore(self) -> bool:
+        if self.values.get("mode") == "manual":
+            return True
+        self._set_diagnostic_error(
+            "manual_restore_requires_manual_mode",
+            "Switch the fixture to Manual mode before restoring saved Manual settings",
+        )
+        return False
+
     def has_last_manual_settings(self) -> bool:
         return self._current_manual_bank() is not None
 
@@ -1399,17 +1412,11 @@ class Device:
             self.diagnostics["last_manual_settings_status"] = "unconfirmed"
             return
         snapshot = dict(expected)
-        identity = self._manual_identity()
-        try:
-            await persist(snapshot)
-        except Exception:
-            # A storage failure must not turn a successful light command into
-            # a reported BLE failure or destroy the previously saved bank.
-            _LOGGER.warning("Unable to save confirmed Fluval Manual settings", exc_info=True)
-            self.diagnostics["last_manual_settings_status"] = "storage_failed"
-            return
         self._session_manual_settings = snapshot
-        self._session_manual_identity = identity
+        self._session_manual_identity = self._manual_identity()
+        # persist only schedules a debounced Store write, so disk errors are
+        # logged by HA later and cannot fail this command.
+        await persist(dict(snapshot))
         self.diagnostics["last_manual_settings_status"] = "saved"
 
     @serialized_device_command
@@ -1420,9 +1427,17 @@ class Device:
             self._set_diagnostic_error("manual_settings_unavailable", "No confirmed Manual settings have been saved")
             return False
         snapshot, identity = bank
+        # Restore never changes mode: switching to Manual would stop the
+        # fixture's schedule, so the user must choose Manual first.
+        if not self._manual_mode_for_restore():
+            return False
         revisions = dict(self._control_readback_revision)
         if not await self._async_set_channels_now(
-            snapshot, force=True, remember_manual=False, expected_manual_identity=identity
+            snapshot,
+            force=True,
+            remember_manual=False,
+            expected_manual_identity=identity,
+            require_manual_mode=True,
         ):
             return False
         try:

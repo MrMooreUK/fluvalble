@@ -210,8 +210,10 @@ or expanding the schedule card does not.
 After a successful HA Manual-channel change, the integration saves the complete
 bank only when fresh fixture readback confirms it. **Restore last Manual
 settings** explicitly reapplies that bank using the native Manual commands.
-It may change the operating mode and turn the light on or off to match those
-levels. The button is unavailable until a confirmed bank has been saved.
+Restore only works in Manual mode: it never switches the mode, so switch the
+fixture to Manual first or it refuses without sending anything. It may turn
+the light on or off to match the saved levels. The button is unavailable until
+a confirmed bank has been saved.
 
 Saved settings survive reloads and restarts, separately from the current
 slider values. Physical-button changes, Auto/Pro reports, failed writes and
