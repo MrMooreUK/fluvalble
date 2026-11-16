@@ -207,8 +207,12 @@ class Device:
         self.values["mode"] = "manual"
         self.values["led_on_off"] = False
         self.values["effect"] = None
-        self._last_manual_settings: dict[str, int] | None = None
-        self._manual_settings_identity = None
+        # Raw stored payload, validated lazily because the channel count of an
+        # unidentified fixture can change after the first readback.
+        self._stored_manual_settings: Any = None
+        # A bank confirmed and persisted this session wins over the stored one.
+        self._session_manual_settings: dict[str, int] | None = None
+        self._session_manual_identity: tuple[Any, ...] | None = None
         self._manual_settings_save: Callable[[dict[str, int]], Awaitable[None]] | None = None
         self.firmware_version: str | None = None
         self.diagnostics: dict[str, Any] = {
@@ -1323,26 +1327,41 @@ class Device:
                 self._schedule_channel_mode_restore()
         return ok
 
-    def _manual_identity(self):
+    def _manual_identity(self) -> tuple[Any, ...]:
         return (self.mac, self.product_id, self.spectrum_profile(), tuple(self.numbers()))
 
     def configure_manual_settings(self, saved, persist) -> None:
         """Attach HA storage without connecting, writing or changing current values."""
         self._manual_settings_save = persist
+        self._stored_manual_settings = saved
+
+    def _current_manual_bank(self) -> tuple[dict[str, int], tuple[Any, ...]] | None:
+        """Return the saved bank and identity only if it fits the fixture as identified now."""
+        identity = self._manual_identity()
+        if self._session_manual_settings is not None:
+            if self._session_manual_identity != identity:
+                return None
+            return dict(self._session_manual_settings), identity
+        saved = self._stored_manual_settings
         if not isinstance(saved, dict) or saved.get("mac") != self.mac or saved.get("product_id") != self.product_id:
-            return
+            return None
         if saved.get("spectrum_profile") != self.spectrum_profile():
-            return
+            return None
+        channels = identity[3]
         levels = saved.get("levels")
-        if not isinstance(levels, list) or len(levels) != len(self.numbers()):
-            return
+        if not isinstance(levels, list) or len(levels) != len(channels):
+            return None
         if any(type(value) is not int or not 0 <= value <= 100 for value in levels):
-            return
-        self._last_manual_settings = dict(zip(self.numbers(), levels, strict=True))
-        self._manual_settings_identity = self._manual_identity()
+            return None
+        return dict(zip(channels, levels, strict=True)), identity
+
+    @property
+    def _last_manual_settings(self) -> dict[str, int] | None:
+        bank = self._current_manual_bank()
+        return None if bank is None else bank[0]
 
     def has_last_manual_settings(self) -> bool:
-        return self._last_manual_settings is not None and self._manual_settings_identity == self._manual_identity()
+        return self._current_manual_bank() is not None
 
     async def _async_confirm_manual(self, expected, revisions) -> bool:
         """Require a complete fresh Manual report, not optimistic command values."""
@@ -1368,6 +1387,10 @@ class Device:
         persist = self._manual_settings_save
         if persist is None:
             return
+        if not any(expected.values()):
+            # All-off is not a useful bank to restore; keep the previous one.
+            self.diagnostics["last_manual_settings_status"] = "skipped_all_off"
+            return
         try:
             confirmed = await self._async_confirm_manual(expected, revisions)
         except (TimeoutError, BleakError):
@@ -1385,21 +1408,21 @@ class Device:
             _LOGGER.warning("Unable to save confirmed Fluval Manual settings", exc_info=True)
             self.diagnostics["last_manual_settings_status"] = "storage_failed"
             return
-        self._last_manual_settings = snapshot
-        self._manual_settings_identity = identity
+        self._session_manual_settings = snapshot
+        self._session_manual_identity = identity
         self.diagnostics["last_manual_settings_status"] = "saved"
 
     @serialized_device_command
     async def async_restore_last_manual_settings(self) -> bool:
         """Explicitly replay the saved full bank using existing native commands."""
-        if not self.has_last_manual_settings():
+        bank = self._current_manual_bank()
+        if bank is None:
             self._set_diagnostic_error("manual_settings_unavailable", "No confirmed Manual settings have been saved")
             return False
-        assert self._last_manual_settings is not None
-        snapshot = dict(self._last_manual_settings)
+        snapshot, identity = bank
         revisions = dict(self._control_readback_revision)
         if not await self._async_set_channels_now(
-            snapshot, force=True, remember_manual=False, expected_manual_identity=self._manual_settings_identity
+            snapshot, force=True, remember_manual=False, expected_manual_identity=identity
         ):
             return False
         try:

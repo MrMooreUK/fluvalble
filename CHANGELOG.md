@@ -7,6 +7,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Re-check the saved Manual bank against the fixture as currently identified,
+  so a 4-channel bank on an unidentified FACEBD fixture becomes restorable once
+  readback resolves the channel count, instead of being dropped at startup.
+- Do not save an all-off write as the last Manual bank.
+
 ## [0.0.17-4] — 2026-11-15
 
 ### Added
