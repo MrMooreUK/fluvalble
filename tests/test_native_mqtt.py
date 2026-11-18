@@ -404,3 +404,86 @@ async def test_native_controls_use_rgbw_channels_and_native_schedule_packets(bro
         assert bank["channel_1"] == 61
     finally:
         await d.client.stop()
+
+
+@pytest.mark.asyncio
+async def test_publish_timeout_returns_command_failure(broker):
+    c = client()
+    assert await c.ensure_connected()
+
+    async def hang(*args, **kwargs):
+        await asyncio.sleep(10)
+
+    broker.async_publish.side_effect = hang
+    try:
+        assert not await asyncio.wait_for(c.send_now(protocol.wifi_switch_packet(False), verify=False), 0.3)
+        assert "Timed out publishing" in c.last_error
+        assert not c._online
+    finally:
+        await c.stop()
+
+
+@pytest.mark.asyncio
+async def test_mqtt_runtime_removal_is_reported_as_offline(broker):
+    c = client()
+    assert await c.ensure_connected()
+    broker.is_connected.side_effect = KeyError("mqtt")
+    try:
+        assert not await c.send_now(protocol.wifi_switch_packet(False))
+        assert not c._online
+    finally:
+        await c.stop()
+
+
+@pytest.mark.asyncio
+async def test_native_disconnect_does_not_create_ble_reachability_timer(broker):
+    d = MqttDevice("Tank", hass=MagicMock(), config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC})
+    d._schedule_reachability_refresh = MagicMock(side_effect=AssertionError("No BLE grace timer"))
+    assert await d.client.ensure_connected()
+    await d.client.stop()
+    assert not d.is_reachable()
+    assert d._reachability_unsub is None
+
+
+@pytest.mark.asyncio
+async def test_provisioning_does_not_accept_old_broker_notification(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "scripts/provision_native_mqtt.py"
+    spec = importlib.util.spec_from_file_location("provision_native_mqtt", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    class FakeBleakClient:
+        def __init__(self, *args, **kwargs):
+            self.services = SimpleNamespace(get_characteristic=lambda _: SimpleNamespace(properties=["write"]))
+            self.frame = bytearray()
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return False
+
+        async def start_notify(self, _uuid, callback):
+            self.callback = callback
+
+        async def write_gatt_char(self, _char, data, **kwargs):
+            self.frame.extend(data)
+            if self.frame.endswith(b";;"):
+                if self.frame.startswith(b"ssid:"):
+                    self.callback(None, b"ip:192.0.2.1;;mqtt:connected;;")
+                self.frame.clear()
+
+    monkeypatch.setattr(sys.modules["bleak"], "BleakClient", FakeBleakClient)
+    args = SimpleNamespace(ble_address=BLE_MAC)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(
+            module.provision(
+                args,
+                b"ssid:Tank;password:x;timeoffset:0;;",
+                b"host:mqtt.lan;port:1883;clientid:tank;username:;password:;;",
+            ),
+            0.1,
+        )

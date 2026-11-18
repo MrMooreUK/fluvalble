@@ -127,6 +127,15 @@ class MqttClient(Client):
                 self.status_callback(False)
             self._state_update_event.set()
 
+    def _broker_connected(self) -> bool:
+        """Broker unload/reload can temporarily remove HA's MQTT runtime."""
+        from homeassistant.components import mqtt
+
+        try:
+            return mqtt.is_connected(self.hass)
+        except KeyError:
+            return False
+
     @callback
     def _message(self, message: Any) -> None:
         # Retained state cannot prove a fixture is currently online.
@@ -139,7 +148,7 @@ class MqttClient(Client):
     async def _publish(self, kind: str, packet: bytes | None = None) -> None:
         from homeassistant.components import mqtt
 
-        if self._stopping or not mqtt.is_connected(self.hass):
+        if self._stopping or not self._broker_connected():
             raise ConnectionError("Home Assistant MQTT broker is disconnected")
         self._request_id = (self._request_id + 1) % 2147483647
         payload = f"id:{self._request_id};type:{kind}"
@@ -183,9 +192,7 @@ class MqttClient(Client):
                         self._state_update_event.clear()
                         if self._stopping:
                             return False
-                        from homeassistant.components import mqtt
-
-                        if not mqtt.is_connected(self.hass):
+                        if not self._broker_connected():
                             raise ConnectionError("Home Assistant MQTT broker is disconnected")
                 if self._stopping:
                     return False
@@ -218,8 +225,8 @@ class MqttClient(Client):
                         return False
                 self.last_error = None
                 return True
-            except ConnectionError as err:
-                self.last_error = str(err)
+            except (ConnectionError, TimeoutError) as err:
+                self.last_error = str(err) or "Timed out publishing the fixture command to local MQTT"
                 self._broker_status(False)
                 return False
 

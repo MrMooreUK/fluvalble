@@ -27,6 +27,19 @@ class MqttDevice(Device):
             return {"is_on": self.connected, "extra": {"transport": "local_mqtt"}}
         return super().attribute(attr)
 
+    def set_connected(self, connected: bool):
+        """MQTT availability is live readback, not a BLE advertising grace timer."""
+        self.connected = connected
+        if connected:
+            self.touch_seen(notify=False)
+        else:
+            self._clock_synced = False
+            self._clock_sync_started = False
+        for handler in self.updates_connect:
+            handler()
+        for handler in self.updates_component:
+            handler()
+
     async def _async_ensure_client(self) -> bool:
         return self.client is not None
 

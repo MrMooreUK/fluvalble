@@ -73,6 +73,11 @@ async def provision(args, wifi: bytes, broker: bytes) -> None:
 
         await write(wifi)
         await wait_for("wifi")
+        # Do not mistake an old broker's queued connection notification for
+        # confirmation of the configuration we are about to send.
+        while not notifications.empty():
+            notifications.get_nowait()
+        buffer.clear()
         await write(broker)
         await wait_for("mqtt")
         print("Fixture reported connection to the selected broker. Verify its uplink topic before adding it to HA.")

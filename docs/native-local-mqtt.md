@@ -65,6 +65,9 @@ as part of this implementation. Do not provision an unattended aquarium first.
 
 FluvalConnect **1.0.15 / versionCode 110**:
 
+The inspected base APK has SHA-256
+`9c3cecf8edebff06ac945d7431b078813af9d4fd86ba9fba40453dc612be3415`.
+
 | Source | Evidence |
 | --- | --- |
 | `LightDetailActivity.initWifiMqtt`, lines 1848–1865 | `cyd/dev/Fluval/Fluval-532/<UPPERCASE_WIFI_MAC_NO_COLONS>/downlink` and `/uplink` |
@@ -93,8 +96,9 @@ The ESP32-C3 application was inspected statically, not flashed or emulated:
   `0x4200830c` consumes a supplied OTA URL. This integration never issues OTA,
   delete, cloud-login, DNS-redirection or firmware-update commands.
 
-Only product 532 is enabled for native MQTT. Other Wi-Fi products need their
-own catalogue/firmware evidence before broadening this transport.
+`DeviceDataKt.wifiLightList` is `0532`: this APK identifies AquaSky 3.0 as
+the native Wi-Fi light family. Only product 532 is enabled for native MQTT;
+Bluetooth Mesh networking is outside this change.
 
 ## Runtime behaviour and validation boundary
 
