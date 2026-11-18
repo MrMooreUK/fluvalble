@@ -9,13 +9,3 @@ updates:
       github-actions:
         patterns:
           - "*"
-
-  - package-ecosystem: pip
-    directory: "/"
-    schedule:
-      interval: weekly
-    versioning-strategy: increase-if-necessary
-    groups:
-      python-development-dependencies:
-        patterns:
-          - "*"
