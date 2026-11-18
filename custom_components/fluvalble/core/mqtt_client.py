@@ -8,6 +8,7 @@ Only the configured Home Assistant broker is used; no vendor credentials.
 import asyncio
 from collections.abc import Callable
 import contextlib
+import logging
 import re
 from typing import Any
 
@@ -23,6 +24,7 @@ CONF_WIFI_MAC = "wifi_mac"
 NATIVE_MQTT_PRODUCT_ID = 532
 MAX_MESSAGE_BYTES = 16384
 STATE_TIMEOUT = 5.0
+_LOGGER = logging.getLogger(__name__)
 
 
 def native_topic(wifi_mac: str) -> str:
@@ -102,6 +104,7 @@ class MqttClient(Client):
         self._connect_lock = asyncio.Lock()
         self._unsubscribers: list[Callable] = []
         self._monitor: asyncio.Task | None = None
+        self._refresh_requested = asyncio.Event()
         self._stopping = False
         self._online = False
         self._request_id = 0
@@ -116,11 +119,15 @@ class MqttClient(Client):
             await mqtt.async_subscribe(self.hass, self.topic + "/uplink", self._message, qos=0, encoding=None)
         )
         self._unsubscribers.append(mqtt.async_subscribe_connection_status(self.hass, self._broker_status))
-        self._monitor = asyncio.create_task(self._poll())
+        self._monitor = self.hass.async_create_background_task(self._poll(), "Fluval local MQTT polling")
 
     @callback
     def _broker_status(self, connected: bool) -> None:
-        if not connected:
+        if self._stopping:
+            return
+        if connected:
+            self._refresh_requested.set()
+        else:
             self._online = False
             self._observed_state.clear()
             if self.status_callback:
@@ -231,13 +238,18 @@ class MqttClient(Client):
                 return False
 
     async def _poll(self) -> None:
-        try:
-            while not self._stopping:
-                await asyncio.sleep(30)
+        while not self._stopping:
+            with contextlib.suppress(TimeoutError):
+                async with asyncio.timeout(30):
+                    await self._refresh_requested.wait()
+            self._refresh_requested.clear()
+            try:
                 async with self._command_lock:
-                    await self.request_state(state_validator=self.state_validator)
-        except asyncio.CancelledError:
-            pass
+                    if not self._stopping:
+                        await self.request_state(state_validator=self.state_validator)
+            except Exception:
+                _LOGGER.exception("Unexpected failure polling Fluval over local MQTT")
+                self._broker_status(False)
 
     async def disconnect(self) -> None:
         await self.stop()

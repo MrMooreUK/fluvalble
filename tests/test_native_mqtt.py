@@ -61,7 +61,44 @@ def broker(monkeypatch):
 
 
 def client():
-    return MqttClient(object(), WIFI_MAC, MagicMock(), MagicMock(return_value=True), lambda state: 103 in state)
+    hass = SimpleNamespace(async_create_background_task=create_background_task)
+    return MqttClient(hass, WIFI_MAC, MagicMock(), MagicMock(return_value=True), lambda state: 103 in state)
+
+
+def create_background_task(coro, name):
+    return asyncio.create_task(coro, name=name)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unexpected_failure", [False, True])
+async def test_poll_recovers_immediately_on_broker_reconnect(broker, unexpected_failure):
+    c = client()
+    try:
+        assert await c.ensure_connected()
+        broker.is_connected.return_value = False
+        c._broker_status(False)
+        broker.is_connected.return_value = True
+        if unexpected_failure:
+            original_read = c.request_state
+            failed = asyncio.Event()
+
+            async def fail_once(**kwargs):
+                c.request_state = original_read
+                failed.set()
+                raise RuntimeError("unexpected read failure")
+
+            c.request_state = fail_once
+            c._broker_status(True)
+            await asyncio.wait_for(failed.wait(), 1)
+            assert not c._monitor.done()
+            assert not c._online
+        refreshed = asyncio.Event()
+        c.status_callback.side_effect = lambda connected: refreshed.set() if connected else None
+        c._broker_status(True)
+        await asyncio.wait_for(refreshed.wait(), 1)
+        assert c._online
+    finally:
+        await c.stop()
 
 
 def test_topic_matches_apk_not_ble_address():
@@ -209,7 +246,11 @@ async def test_native_device_never_looks_up_ble_and_keeps_entity_ids(broker, mon
         "async_ble_device_from_address",
         MagicMock(side_effect=AssertionError("No BLE lookup allowed")),
     )
-    d = MqttDevice("Tank", hass=MagicMock(), config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC})
+    d = MqttDevice(
+        "Tank",
+        hass=MagicMock(async_create_background_task=create_background_task),
+        config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC},
+    )
     try:
         assert await d._async_prepare_command()
         assert d.product_id == 532
@@ -304,6 +345,7 @@ async def test_entry_setup_reload_unload_has_no_ble_registration(broker, monkeyp
     )
     hass = SimpleNamespace(
         data={},
+        async_create_background_task=create_background_task,
         config_entries=SimpleNamespace(
             async_forward_entry_setups=AsyncMock(), async_unload_platforms=AsyncMock(return_value=True)
         ),
@@ -340,7 +382,7 @@ async def test_entry_setup_failure_leaves_no_subscription_or_task(broker, monkey
         options={},
         runtime_data=None,
     )
-    hass = SimpleNamespace(data={})
+    hass = SimpleNamespace(data={}, async_create_background_task=create_background_task)
     cleanup = MagicMock()
 
     async def storage_setup(hass, config_entry):
@@ -392,7 +434,11 @@ def test_transport_switch_disables_only_inapplicable_diagnostics(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_native_controls_use_rgbw_channels_and_native_schedule_packets(broker):
-    d = MqttDevice("Tank", hass=MagicMock(), config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC})
+    d = MqttDevice(
+        "Tank",
+        hass=MagicMock(async_create_background_task=create_background_task),
+        config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC},
+    )
     d.configure_manual_settings(None, AsyncMock())
     try:
         assert await d.async_set_channels({"channel_1": 61, "channel_2": 0, "channel_3": 83, "channel_4": 0})
@@ -437,7 +483,11 @@ async def test_mqtt_runtime_removal_is_reported_as_offline(broker):
 
 @pytest.mark.asyncio
 async def test_native_disconnect_does_not_create_ble_reachability_timer(broker):
-    d = MqttDevice("Tank", hass=MagicMock(), config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC})
+    d = MqttDevice(
+        "Tank",
+        hass=MagicMock(async_create_background_task=create_background_task),
+        config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC},
+    )
     d._schedule_reachability_refresh = MagicMock(side_effect=AssertionError("No BLE grace timer"))
     assert await d.client.ensure_connected()
     await d.client.stop()

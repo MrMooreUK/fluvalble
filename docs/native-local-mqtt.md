@@ -55,6 +55,11 @@ The firmware's reviewed saved-broker path uses **plain MQTT/TCP**, not TLS. Use
 a trusted LAN, a dedicated broker account and per-fixture ACLs; never expose
 this listener to the Internet. Give the fixture publish access to its uplink
 and subscribe access to its downlink; HA needs the reverse permissions.
+During provisioning, Wi-Fi and broker credentials cross BLE without
+application-layer encryption. Limit provisioning to a trusted setting.
+Any client allowed to publish to the fixture's uplink can spoof its state;
+restrict uplink publish permission to that fixture and downlink publish
+permission to Home Assistant.
 
 Returning HA to BLE does not restore the original cloud broker. Returning the
 fixture to official-app Wi-Fi operation requires deliberately configuring it
