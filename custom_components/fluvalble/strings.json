@@ -13,6 +13,11 @@
         },
         "description": "Enter the Bluetooth MAC address of your Fluval light (e.g. {mac_example}). You can find it in your phone's Bluetooth settings or the Fluval app."
       },
+      "local_mqtt": {
+        "title": "Native local Wi-Fi (experimental)",
+        "description": "AquaSky 3 product 532 only. Configure Home Assistant MQTT and explicitly provision the fixture to that same local broker first. Enter the separate Bluetooth and Wi-Fi addresses. Bluetooth is retained as the stable device identity, not used for control in this mode. For an existing device, change its connection in Configure instead of adding it again.",
+        "data": {"mac": "Bluetooth address (stable identity)", "wifi_mac": "Wi-Fi address (MQTT topic)", "name": "Name"}
+      },
       "confirm": {
         "description": "Do you want to set up **{name}**?"
       },
@@ -21,6 +26,7 @@
       }
     },
     "error": {
+      "mqtt_required": "Configure the MQTT integration with your local broker first.",
       "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
       "invalid_format": "Invalid MAC address format. Use AA:BB:CC:DD:EE:FF.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
@@ -32,9 +38,25 @@
   },
   "options": {
     "error": {
+      "mqtt_required": "Configure the MQTT integration with your local broker first.",
+      "invalid_format": "Enter a valid Wi-Fi MAC address.",
       "invalid_active_time": "Enter a value from 30 to 600 seconds."
     },
     "step": {
+      "connection": {
+        "title": "Fixture connection",
+        "data": {"transport": "Connection"},
+        "description": "Choose Bluetooth or native local Wi-Fi. Switching preserves entities and settings. Wi-Fi requires separate, explicit fixture provisioning to Home Assistant's local MQTT broker; this form never changes the fixture's broker."
+      },
+      "mqtt_options": {
+        "title": "Native local Wi-Fi",
+        "description": "Enter the fixture's Wi-Fi address, not its Bluetooth address. Home Assistant's configured MQTT broker is used. Fresh fixture state is read every 30 seconds. This transport is experimental pending hardware validation.",
+        "data": {"wifi_mac": "Wi-Fi address", "restore_previous_mode": "Restore previous mode after channels reach zero"}
+      },
+      "bluetooth_options": {
+        "title": "Bluetooth options",
+        "data": {"lamp_profile": "Lamp type", "ping_interval": "Keep-alive interval (seconds)", "active_time": "Active connection window (seconds)", "restore_previous_mode": "Restore previous mode after channels reach zero"}
+      },
       "init": {
         "title": "Fluval BLE options",
         "data": {

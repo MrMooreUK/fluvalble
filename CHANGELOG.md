@@ -7,6 +7,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Experimental native local MQTT control for AquaSky 3.0 product 532, based on
+  FluvalConnect and official Fluval532 v10 firmware. Existing entries can switch
+  between Bluetooth and local Wi-Fi without replacing their entities or Manual
+  settings. Provisioning is a separate explicit tool; no cloud account is used.
+  Physical product-532 validation is required before treating this as supported.
+
 ### Fixed
 
 - Allow five seconds for each initial state read and retry once before releasing

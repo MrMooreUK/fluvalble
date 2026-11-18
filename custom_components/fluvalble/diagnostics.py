@@ -39,6 +39,7 @@ TO_REDACT = {
     "source_name",
     "title",
     "unique_id",
+    "wifi_mac",
 }
 
 

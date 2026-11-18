@@ -1,0 +1,124 @@
+# Native local Wi-Fi (experimental)
+
+This is a direct fixture-to-broker transport for **AquaSky 3.0, product 532**.
+It is not cloud MQTT, an ESP32 BLE bridge, or Wi-Fi support for Plant 3.0.
+No BLE operational command bytes, encryption, or existing colour translations
+are changed. Home Assistant's MQTT integration owns the broker connection.
+There are no new integration runtime requirements or minimum-HA-version changes.
+
+## Switching an existing fixture
+
+1. Configure Home Assistant's MQTT integration with a **local** broker reachable
+   by both HA and the fixture. This integration does not install a broker.
+2. Explicitly provision the fixture to that broker (below). This can replace its
+   vendor broker configuration and interrupt Fluval Connect Wi-Fi access.
+3. In the existing Fluval entry, choose **Configure → Fixture connection → Local
+   Wi-Fi**, then enter the fixture's **Wi-Fi MAC**, not its BLE address.
+4. The entry reloads using local MQTT. Its original Bluetooth address remains
+   the stable entity/storage identity. No second device should be added.
+5. To use BLE again, choose **Bluetooth** in the same form. This changes only HA's
+   selected transport, not the fixture's saved broker or network credentials.
+
+New entries collect both identities for the same reason. Do not derive one MAC
+from the other: use the actual Wi-Fi identity/topic reported by the fixture.
+Home Assistant and the fixture must use the **same broker**. There is no host or
+cloud-account password field in the integration; HA retains its own broker login.
+
+## Explicit provisioning tool
+
+The standalone `scripts/provision_native_mqtt.py` tool is not run by setup,
+reload, discovery or control. Run it only with explicit authorization and a
+product-532 fixture available for validation. It requires a Python environment
+with Bleak and access to a Bluetooth adapter near the fixture. An HA ESPHome
+proxy is not automatically a local Bleak adapter for this standalone tool.
+
+```sh
+python scripts/provision_native_mqtt.py \
+  --ble-address AA:BB:CC:DD:EE:01 \
+  --ssid AquariumNetwork \
+  --broker mqtt.lan --port 1883 \
+  --client-id aquarium-532 --username aquarium \
+  --confirm-broker-change
+```
+
+Passwords are prompted without echo, not passed in argv or written to disk.
+The tool waits for `ip:...;;`, then `mqtt:connected;;`. It does not print raw
+firmware responses, which could contain credentials, and does not flash firmware.
+If the fixture reports its Wi-Fi identity it is shown; otherwise identify its
+exact native uplink topic on your broker. Success here means only the fixture
+reported a broker connection, not that lighting control has been validated.
+
+The tool deliberately rejects non-ASCII fields and `:`/`;` delimiters rather than
+inventing an escaping scheme absent from the recovered parser. Tool bounds are
+conservative; they are not claims about every firmware's buffer capacities.
+The firmware's reviewed saved-broker path uses **plain MQTT/TCP**, not TLS. Use
+a trusted LAN, a dedicated broker account and per-fixture ACLs; never expose
+this listener to the Internet. Give the fixture publish access to its uplink
+and subscribe access to its downlink; HA needs the reverse permissions.
+
+Returning HA to BLE does not restore the original cloud broker. Returning the
+fixture to official-app Wi-Fi operation requires deliberately configuring it
+again through the official app. That recovery path has not been hardware-tested
+as part of this implementation. Do not provision an unattended aquarium first.
+
+## Recovered protocol, not cloud emulation
+
+FluvalConnect **1.0.15 / versionCode 110**:
+
+| Source | Evidence |
+| --- | --- |
+| `LightDetailActivity.initWifiMqtt`, lines 1848–1865 | `cyd/dev/Fluval/Fluval-532/<UPPERCASE_WIFI_MAC_NO_COLONS>/downlink` and `/uplink` |
+| `LightInstructionsKxtKt`, lines 65–80 and command builders | `id:<number>;type:property_get;;` and `id:<number>;type:property_set;param:<hex CBOR>;;` |
+| `MqttHelper.nextTo532`, lines 577–590 | Native text envelope, `param` hex decoded into the shared CBOR parser |
+| `LightSettingActivity`, lines 701–773 | FACEBD80 network credentials, then configurable host/port/client ID/user/password; `ip` and `mqtt:connected` responses |
+| `BleKxtKt.sendDataToWifi`, lines 197–226 | UTF-8 frames, ATT-sized chunks, 5 ms gap, prefer write-without-response when advertised |
+
+Official **Fluval532 v10 / 1.0.10** firmware downloaded from the URL returned by
+the manufacturer's public `api/app/version/newest?productId=0532` metadata on
+both EU and US endpoints. Both regional binaries were identical:
+
+`ac7775617fbc6fe88b3f53cc8fc0e716701e559adc4b10cb3611b1486b6b3d70`
+
+The ESP32-C3 application was inspected statically, not flashed or emulated:
+
+- `0x4200ff46–0x42010098`: parser accepts broker host, port, client ID, user
+  and password, passed to initializer `0x420118e2`.
+- `0x420093b4`, `0x4200948e`, `0x42009612`: saved broker loading and NVS storage.
+- `0x4200a24a`: normal MQTT configuration; `0x420094b8` passes a null certificate
+  pointer and the `0x4200a29c` branch selects ESP-MQTT transport 1 (TCP).
+- Firmware literal `id:%lu;type:%s;%s;;` with `param:%s` establishes the exact
+  semicolon uplink grammar used here. No invented JSON protocol or vendor
+  signing credentials are required.
+- Startup `0x4200909e` configures `0.pool.ntp.org`; MQTT update handling at
+  `0x4200830c` consumes a supplied OTA URL. This integration never issues OTA,
+  delete, cloud-login, DNS-redirection or firmware-update commands.
+
+Only product 532 is enabled for native MQTT. Other Wi-Fi products need their
+own catalogue/firmware evidence before broadening this transport.
+
+## Runtime behaviour and validation boundary
+
+The adapter subscribes before reading, rejects retained/malformed/oversized
+messages as live evidence, accumulates split CBOR state, requires fresh readback
+for verified writes, and retries only initialization reads, not writes. It reads
+state every 30 seconds. Availability is based on fixture responses, not merely
+the broker being connected. Unload removes only this entry's subscriptions and
+poll task; it never disconnects HA's shared MQTT client.
+
+BLE RSSI and proxy-source entities are not fabricated. Existing rows are
+integration-disabled while on MQTT, then re-enabled when returning to BLE,
+unless the user disabled them independently. Manual settings and the hardware
+schedule editor use the same existing state machine and CBOR builders.
+
+Offline tests cover envelope validation, read/write confirmation, split maps,
+broker failure, stop during a read, identity preservation and switching. They
+do **not** prove physical behaviour. Before publishing as supported, validate:
+
+- explicit provisioning and correct Wi-Fi MAC/topic on a real product-532 light;
+- reads, power, individual channels, modes, native effects and schedules;
+- reload, broker outage/reconnect and fixture reboot persistence;
+- WAN-blocked operation and egress capture, including time behaviour;
+- switching back to BLE and deliberate official-app broker recovery.
+
+No user's fixture, Home Assistant, broker or network has been modified to
+develop or run these offline checks.
