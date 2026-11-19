@@ -14,10 +14,9 @@ Local follow-up to the 2026-09-09 product 328 (Aquasky 750mm) captures.
 - Freeze outgoing channel values before awaiting power, because incoming
   notifications can replace cached channels during that await.
 
-APK evidence: `OldLightKxtKt.createLightSwitchValueForOld` builds 6803;
-the all-zone builder supplies 6804. `ManFragment` manual channel handlers
-leave weather through channel writes, and `LightWeatherAdapter.clearSelect`
-only clears UI selection. No dedicated weather-cancel command is invented.
+App evidence: the classic power builder produces 6803; the all-zone builder
+supplies 6804. The app's Manual channel handlers leave weather through channel
+writes, and clearing the weather list only clears UI selection. No dedicated weather-cancel command is invented.
 
 Weather clearing is limited to an active Manual effect on a confirmed classic
 transport. Ordinary static Off and other transports retain their existing
