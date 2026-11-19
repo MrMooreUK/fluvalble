@@ -409,8 +409,8 @@ FluvalConnect and community reverse-engineering work, including the
 No data is sent to Fluval or any third party.
 
 Detailed product, protocol, schedule, and connection behavior is documented in
-the [technical reference](docs/technical-reference.md). Colour conversion and
-its APK sources are documented separately in
+the [technical reference](docs/technical-reference.md). Colour conversion is
+documented separately in
 [APK colour-control evidence](docs/apk-colour-evidence.md).
 
 **BLE connection lifecycle:**
