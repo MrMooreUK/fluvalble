@@ -40,7 +40,7 @@
     "error": {
       "wifi_confirmation_required": "Confirm that setup will replace the fixture’s saved Wi-Fi and broker settings.",
       "wifi_bluetooth_required": "Load this fixture in Home Assistant using Bluetooth first.",
-      "wifi_setup_failed": "Setup could not verify the fixture on Home Assistant’s MQTT broker. The fixture may have accepted some settings; check Bluetooth and broker access before retrying.",
+      "wifi_setup_failed": "Setup could not verify the fixture on Home Assistant’s MQTT broker. The fixture may already be on the new Wi-Fi network even if broker setup failed. Check Bluetooth and broker access before retrying.",
       "mqtt_required": "Configure the MQTT integration with your local broker first.",
       "invalid_format": "Enter a valid Wi-Fi MAC address.",
       "invalid_active_time": "Enter a value from 30 to 600 seconds."

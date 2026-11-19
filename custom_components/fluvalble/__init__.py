@@ -491,7 +491,8 @@ async def _async_setup_mqtt_entry(hass: HomeAssistant, entry: FluvalConfigEntry)
     try:
         attach_manual_settings = await async_manual_settings_storage(hass, entry)
         attach_manual_settings(device)
-        assert device.client is not None
+        if device.client is None:
+            raise ConfigEntryNotReady("Local MQTT fixture client is unavailable")
         if not await device.client.ensure_connected():
             raise ConfigEntryNotReady(device.client.last_error or "Fixture did not answer on local MQTT")
         _sync_connection_diagnostic_registry_entries(hass, entry, native_mqtt=True)

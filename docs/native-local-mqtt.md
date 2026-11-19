@@ -83,8 +83,7 @@ as part of this implementation. Do not provision an unattended aquarium first.
 
 FluvalConnect **1.0.15 / versionCode 110**:
 
-The inspected base APK has SHA-256
-`9c3cecf8edebff06ac945d7431b078813af9d4fd86ba9fba40453dc612be3415`.
+This is a community integration and is not affiliated with Fluval or Rolf C. Hagen.
 
 | Source | Evidence |
 | --- | --- |
@@ -94,25 +93,29 @@ The inspected base APK has SHA-256
 | `LightSettingActivity`, lines 701–773 | FACEBD80 network credentials, then configurable host/port/client ID/user/password; `ip` and `mqtt:connected` responses |
 | `BleKxtKt.sendDataToWifi`, lines 197–226 | UTF-8 frames, ATT-sized chunks, 5 ms gap, prefer write-without-response when advertised |
 
-Official **Fluval532 v10 / 1.0.10** firmware downloaded from the URL returned by
-the manufacturer's public `api/app/version/newest?productId=0532` metadata on
-both EU and US endpoints. Both regional binaries were identical:
+Static inspection of Fluval532 firmware v1.0.10 supports the saved-broker setup
+and MQTT envelope described above. The fixture uses `0.pool.ntp.org`; reliable
+clock and schedule recovery after a power cut without Internet is unverified.
+Check the fixture clock before relying on schedules after an offline reboot.
 
-`ac7775617fbc6fe88b3f53cc8fc0e716701e559adc4b10cb3611b1486b6b3d70`
+Prefer a dedicated IoT VLAN where practical. Permit the fixture to reach its
+broker and required network services; keep the MQTT listener off the Internet.
+Use dedicated accounts and exact-topic ACLs. For example, in a Mosquitto ACL
+file, substitute the fixture's uppercase Wi-Fi MAC without separators:
 
-The ESP32-C3 application was inspected statically, not flashed or emulated:
+```text
+user aquarium_fixture
+topic write cyd/dev/Fluval/Fluval-532/AABBCCDDEE02/uplink
+topic read cyd/dev/Fluval/Fluval-532/AABBCCDDEE02/downlink
 
-- `0x4200ff46–0x42010098`: parser accepts broker host, port, client ID, user
-  and password, passed to initializer `0x420118e2`.
-- `0x420093b4`, `0x4200948e`, `0x42009612`: saved broker loading and NVS storage.
-- `0x4200a24a`: normal MQTT configuration; `0x420094b8` passes a null certificate
-  pointer and the `0x4200a29c` branch selects ESP-MQTT transport 1 (TCP).
-- Firmware literal `id:%lu;type:%s;%s;;` with `param:%s` establishes the exact
-  semicolon uplink grammar used here. No invented JSON protocol or vendor
-  signing credentials are required.
-- Startup `0x4200909e` configures `0.pool.ntp.org`; MQTT update handling at
-  `0x4200830c` consumes a supplied OTA URL. This integration never issues OTA,
-  delete, cloud-login, DNS-redirection or firmware-update commands.
+user home_assistant
+topic read cyd/dev/Fluval/Fluval-532/AABBCCDDEE02/uplink
+topic write cyd/dev/Fluval/Fluval-532/AABBCCDDEE02/downlink
+```
+
+These are per-fixture rules, not a replacement for any unrelated HA ACLs.
+Clients with downlink write access can send device commands, including a
+firmware update URL. The integration does not send firmware update commands.
 
 `DeviceDataKt.wifiLightList` is `0532`: this APK identifies AquaSky 3.0 as
 the native Wi-Fi light family. Only product 532 is enabled for native MQTT;

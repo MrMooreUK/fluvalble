@@ -59,6 +59,10 @@ MANUAL_ENTRY = "__manual__"
 MQTT_ENTRY = "__local_mqtt__"
 
 
+def _mqtt_configured(hass: HomeAssistant) -> bool:
+    return any(not getattr(entry, "disabled_by", None) for entry in hass.config_entries.async_entries("mqtt"))
+
+
 def validate_active_time(value: Any) -> int:
     """Accept a bounded idle window so the app can reconnect."""
     try:
@@ -286,7 +290,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
             selected = user_input.get(CONF_MAC)
             if selected == MANUAL_ENTRY:
                 return await self.async_step_manual()
-            if selected == MQTT_ENTRY:
+            if selected == MQTT_ENTRY and _mqtt_configured(self.hass):
                 return await self.async_step_local_mqtt()
             if not isinstance(selected, str):
                 errors["base"] = "invalid_format"
@@ -309,7 +313,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
 
         self._discovered_devices = await _get_discovered_devices(self.hass)
         options = self._device_options(configured_normalized)
-        # Always retain both explicit setup routes, even without advertisements.
+        if len(options) <= 1:
+            return await self.async_step_manual()
         schema = vol.Schema({vol.Required(CONF_MAC): vol.In(options)})
         return self.async_show_form(
             step_id="user",
@@ -327,7 +332,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):  # type: ignore[call
                 continue
             options[mac] = _device_display_name(info, is_fluval=True)
         options[MANUAL_ENTRY] = "My device isn't in the list — enter MAC address manually"
-        options[MQTT_ENTRY] = "AquaSky 3 — native local Wi-Fi (experimental)"
+        if _mqtt_configured(self.hass):
+            options[MQTT_ENTRY] = "AquaSky 3 — native local Wi-Fi (experimental)"
         return options
 
     async def async_step_local_mqtt(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -422,7 +428,8 @@ class OptionsFlowHandler(OptionsFlowBase):
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Show and handle the options form."""
-        if self._config_entry().data.get("product_id") == 532:
+        entry = self._config_entry()
+        if entry.data.get("product_id") == 532 and _mqtt_configured(self.hass):
             return await self.async_step_connection(user_input)
         if user_input is not None:
             try:
@@ -436,7 +443,10 @@ class OptionsFlowHandler(OptionsFlowBase):
                     ),
                     errors={CONF_ACTIVE_TIME: "invalid_active_time"},
                 )
-            return self.async_create_entry(title="", data=user_input)
+            options = dict(user_input)
+            if entry.options.get("transport", entry.data.get("transport")) == "local_mqtt":
+                options = {**entry.options, **options, "transport": "bluetooth"}
+            return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
             step_id="init",
@@ -509,8 +519,9 @@ class OptionsFlowHandler(OptionsFlowBase):
                         user_input["broker_password"],
                     )
                     mac = await provision(self.hass, device, wifi, broker)
-                except Exception:
+                except Exception as err:
                     # Never echo submitted credentials or transport exception detail.
+                    _LOGGER.warning("Local Wi-Fi provisioning failed: %s", type(err).__name__)
                     errors["base"] = "wifi_setup_failed"
                 else:
                     return self.async_create_entry(

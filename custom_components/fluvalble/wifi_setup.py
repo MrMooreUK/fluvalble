@@ -11,13 +11,14 @@ from .core.mqtt_client import MqttClient
 from .core.mqtt_provisioning import PROVISION_UUID, provisioning_wifi_mac
 
 _LOGGER = logging.getLogger(__name__)
+BLE_SETUP_TIMEOUT = 45
 
 
 async def provision(hass: HomeAssistant, device: Device, wifi: bytes, broker: bytes) -> str:
     """Return the Wi-Fi address only after a fresh local broker read."""
     if device.product_id != 532 or not mqtt.is_connected(hass):
         raise ValueError("AquaSky 3.0 and a connected local broker are required")
-    async with device.command_transaction():
+    async with device.command_transaction(), asyncio.timeout(BLE_SETUP_TIMEOUT):
         if not await device._async_prepare_command() or device.client is None or isinstance(device.client, MqttClient):
             raise ConnectionError("Fixture is not reachable over Bluetooth")
         gatt = await device.client._ensure_client()
@@ -49,16 +50,15 @@ async def provision(hass: HomeAssistant, device: Device, wifi: bytes, broker: by
                 reports.get_nowait()
             response = "write-without-response" not in characteristic.properties
             # Use a conservative chunk size across local adapters and proxies.
-            async with asyncio.timeout(60):
-                for offset in range(0, len(frame), 20):
-                    await gatt.write_gatt_char(characteristic, frame[offset : offset + 20], response=response)
-                    await asyncio.sleep(0.005)
-                while True:
-                    report = await reports.get()
-                    if report.startswith(b"err:"):
-                        raise ConnectionError("Fixture rejected Wi-Fi or broker settings")
-                    if report.startswith(expected):
-                        return
+            for offset in range(0, len(frame), 20):
+                await gatt.write_gatt_char(characteristic, frame[offset : offset + 20], response=response)
+                await asyncio.sleep(0.005)
+            while True:
+                report = await reports.get()
+                if report.startswith(b"err:"):
+                    raise ConnectionError("Fixture rejected Wi-Fi or broker settings")
+                if report.startswith(expected):
+                    return
 
         # Keep the client's idle timer from disconnecting a provisioning write.
         async with device.client._command_lock:

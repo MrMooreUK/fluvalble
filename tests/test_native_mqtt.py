@@ -76,15 +76,17 @@ def create_background_task(coro, name):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("mqtt_responds", [True, False])
-async def test_ha_provisioning_uses_existing_gatt_and_requires_mqtt_response(broker, mqtt_responds):
-    from custom_components.fluvalble.wifi_setup import provision
+@pytest.mark.parametrize("outcome", ["success", "no_mqtt", "rejected", "timeout", "missing_characteristic"])
+async def test_ha_provisioning_uses_existing_gatt_and_requires_mqtt_response(broker, monkeypatch, outcome):
+    from custom_components.fluvalble import wifi_setup
 
     hass = SimpleNamespace(async_create_background_task=create_background_task)
     device = MqttDevice("Tank", hass=hass, config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC})
     characteristic = SimpleNamespace(properties=["write-without-response"])
     gatt = SimpleNamespace(
-        services=SimpleNamespace(get_characteristic=lambda _: characteristic),
+        services=SimpleNamespace(
+            get_characteristic=lambda _: None if outcome == "missing_characteristic" else characteristic
+        ),
         read_gatt_char=AsyncMock(return_value=f"brand:Fluval;mac:{WIFI_MAC};;".encode()),
         start_notify=AsyncMock(),
         stop_notify=AsyncMock(),
@@ -92,29 +94,63 @@ async def test_ha_provisioning_uses_existing_gatt_and_requires_mqtt_response(bro
     written = bytearray()
     wifi = wifi_frame("Tank", "test-only", 0)
     settings = broker_frame("broker.lan", 1883, "tank", "lamp", "test-only")
+    started = asyncio.Event()
+    continue_write = asyncio.Event()
 
     async def write(_characteristic, chunk, *, response):
         assert not response and len(chunk) <= 20
+        if not written and outcome == "success":
+            started.set()
+            await continue_write.wait()
         written.extend(chunk)
         receive = gatt.start_notify.call_args.args[1]
         if written == wifi:
             receive(None, b"ip:192.0.2.")
             receive(None, b"1;;")
-        elif written == wifi + settings:
+        elif written == wifi + settings and outcome == "rejected":
+            receive(None, b"err:broker;;")
+        elif written == wifi + settings and outcome != "timeout":
             receive(None, b"mqtt:connected;;")
 
     gatt.write_gatt_char = AsyncMock(side_effect=write)
     device.client = SimpleNamespace(_ensure_client=AsyncMock(return_value=gatt), _command_lock=asyncio.Lock())
     device._async_prepare_command = AsyncMock(return_value=True)
-    if mqtt_responds:
-        assert await provision(hass, device, wifi, settings) == WIFI_MAC
-    else:
+    if outcome == "success":
+
+        async def light_command():
+            async with device.command_transaction():
+                assert written == wifi + settings
+
+        setup = asyncio.create_task(wifi_setup.provision(hass, device, wifi, settings))
+        await asyncio.wait_for(started.wait(), 1)
+        command = asyncio.create_task(light_command())
+        await asyncio.sleep(0)
+        assert not command.done()
+        continue_write.set()
+        assert await asyncio.wait_for(setup, 1) == WIFI_MAC
+        await asyncio.wait_for(command, 1)
+    elif outcome == "no_mqtt":
         broker.async_publish.side_effect = None
         with pytest.raises(ConnectionError, match="did not respond"):
-            await provision(hass, device, wifi, settings)
+            await wifi_setup.provision(hass, device, wifi, settings)
+    elif outcome == "missing_characteristic":
+        with pytest.raises(ConnectionError, match="does not expose"):
+            await wifi_setup.provision(hass, device, wifi, settings)
+        assert not written
+        gatt.start_notify.assert_not_awaited()
+        broker.async_subscribe.assert_not_awaited()
+        return
+    elif outcome == "timeout":
+        monkeypatch.setattr(wifi_setup, "BLE_SETUP_TIMEOUT", 0.2)
+        with pytest.raises(TimeoutError):
+            await wifi_setup.provision(hass, device, wifi, settings)
+    else:
+        with pytest.raises(ConnectionError, match="rejected"):
+            await wifi_setup.provision(hass, device, wifi, settings)
     assert written == wifi + settings
     gatt.stop_notify.assert_awaited_once_with(characteristic)
-    broker.unsubscribe.assert_called_once()
+    assert not device.client._command_lock.locked()
+    assert broker.unsubscribe.call_count == int(outcome in {"success", "no_mqtt"})
 
 
 @pytest.mark.asyncio
@@ -315,7 +351,7 @@ async def test_native_device_never_looks_up_ble_and_keeps_entity_ids(broker, mon
 @pytest.mark.asyncio
 async def test_transport_options_preserve_entry_identity_and_settings(broker):
     flow = OptionsFlowHandler()
-    flow.hass = object()
+    flow.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: [SimpleNamespace()]))
     flow.config_entry.data = {"mac": BLE_MAC, "product_id": 532}
     flow.config_entry.options = {"active_time": 60, "lamp_profile": "aquasky3"}
     flow.async_create_entry = MagicMock(side_effect=lambda **kwargs: kwargs)
@@ -330,6 +366,30 @@ async def test_transport_options_preserve_entry_identity_and_settings(broker):
     result = await flow.async_step_bluetooth_options({"active_time": 60})
     assert result["data"]["transport"] == "bluetooth"
     assert result["data"]["wifi_mac"] == WIFI_MAC
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("entries", [[], [SimpleNamespace(disabled_by="user")]])
+async def test_ble_only_setup_and_options_keep_original_flow(monkeypatch, entries):
+    from importlib import import_module
+
+    module = import_module("custom_components.fluvalble.config_flow")
+    hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: entries))
+    flow = ConfigFlow()
+    flow.hass = hass
+    flow._async_current_entries = MagicMock(return_value=[])
+    flow.async_step_manual = AsyncMock(return_value={"step_id": "manual"})
+    monkeypatch.setattr(module, "_get_discovered_devices", AsyncMock(return_value={}))
+    assert (await flow.async_step_user())["step_id"] == "manual"
+    assert module.MQTT_ENTRY not in flow._device_options(set())
+
+    options = OptionsFlowHandler()
+    options.hass = hass
+    options.config_entry.data = {"mac": BLE_MAC, "product_id": 532}
+    options.config_entry.options = {"active_time": 60}
+    options.async_show_form = MagicMock(side_effect=lambda **kwargs: kwargs)
+    options.add_suggested_values_to_schema = MagicMock()
+    assert (await options.async_step_init())["step_id"] == "init"
 
 
 @pytest.mark.asyncio
@@ -416,7 +476,8 @@ async def test_entry_setup_reload_unload_has_no_ble_registration(broker, monkeyp
 
 
 @pytest.mark.asyncio
-async def test_entry_setup_failure_leaves_no_subscription_or_task(broker, monkeypatch):
+@pytest.mark.parametrize("missing_client", [True, False])
+async def test_entry_setup_failure_leaves_no_subscription_or_task(broker, monkeypatch, missing_client):
     import importlib
 
     integration = importlib.import_module("custom_components.fluvalble")
@@ -438,12 +499,24 @@ async def test_entry_setup_failure_leaves_no_subscription_or_task(broker, monkey
         return MagicMock()
 
     monkeypatch.setattr(storage, "async_manual_settings_storage", storage_setup)
+    if missing_client:
+        module = importlib.import_module("custom_components.fluvalble.core.mqtt_device")
+
+        class DeviceWithoutClient(MqttDevice):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.client = None
+
+        monkeypatch.setattr(module, "MqttDevice", DeviceWithoutClient)
     broker.async_publish.side_effect = None
     with pytest.raises(ConfigEntryNotReady):
         await integration.async_setup_entry(hass, entry)
     assert entry.entry_id not in hass.data[integration.DOMAIN]
-    assert entry.runtime_data.device.client._monitor is None
-    broker.unsubscribe.assert_called_once()
+    if not missing_client:
+        assert entry.runtime_data.device.client._monitor is None
+        broker.unsubscribe.assert_called_once()
+    else:
+        broker.async_subscribe.assert_not_awaited()
     cleanup.assert_called_once()
 
 

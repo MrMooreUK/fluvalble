@@ -14,8 +14,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   between Bluetooth and local Wi-Fi without replacing their entities or Manual
   settings. Provisioning is a separate explicit tool; no cloud account is used.
   Physical product-532 validation is required before treating this as supported.
-- Manual Bluetooth setup remains available from the device picker even when no
-  fixtures are discovered. AquaSky 3.0 options now start with a connection picker.
+- When MQTT is configured, the device picker includes a local Wi-Fi setup route
+  even without Bluetooth discoveries, and AquaSky 3.0 options include a
+  connection picker. Bluetooth-only installs retain the original setup flow.
 
 ### Fixed
 
