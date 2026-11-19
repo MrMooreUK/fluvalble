@@ -16,7 +16,6 @@ from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 
 from . import protocol
-from .client import Client
 
 CONF_TRANSPORT = "transport"
 TRANSPORT_MQTT = "local_mqtt"
@@ -69,35 +68,29 @@ def decode_uplink(payload: str | bytes) -> bytes | None:
         return None
 
 
-class MqttClient(Client):
-    """Device-compatible client without BLE initialization or GATT calls.
-
-    Client inheritance reuses only its pure state decoder/comparison helpers.
-    All I/O, lifecycle and request serialization are implemented here.
-    """
+class MqttClient:
+    """Independent MQTT transport, sharing only wire helpers with BLE."""
 
     def __init__(
         self, hass: Any, wifi_mac: str, status_callback: Callable, update_callback: Callable, state_validator: Callable
     ) -> None:
-        # Deliberately do not invoke Client.__init__: it starts a BLE connection.
         self.hass = hass
         self.topic = native_topic(wifi_mac)
-        self.status_callback = status_callback
+        self.status_callback: Callable[[bool], None] | None = status_callback
         self.update_callback = update_callback
         self.state_validator = state_validator
-        self.device = None
         self.raw_facebd = self.wifi_facebd = True
         self.spp_transport = False
         self.profile = "native_local_mqtt"
         self.command_write_uuid = None
-        self.notify_uuids = []
-        self.last_error = None
-        self.last_write_targets = []
+        self.notify_uuids: list[str] = []
+        self.last_error: str | None = None
+        self.last_write_targets: list[str] = []
         self.last_write_verified = False
-        self.last_expected_state = {}
-        self.last_confirmed_state = {}
-        self.last_verification_mismatches = {}
-        self._observed_state = {}
+        self.last_expected_state: dict[int, object] = {}
+        self.last_confirmed_state: dict[int, object] = {}
+        self.last_verification_mismatches: dict[int, dict[str, object]] = {}
+        self._observed_state: dict[int, object] = {}
         self._state_update_event = asyncio.Event()
         self._command_lock = asyncio.Lock()
         self._read_lock = asyncio.Lock()
@@ -150,7 +143,19 @@ class MqttClient(Client):
             return
         packet = decode_uplink(message.payload)
         if packet is not None:
-            self._dispatch_update(packet)
+            state = protocol.decode_cbor_map(packet)
+            if state and self.update_callback(packet):
+                self._observed_state.update(state)
+                self.last_confirmed_state = self.observed_state
+                self._state_update_event.set()
+
+    @property
+    def observed_state(self) -> dict[int, object]:
+        return dict(self._observed_state)
+
+    def _state_matches(self, expected_state: dict[int, object] | None) -> bool:
+        self.last_verification_mismatches = protocol.state_mismatches(self._observed_state, expected_state)
+        return not self.last_verification_mismatches
 
     async def _publish(self, kind: str, packet: bytes | None = None) -> None:
         from homeassistant.components import mqtt

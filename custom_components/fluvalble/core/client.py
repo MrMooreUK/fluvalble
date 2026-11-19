@@ -733,19 +733,8 @@ class Client:
 
     def _state_matches(self, expected_state: dict[int, object] | None) -> bool:
         """Compare requested FACEBD values with state returned by the lamp."""
-        if not expected_state:
-            self.last_verification_mismatches = {}
-            return True
-        mismatches = {}
-        for key, expected in expected_state.items():
-            confirmed = self._observed_state.get(key)
-            if type(confirmed) is not type(expected) or confirmed != expected:
-                mismatches[key] = {
-                    "expected": expected,
-                    "confirmed": confirmed,
-                }
-        self.last_verification_mismatches = mismatches
-        return not mismatches
+        self.last_verification_mismatches = protocol.state_mismatches(self._observed_state, expected_state)
+        return not self.last_verification_mismatches
 
     def _command_gap(self) -> float:
         """Return the inter-command delay for the resolved GATT transport."""

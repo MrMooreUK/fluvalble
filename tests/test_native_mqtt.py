@@ -65,6 +65,12 @@ def client():
     return MqttClient(hass, WIFI_MAC, MagicMock(), MagicMock(return_value=True), lambda state: 103 in state)
 
 
+def test_mqtt_transport_does_not_inherit_ble_lifecycle():
+    from custom_components.fluvalble.core.client import Client
+
+    assert not issubclass(MqttClient, Client)
+
+
 def create_background_task(coro, name):
     return asyncio.create_task(coro, name=name)
 

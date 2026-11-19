@@ -18,7 +18,7 @@ async def provision(hass: HomeAssistant, device: Device, wifi: bytes, broker: by
     if device.product_id != 532 or not mqtt.is_connected(hass):
         raise ValueError("AquaSky 3.0 and a connected local broker are required")
     async with device.command_transaction():
-        if not await device._async_prepare_command() or device.client is None:
+        if not await device._async_prepare_command() or device.client is None or isinstance(device.client, MqttClient):
             raise ConnectionError("Fixture is not reachable over Bluetooth")
         gatt = await device.client._ensure_client()
         characteristic = gatt.services.get_characteristic(PROVISION_UUID)
