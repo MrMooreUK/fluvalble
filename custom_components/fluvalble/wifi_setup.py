@@ -77,6 +77,9 @@ async def provision(hass: HomeAssistant, device: Device, wifi: bytes, broker: by
                             await gatt.stop_notify(characteristic)
                             if restore_state_notify:
                                 await gatt.start_notify(characteristic, ble.notify_callback)
+                except asyncio.CancelledError:
+                    await asyncio.shield(ble._safe_disconnect())
+                    raise
                 except Exception:
                     # Never keep a session that might no longer deliver state.
                     _LOGGER.debug("Reconnecting BLE after provisioning notification cleanup failed")

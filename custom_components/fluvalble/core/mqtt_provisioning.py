@@ -9,17 +9,21 @@ import re
 PROVISION_UUID = "facebd80-7261-6262-6974-696f74626c65"
 
 
+class InvalidProvisioningField(ValueError):
+    """A field cannot be represented in the fixture's provisioning format."""
+
+
 def _field(value: str, *, maximum: int, empty: bool = False) -> str:
     """Reject delimiters/control bytes; don't interpolate arbitrary config text."""
     if not isinstance(value, str) or (not value and not empty):
-        raise ValueError("A nonempty configuration field is required")
+        raise InvalidProvisioningField("A nonempty configuration field is required")
     if len(value) > maximum or any(not 32 <= ord(char) <= 126 or char in ":;" for char in value):
-        raise ValueError("Configuration fields must be bounded printable ASCII without ':' or ';'")
+        raise InvalidProvisioningField("Configuration fields must be bounded printable ASCII without ':' or ';'")
     return value
 
 
 def wifi_frame(ssid: str, password: str, offset_minutes: int) -> bytes:
-    """APK LightSettingActivity: network then local UTC offset in minutes."""
+    """Encode network credentials followed by the local UTC offset in minutes."""
     if type(offset_minutes) is not int or not -840 <= offset_minutes <= 840:
         raise ValueError("Invalid timezone offset")
     return (

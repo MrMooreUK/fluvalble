@@ -1,6 +1,7 @@
 """Offline native MQTT fixture tests; no network, broker or BLE hardware."""
 
 import asyncio
+from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -92,7 +93,17 @@ def create_background_task(coro, name):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
-    "outcome", ["success", "no_mqtt", "rejected", "timeout", "missing_characteristic", "restore_failed"]
+    "outcome",
+    [
+        "success",
+        "no_mqtt",
+        "rejected",
+        "timeout",
+        "missing_characteristic",
+        "restore_failed",
+        "cancel_stop",
+        "cancel_start",
+    ],
 )
 async def test_ha_provisioning_uses_existing_gatt_and_requires_mqtt_response(broker, monkeypatch, outcome):
     from custom_components.fluvalble import wifi_setup
@@ -143,6 +154,41 @@ async def test_ha_provisioning_uses_existing_gatt_and_requires_mqtt_response(bro
     device._async_prepare_command = AsyncMock(return_value=True)
     if outcome == "restore_failed":
         gatt.start_notify.side_effect = [None, RuntimeError("proxy lost the subscription")]
+    if outcome in {"cancel_stop", "cancel_start"}:
+        cleanup_started = asyncio.Event()
+        active_callback = device.client.notify_callback
+
+        async def start_notify(_, callback):
+            nonlocal active_callback
+            if callback is device.client.notify_callback and outcome == "cancel_start":
+                cleanup_started.set()
+                await asyncio.Future()
+            active_callback = callback
+
+        async def stop_notify(_):
+            nonlocal active_callback
+            if gatt.stop_notify.await_count == 2 and outcome == "cancel_stop":
+                cleanup_started.set()
+                await asyncio.Future()
+            active_callback = None
+
+        async def disconnect():
+            nonlocal active_callback
+            active_callback = None
+
+        gatt.start_notify.side_effect = start_notify
+        gatt.stop_notify.side_effect = stop_notify
+        device.client._safe_disconnect.side_effect = disconnect
+        setup = asyncio.create_task(wifi_setup.provision(hass, device, wifi, settings))
+        await asyncio.wait_for(cleanup_started.wait(), 1)
+        setup.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await setup
+        device.client._safe_disconnect.assert_awaited_once()
+        assert active_callback is None
+        assert not device.client._command_lock.locked()
+        broker.async_subscribe.assert_not_awaited()
+        return
     if outcome == "success":
 
         async def light_command():
@@ -431,17 +477,20 @@ async def test_ble_only_setup_and_options_keep_original_flow(monkeypatch, entrie
 
 
 def test_ble_import_does_not_load_optional_mqtt_modules():
+    conftest = Path(__file__).resolve().with_name("conftest.py")
     subprocess.run(
         [
             sys.executable,
             "-c",
-            "import runpy, sys; runpy.run_path('tests/conftest.py'); "
+            "import runpy, sys; runpy.run_path(sys.argv[1]); "
             "import custom_components.fluvalble.config_flow, custom_components.fluvalble.core.device; "
             "assert not any(name in sys.modules for name in ("
             "'homeassistant.components.mqtt', 'custom_components.fluvalble.core.mqtt_client', "
             "'custom_components.fluvalble.wifi_setup'))",
+            str(conftest),
         ],
         check=True,
+        cwd=conftest.parent.parent,
     )
 
 
@@ -455,6 +504,15 @@ async def test_mqtt_downlink_allows_only_property_messages(broker):
         ("property_get", b"x"),
         ("property_set", None),
         ("property_set;url:http", b"x"),
+        ("property_set", protocol.cbor_map({200: "http://example.invalid/fw.bin"})),
+        ("property_set", protocol.cbor_map({104: True, 201: "ota"})),
+        ("property_set", protocol.cbor_map({123: 1})),
+        ("property_set", protocol.cbor_map({104: "find"})),
+        ("property_set", protocol.cbor_map({52: "not-find"})),
+        ("property_set", protocol.cbor_map({114: ["unexpected"]})),
+        ("property_set", bytes.fromhex("a21868f41868f5")),
+        ("property_set", protocol.spp_command({2: True})),
+        ("property_set", b"not CBOR"),
     ]:
         with pytest.raises(ValueError, match="Unsupported"):
             await c._publish(kind, packet)
@@ -466,6 +524,18 @@ async def test_mqtt_downlink_allows_only_property_messages(broker):
         payloads = [call.args[2] for call in broker.async_publish.await_args_list]
         assert payloads == ["id:1;type:property_get;;", "id:2;type:property_set;param:a11868f5;;"]
         assert not any(token in payload.lower() for payload in payloads for token in ("ota", "url", "http"))
+        for packet in (
+            protocol.wifi_find_packet(),
+            protocol.wifi_dst_packet(True),
+            protocol.wifi_timezone_packet(),
+            protocol.wifi_clock_packet(),
+            protocol.wifi_mode_packet(1),
+            protocol.wifi_effect_packet(4),
+            protocol.wifi_all_zone_packet([10, 20, 30, 40, 50]),
+            protocol.cbor_map({114: [360, 420], 115: [1020, 1080], 116: 65535, 117: b"1234", 118: b"0000"}),
+            protocol.cbor_map({120: 2, 121: [360, 1080], 122: b"12340000"}),
+        ):
+            await c._publish("property_set", packet)
     finally:
         await c.stop()
 
@@ -530,6 +600,11 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
     for key in warning["data_schema"].schema:
         if str(key) in {"wifi_password", "broker_password"}:
             assert key.default() == ""
+    for field in ("ssid", "wifi_password", "broker_password"):
+        invalid = {**values, "confirm_broker_host": True, field: "bad;value"}
+        result = await flow.async_step_provision_wifi(invalid)
+        assert result["errors"] == {"base": "wifi_invalid_characters"}
+        provision.assert_not_awaited()
     result = await flow.async_step_provision_wifi({**values, "confirm_broker_host": True})
     provision.assert_awaited_once()
     assert result["data"] == {"wifi_mac": WIFI_MAC, "transport": "local_mqtt"}

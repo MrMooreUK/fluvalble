@@ -38,7 +38,10 @@ from the other: use the actual Wi-Fi identity/topic reported by the fixture.
 Home Assistant and the fixture must use the **same broker**. The provisioning
 form defaults to HA's configured broker host and asks for confirmation if a
 different hostname is entered. A different address can be valid if HA uses an
-internal alias the fixture cannot reach. Enter fixture-specific credentials;
+internal alias the fixture cannot reach. For the Home Assistant Mosquitto add-on,
+`core-mosquitto` is internal to Home Assistant; use Home Assistant's LAN address
+or a LAN hostname the fixture can resolve to reach the same broker.
+Enter fixture-specific credentials;
 HA retains its own broker login and the integration does not save passwords.
 
 ## Explicit provisioning tool

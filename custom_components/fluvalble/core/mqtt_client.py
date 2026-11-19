@@ -23,7 +23,32 @@ CONF_WIFI_MAC = "wifi_mac"
 NATIVE_MQTT_PRODUCT_ID = 532
 MAX_MESSAGE_BYTES = 16384
 STATE_TIMEOUT = 5.0
+_WRITABLE_KEYS = frozenset({52, 99, 101, 102, 103, 104, 109, *range(110, 119), 120, 121, 122})
 _LOGGER = logging.getLogger(__name__)
+
+
+def _valid_property_set(packet: bytes) -> bool:
+    """Allow only the raw CBOR maps emitted by the lighting command builders."""
+    state = protocol.decode_cbor_map(packet)
+    if not state:
+        return False
+    for key, value in state.items():
+        if type(key) is not int or key not in _WRITABLE_KEYS:
+            return False
+        if key == 52:
+            if value != "find":
+                return False
+        elif isinstance(value, list):
+            if any(type(item) is not int for item in value):
+                return False
+        elif type(value) not in (int, bool, bytes):
+            return False
+    # The builders use a canonical encoding. Reject duplicate/ambiguous keys
+    # that the shared decoder would otherwise collapse into one map entry.
+    try:
+        return protocol.cbor_map(state) == packet
+    except (ValueError, OverflowError):
+        return False
 
 
 def native_topic(wifi_mac: str) -> str:
@@ -161,7 +186,10 @@ class MqttClient:
         return not self.last_verification_mismatches
 
     async def _publish(self, kind: str, packet: bytes | None = None) -> None:
-        if not ((kind == "property_get" and packet is None) or (kind == "property_set" and packet)):
+        if not (
+            (kind == "property_get" and packet is None)
+            or (kind == "property_set" and packet and _valid_property_set(packet))
+        ):
             raise ValueError("Unsupported outbound Fluval MQTT message")
 
         from homeassistant.components import mqtt

@@ -492,7 +492,7 @@ class OptionsFlowHandler(OptionsFlowBase):
         from homeassistant.util import dt as dt_util
 
         from . import entry_runtime_data
-        from .core.mqtt_provisioning import broker_frame, wifi_frame
+        from .core.mqtt_provisioning import broker_frame, InvalidProvisioningField, wifi_frame
         from .wifi_setup import provision
 
         entry = self._config_entry()
@@ -531,6 +531,8 @@ class OptionsFlowHandler(OptionsFlowBase):
                         user_input["broker_password"],
                     )
                     mac = await provision(self.hass, device, wifi, broker)
+                except InvalidProvisioningField:
+                    errors["base"] = "wifi_invalid_characters"
                 except Exception as err:
                     # Never echo submitted credentials or transport exception detail.
                     _LOGGER.warning("Local Wi-Fi provisioning failed: %s", type(err).__name__)
