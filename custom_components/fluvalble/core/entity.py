@@ -26,7 +26,11 @@ class FluvalEntity(Entity):
         # not duplicated or orphaned across reloads.
         mac = device.mac.upper()
         self._attr_device_info = DeviceInfo(
-            connections={(CONNECTION_BLUETOOTH, mac)},
+            connections=(
+                {("mac", device.conn_info["wifi_mac"])}
+                if device.conn_info.get("transport") == "local_mqtt"
+                else {(CONNECTION_BLUETOOTH, mac)}
+            ),
             identifiers={(DOMAIN, mac)},
             manufacturer="Fluval",
             model=device.model_name,

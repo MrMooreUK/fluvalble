@@ -675,6 +675,17 @@ def decode_cbor_map(data: bytes | bytearray) -> dict[Any, Any] | None:
     return value
 
 
+def state_mismatches(
+    observed: Mapping[int, object], expected: Mapping[int, object] | None
+) -> dict[int, dict[str, object]]:
+    """Compare wire values without treating booleans and integers as equal."""
+    return {
+        key: {"expected": value, "confirmed": confirmed}
+        for key, value in (expected or {}).items()
+        if type(confirmed := observed.get(key)) is not type(value) or confirmed != value
+    }
+
+
 def decode_cbor_update(data: bytes | bytearray) -> dict[Any, Any] | None:
     """Decode a raw CBOR map or a current-controller D1/D2 frame."""
     if not data:

@@ -7,6 +7,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Experimental native local MQTT control for AquaSky 3.0 product 532, based on
+  FluvalConnect and official Fluval532 v10 firmware. Existing entries can switch
+  between Bluetooth and local Wi-Fi without replacing their entities or Manual
+  settings. Wi-Fi provisioning is an explicit setup action in Home Assistant;
+  no cloud account is used.
+  Physical product-532 validation is required before treating this as supported.
+- When MQTT is configured, the device picker includes a local Wi-Fi setup route
+  even without Bluetooth discoveries, and AquaSky 3.0 options include a
+  connection picker. Bluetooth-only installs retain the original setup flow.
+
 ### Fixed
 
 - Allow five seconds for each initial state read and retry once before releasing
