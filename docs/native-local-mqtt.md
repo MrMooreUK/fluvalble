@@ -36,11 +36,11 @@ For a fixture already provisioned to the local broker:
 New entries collect both identities for the same reason. Do not derive one MAC
 from the other: use the actual Wi-Fi identity/topic reported by the fixture.
 Home Assistant and the fixture must use the **same broker**. The provisioning
-form defaults to HA's configured broker host and asks for confirmation if a
-different hostname is entered. A different address can be valid if HA uses an
-internal alias the fixture cannot reach. For the Home Assistant Mosquitto add-on,
-`core-mosquitto` is internal to Home Assistant; use Home Assistant's LAN address
-or a LAN hostname the fixture can resolve to reach the same broker.
+form defaults to HA's configured broker host. For `core-mosquitto`,
+`localhost`, `127.0.0.1`, and `::1`, it uses HA's LAN IPv4 address instead,
+without asking for confirmation. If HA cannot determine that address, enter a
+LAN address or hostname the fixture can reach. An address other than the default
+requires confirming that it reaches the same broker.
 Enter fixture-specific credentials;
 HA retains its own broker login and the integration does not save passwords.
 

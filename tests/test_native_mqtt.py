@@ -551,7 +551,20 @@ async def test_mqtt_options_require_broker_and_valid_wifi_mac(broker):
 
 
 @pytest.mark.asyncio
-async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_confirmation(broker, monkeypatch):
+@pytest.mark.parametrize(
+    ("configured_host", "source_ip", "default_host"),
+    [
+        ("mqtt.internal", "192.0.2.10", "mqtt.internal"),
+        ("core-mosquitto", "192.0.2.10", "192.0.2.10"),
+        ("localhost", "192.0.2.10", "192.0.2.10"),
+        ("127.0.0.1", "192.0.2.10", "192.0.2.10"),
+        ("::1", "192.0.2.10", "192.0.2.10"),
+        ("core-mosquitto", "127.0.0.1", ""),
+    ],
+)
+async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_confirmation(
+    broker, monkeypatch, configured_host, source_ip, default_host
+):
     import importlib
     from types import ModuleType
 
@@ -569,6 +582,10 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
     selector.TextSelectorConfig = dict
     selector.TextSelectorType = SimpleNamespace(PASSWORD="password")
     monkeypatch.setitem(sys.modules, selector.__name__, selector)
+    network = ModuleType("homeassistant.components.network")
+    network.async_get_source_ip = AsyncMock(return_value=source_ip)
+    monkeypatch.setitem(sys.modules, network.__name__, network)
+    monkeypatch.setattr(sys.modules["homeassistant.components"], "network", network, raising=False)
     integration = importlib.import_module("custom_components.fluvalble")
     wifi_setup = importlib.import_module("custom_components.fluvalble.wifi_setup")
     device = object()
@@ -576,7 +593,7 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
     monkeypatch.setattr(integration, "entry_runtime_data", lambda *_: SimpleNamespace(device=device))
     monkeypatch.setattr(wifi_setup, "provision", provision)
     flow = OptionsFlowHandler()
-    mqtt_entry = SimpleNamespace(disabled_by=None, data={"broker": "mqtt.internal"})
+    mqtt_entry = SimpleNamespace(disabled_by=None, data={"broker": configured_host})
     flow.hass = SimpleNamespace(config_entries=SimpleNamespace(async_entries=lambda _: [mqtt_entry]))
     flow.config_entry.data = {"mac": BLE_MAC, "product_id": 532}
     flow.config_entry.options = {}
@@ -584,7 +601,8 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
     flow.async_create_entry = MagicMock(side_effect=lambda **kwargs: kwargs)
     form = await flow.async_step_provision_wifi()
     fields = {str(key): key for key in form["data_schema"].schema}
-    assert fields["broker_host"].default() == "mqtt.internal"
+    assert fields["broker_host"].default() == default_host
+    assert network.async_get_source_ip.await_count == int(configured_host != "mqtt.internal")
     values = {
         "confirm": True,
         "ssid": "Tank",
@@ -605,6 +623,12 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
         result = await flow.async_step_provision_wifi(invalid)
         assert result["errors"] == {"base": "wifi_invalid_characters"}
         provision.assert_not_awaited()
+    if default_host:
+        result = await flow.async_step_provision_wifi({**values, "broker_host": default_host})
+        provision.assert_awaited_once()
+        assert provision.await_args.args[3].startswith(f"host:{default_host};".encode())
+        assert result["data"] == {"wifi_mac": WIFI_MAC, "transport": "local_mqtt"}
+        provision.reset_mock()
     result = await flow.async_step_provision_wifi({**values, "confirm_broker_host": True})
     provision.assert_awaited_once()
     assert result["data"] == {"wifi_mac": WIFI_MAC, "transport": "local_mqtt"}

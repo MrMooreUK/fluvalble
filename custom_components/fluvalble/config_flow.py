@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ipaddress import IPv4Address
 import logging
 import re
 from typing import Any, TYPE_CHECKING
@@ -57,6 +58,7 @@ MAC_REGEX = re.compile(
 
 MANUAL_ENTRY = "__manual__"
 MQTT_ENTRY = "__local_mqtt__"
+_INTERNAL_BROKER_HOSTS = frozenset({"core-mosquitto", "localhost", "127.0.0.1", "::1"})
 
 
 def _mqtt_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
@@ -499,6 +501,20 @@ class OptionsFlowHandler(OptionsFlowBase):
         mqtt_entry = _mqtt_entry(self.hass)
         broker_data = mqtt_entry.data if mqtt_entry is not None else {}
         broker_host = broker_data.get("broker", "")
+        internal_broker = broker_host.casefold() in _INTERNAL_BROKER_HOSTS
+        if internal_broker:
+            from homeassistant.components import network
+
+            # The fixture cannot resolve HA-internal names or use IPv6 literals
+            # in its colon-delimited provisioning format.
+            broker_host = ""
+            try:
+                address = IPv4Address(await network.async_get_source_ip(self.hass))
+            except (ValueError, OSError):
+                pass
+            else:
+                if not (address.is_loopback or address.is_unspecified or address.is_link_local):
+                    broker_host = str(address)
         errors = {}
         if user_input is not None:
             runtime = entry_runtime_data(self.hass, entry)
@@ -510,7 +526,7 @@ class OptionsFlowHandler(OptionsFlowBase):
             elif mqtt_entry is None or not await mqtt.async_wait_for_mqtt_client(self.hass):
                 errors["base"] = "mqtt_required"
             elif (
-                broker_host
+                (broker_host or internal_broker)
                 and user_input["broker_host"].strip().casefold() != broker_host.casefold()
                 and not user_input.get("confirm_broker_host")
             ):
