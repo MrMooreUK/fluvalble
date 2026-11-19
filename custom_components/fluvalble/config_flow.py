@@ -510,7 +510,7 @@ class OptionsFlowHandler(OptionsFlowBase):
             broker_host = ""
             try:
                 address = IPv4Address(await network.async_get_source_ip(self.hass))
-            except (ValueError, OSError):
+            except (HomeAssistantError, ValueError, OSError):
                 pass
             else:
                 if not (address.is_loopback or address.is_unspecified or address.is_link_local):

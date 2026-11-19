@@ -560,6 +560,7 @@ async def test_mqtt_options_require_broker_and_valid_wifi_mac(broker):
         ("127.0.0.1", "192.0.2.10", "192.0.2.10"),
         ("::1", "192.0.2.10", "192.0.2.10"),
         ("core-mosquitto", "127.0.0.1", ""),
+        ("core-mosquitto", None, ""),
     ],
 )
 async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_confirmation(
@@ -567,6 +568,8 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
 ):
     import importlib
     from types import ModuleType
+
+    from homeassistant.exceptions import HomeAssistantError
 
     class Marker(str):
         def __new__(cls, name, *, default=None):
@@ -584,6 +587,8 @@ async def test_provisioning_defaults_to_ha_broker_and_requires_host_mismatch_con
     monkeypatch.setitem(sys.modules, selector.__name__, selector)
     network = ModuleType("homeassistant.components.network")
     network.async_get_source_ip = AsyncMock(return_value=source_ip)
+    if source_ip is None:
+        network.async_get_source_ip.side_effect = HomeAssistantError("No usable adapter")
     monkeypatch.setitem(sys.modules, network.__name__, network)
     monkeypatch.setattr(sys.modules["homeassistant.components"], "network", network, raising=False)
     integration = importlib.import_module("custom_components.fluvalble")
