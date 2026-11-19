@@ -8,6 +8,19 @@ There are no new integration runtime requirements or minimum-HA-version changes.
 
 ## Switching an existing fixture
 
+For first-time setup, select Bluetooth control mode in FluvalConnect and close
+the app without deleting the light. Add the fixture to HA over Bluetooth if
+needed. Choose **Configure → Fixture connection → Set up Local Wi-Fi over
+Bluetooth**. An active ESPHome Bluetooth proxy can carry the GATT connection;
+no separate computer or script is required. Enter the fixture Wi-Fi details and
+the local MQTT broker details, then confirm replacement of the fixture settings.
+HA reads the Wi-Fi address from the fixture and saves the new transport only
+after a fresh MQTT state response. A failed attempt can still have changed the
+fixture's saved settings. Rerun Wi-Fi setup in FluvalConnect to restore official
+app Wi-Fi control. Proxy provisioning and recovery still need hardware testing.
+
+For a fixture already provisioned to the local broker:
+
 1. Configure Home Assistant's MQTT integration with a **local** broker reachable
    by both HA and the fixture. This integration does not install a broker.
 2. Explicitly provision the fixture to that broker (below). This can replace its

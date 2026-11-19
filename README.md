@@ -135,6 +135,10 @@ disconnect, scan for, reconnect to, or send commands to the light.
 
 ### Native local Wi-Fi (experimental)
 
+For first-time setup, use **Configure → Fixture connection → Set up Local Wi-Fi
+over Bluetooth** on the existing Bluetooth entry. Home Assistant can use an
+active ESPHome proxy; a standalone provisioning script is not required.
+
 AquaSky 3.0 product **532** can also use its own Wi-Fi through your local MQTT
 broker, without a BLE bridge or vendor-cloud relay. This branch implements the
 protocol recovered from FluvalConnect and official product-532 v10 firmware;

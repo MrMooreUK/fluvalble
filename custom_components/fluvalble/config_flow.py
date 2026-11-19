@@ -452,6 +452,8 @@ class OptionsFlowHandler(OptionsFlowBase):
         if user_input is not None:
             if user_input["transport"] == "local_mqtt":
                 return await self.async_step_mqtt_options()
+            if user_input["transport"] == "provision_wifi":
+                return await self.async_step_provision_wifi()
             return await self.async_step_bluetooth_options()
         return self.async_show_form(
             step_id="connection",
@@ -463,8 +465,71 @@ class OptionsFlowHandler(OptionsFlowBase):
                         {
                             "bluetooth": "Bluetooth",
                             "local_mqtt": "Local Wi-Fi (MQTT, experimental)",
+                            "provision_wifi": "Set up Local Wi-Fi over Bluetooth",
                         }
                     ),
+                }
+            ),
+        )
+
+    async def async_step_provision_wifi(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Provision explicitly; never persist submitted passwords."""
+        from homeassistant.components import mqtt
+        from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
+        from homeassistant.util import dt as dt_util
+
+        from . import entry_runtime_data
+        from .core.mqtt_provisioning import broker_frame, wifi_frame
+        from .wifi_setup import provision
+
+        entry = self._config_entry()
+        errors = {}
+        if user_input is not None:
+            runtime = entry_runtime_data(self.hass, entry)
+            device = runtime.device if runtime else None
+            if not user_input.get("confirm"):
+                errors["base"] = "wifi_confirmation_required"
+            elif device is None or entry.options.get("transport", entry.data.get("transport")) == "local_mqtt":
+                errors["base"] = "wifi_bluetooth_required"
+            elif not await mqtt.async_wait_for_mqtt_client(self.hass):
+                errors["base"] = "mqtt_required"
+            else:
+                try:
+                    offset = dt_util.now().utcoffset()
+                    wifi = wifi_frame(
+                        user_input["ssid"],
+                        user_input["wifi_password"],
+                        int(offset.total_seconds() // 60) if offset else 0,
+                    )
+                    broker = broker_frame(
+                        user_input["broker_host"],
+                        user_input["broker_port"],
+                        "fluval-" + normalize_mac(entry.data[CONF_MAC]).replace(":", "").lower(),
+                        user_input["broker_user"],
+                        user_input["broker_password"],
+                    )
+                    mac = await provision(self.hass, device, wifi, broker)
+                except Exception:
+                    # Never echo submitted credentials or transport exception detail.
+                    errors["base"] = "wifi_setup_failed"
+                else:
+                    return self.async_create_entry(
+                        title="", data={**entry.options, "wifi_mac": mac, "transport": "local_mqtt"}
+                    )
+
+        password = TextSelector(TextSelectorConfig(type=TextSelectorType.PASSWORD))
+        return self.async_show_form(
+            step_id="provision_wifi",
+            errors=errors,
+            data_schema=vol.Schema(
+                {
+                    vol.Required("ssid"): str,
+                    vol.Optional("wifi_password", default=""): password,
+                    vol.Required("broker_host"): str,
+                    vol.Required("broker_port", default=1883): vol.All(int, vol.Range(min=1, max=65535)),
+                    vol.Optional("broker_user", default=""): str,
+                    vol.Optional("broker_password", default=""): password,
+                    vol.Required("confirm", default=False): bool,
                 }
             ),
         )

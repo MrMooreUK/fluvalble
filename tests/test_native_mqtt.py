@@ -70,6 +70,48 @@ def create_background_task(coro, name):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("mqtt_responds", [True, False])
+async def test_ha_provisioning_uses_existing_gatt_and_requires_mqtt_response(broker, mqtt_responds):
+    from custom_components.fluvalble.wifi_setup import provision
+
+    hass = SimpleNamespace(async_create_background_task=create_background_task)
+    device = MqttDevice("Tank", hass=hass, config_data={"mac": BLE_MAC, "wifi_mac": WIFI_MAC})
+    characteristic = SimpleNamespace(properties=["write-without-response"])
+    gatt = SimpleNamespace(
+        services=SimpleNamespace(get_characteristic=lambda _: characteristic),
+        read_gatt_char=AsyncMock(return_value=f"brand:Fluval;mac:{WIFI_MAC};;".encode()),
+        start_notify=AsyncMock(),
+        stop_notify=AsyncMock(),
+    )
+    written = bytearray()
+    wifi = wifi_frame("Tank", "test-only", 0)
+    settings = broker_frame("broker.lan", 1883, "tank", "lamp", "test-only")
+
+    async def write(_characteristic, chunk, *, response):
+        assert not response and len(chunk) <= 20
+        written.extend(chunk)
+        receive = gatt.start_notify.call_args.args[1]
+        if written == wifi:
+            receive(None, b"ip:192.0.2.")
+            receive(None, b"1;;")
+        elif written == wifi + settings:
+            receive(None, b"mqtt:connected;;")
+
+    gatt.write_gatt_char = AsyncMock(side_effect=write)
+    device.client = SimpleNamespace(_ensure_client=AsyncMock(return_value=gatt), _command_lock=asyncio.Lock())
+    device._async_prepare_command = AsyncMock(return_value=True)
+    if mqtt_responds:
+        assert await provision(hass, device, wifi, settings) == WIFI_MAC
+    else:
+        broker.async_publish.side_effect = None
+        with pytest.raises(ConnectionError, match="did not respond"):
+            await provision(hass, device, wifi, settings)
+    assert written == wifi + settings
+    gatt.stop_notify.assert_awaited_once_with(characteristic)
+    broker.unsubscribe.assert_called_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("unexpected_failure", [False, True])
 async def test_poll_recovers_immediately_on_broker_reconnect(broker, unexpected_failure):
     c = client()
