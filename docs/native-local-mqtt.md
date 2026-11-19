@@ -11,7 +11,8 @@ There are no new integration runtime requirements or minimum-HA-version changes.
 For first-time setup, select Bluetooth control mode in FluvalConnect and close
 the app without deleting the light. Add the fixture to HA over Bluetooth if
 needed. Choose **Configure → Fixture connection → Set up Local Wi-Fi over
-Bluetooth**. An active ESPHome Bluetooth proxy can carry the GATT connection;
+Bluetooth**. Use a nearby adapter or active ESPHome Bluetooth proxy with an
+encrypted ESPHome API connection to Home Assistant. Provision at close range;
 no separate computer or script is required. Enter the fixture Wi-Fi details and
 the local MQTT broker details, then confirm replacement of the fixture settings.
 HA reads the Wi-Fi address from the fixture and saves the new transport only
@@ -34,8 +35,11 @@ For a fixture already provisioned to the local broker:
 
 New entries collect both identities for the same reason. Do not derive one MAC
 from the other: use the actual Wi-Fi identity/topic reported by the fixture.
-Home Assistant and the fixture must use the **same broker**. There is no host or
-cloud-account password field in the integration; HA retains its own broker login.
+Home Assistant and the fixture must use the **same broker**. The provisioning
+form defaults to HA's configured broker host and asks for confirmation if a
+different hostname is entered. A different address can be valid if HA uses an
+internal alias the fixture cannot reach. Enter fixture-specific credentials;
+HA retains its own broker login and the integration does not save passwords.
 
 ## Explicit provisioning tool
 
@@ -81,27 +85,20 @@ as part of this implementation. Do not provision an unattended aquarium first.
 
 ## Recovered protocol, not cloud emulation
 
-FluvalConnect **1.0.15 / versionCode 110**:
+Derived from FluvalConnect 1.0.15 for interoperability.
 
 This is a community integration and is not affiliated with Fluval or Rolf C. Hagen.
 
-| Source | Evidence |
-| --- | --- |
-| `LightDetailActivity.initWifiMqtt`, lines 1848–1865 | `cyd/dev/Fluval/Fluval-532/<UPPERCASE_WIFI_MAC_NO_COLONS>/downlink` and `/uplink` |
-| `LightInstructionsKxtKt`, lines 65–80 and command builders | `id:<number>;type:property_get;;` and `id:<number>;type:property_set;param:<hex CBOR>;;` |
-| `MqttHelper.nextTo532`, lines 577–590 | Native text envelope, `param` hex decoded into the shared CBOR parser |
-| `LightSettingActivity`, lines 701–773 | FACEBD80 network credentials, then configurable host/port/client ID/user/password; `ip` and `mqtt:connected` responses |
-| `BleKxtKt.sendDataToWifi`, lines 197–226 | UTF-8 frames, ATT-sized chunks, 5 ms gap, prefer write-without-response when advertised |
-
-Static inspection of Fluval532 firmware v1.0.10 supports the saved-broker setup
-and MQTT envelope described above. The fixture uses `0.pool.ntp.org`; reliable
+The fixture uses `0.pool.ntp.org`; reliable
 clock and schedule recovery after a power cut without Internet is unverified.
 Check the fixture clock before relying on schedules after an offline reboot.
 
 Prefer a dedicated IoT VLAN where practical. Permit the fixture to reach its
-broker and required network services; keep the MQTT listener off the Internet.
-Use dedicated accounts and exact-topic ACLs. For example, in a Mosquitto ACL
-file, substitute the fixture's uppercase Wi-Fi MAC without separators:
+broker and required network services. Do not port-forward the MQTT listener
+or bridge these fixture topics to a cloud broker.
+Require authenticated clients (`allow_anonymous false` in Mosquitto) and
+dedicated accounts with exact-topic ACLs. In the Mosquitto ACL example below,
+substitute the fixture's uppercase Wi-Fi MAC without separators:
 
 ```text
 user aquarium_fixture
@@ -114,11 +111,13 @@ topic write cyd/dev/Fluval/Fluval-532/AABBCCDDEE02/downlink
 ```
 
 These are per-fixture rules, not a replacement for any unrelated HA ACLs.
-Clients with downlink write access can send device commands, including a
-firmware update URL. The integration does not send firmware update commands.
+> [!WARNING]
+> Only Home Assistant should have write access to the fixture's downlink.
+> A client with downlink write permission can submit a firmware update URL.
+> Do not assume the fixture rejects unsigned firmware. This integration does
+> not send firmware update commands.
 
-`DeviceDataKt.wifiLightList` is `0532`: this APK identifies AquaSky 3.0 as
-the native Wi-Fi light family. Only product 532 is enabled for native MQTT;
+Only AquaSky 3.0 product 532 is enabled for native MQTT;
 Bluetooth Mesh networking is outside this change.
 
 ## Runtime behaviour and validation boundary

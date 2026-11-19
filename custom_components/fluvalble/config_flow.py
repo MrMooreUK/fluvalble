@@ -59,8 +59,12 @@ MANUAL_ENTRY = "__manual__"
 MQTT_ENTRY = "__local_mqtt__"
 
 
+def _mqtt_entry(hass: HomeAssistant) -> config_entries.ConfigEntry | None:
+    return next((entry for entry in hass.config_entries.async_entries("mqtt") if not entry.disabled_by), None)
+
+
 def _mqtt_configured(hass: HomeAssistant) -> bool:
-    return any(not getattr(entry, "disabled_by", None) for entry in hass.config_entries.async_entries("mqtt"))
+    return _mqtt_entry(hass) is not None
 
 
 def validate_active_time(value: Any) -> int:
@@ -443,9 +447,7 @@ class OptionsFlowHandler(OptionsFlowBase):
                     ),
                     errors={CONF_ACTIVE_TIME: "invalid_active_time"},
                 )
-            options = dict(user_input)
-            if entry.options.get("transport", entry.data.get("transport")) == "local_mqtt":
-                options = {**entry.options, **options, "transport": "bluetooth"}
+            options = {**entry.options, **{key: value for key, value in user_input.items() if key != "transport"}}
             return self.async_create_entry(title="", data=options)
 
         return self.async_show_form(
@@ -464,7 +466,8 @@ class OptionsFlowHandler(OptionsFlowBase):
                 return await self.async_step_mqtt_options()
             if user_input["transport"] == "provision_wifi":
                 return await self.async_step_provision_wifi()
-            return await self.async_step_bluetooth_options()
+            if user_input["transport"] == "bluetooth":
+                return await self.async_step_bluetooth_options()
         return self.async_show_form(
             step_id="connection",
             data_schema=vol.Schema(
@@ -493,6 +496,9 @@ class OptionsFlowHandler(OptionsFlowBase):
         from .wifi_setup import provision
 
         entry = self._config_entry()
+        mqtt_entry = _mqtt_entry(self.hass)
+        broker_data = mqtt_entry.data if mqtt_entry is not None else {}
+        broker_host = broker_data.get("broker", "")
         errors = {}
         if user_input is not None:
             runtime = entry_runtime_data(self.hass, entry)
@@ -501,8 +507,14 @@ class OptionsFlowHandler(OptionsFlowBase):
                 errors["base"] = "wifi_confirmation_required"
             elif device is None or entry.options.get("transport", entry.data.get("transport")) == "local_mqtt":
                 errors["base"] = "wifi_bluetooth_required"
-            elif not await mqtt.async_wait_for_mqtt_client(self.hass):
+            elif mqtt_entry is None or not await mqtt.async_wait_for_mqtt_client(self.hass):
                 errors["base"] = "mqtt_required"
+            elif (
+                broker_host
+                and user_input["broker_host"].strip().casefold() != broker_host.casefold()
+                and not user_input.get("confirm_broker_host")
+            ):
+                errors["base"] = "wifi_broker_host_mismatch"
             else:
                 try:
                     offset = dt_util.now().utcoffset()
@@ -512,7 +524,7 @@ class OptionsFlowHandler(OptionsFlowBase):
                         int(offset.total_seconds() // 60) if offset else 0,
                     )
                     broker = broker_frame(
-                        user_input["broker_host"],
+                        user_input["broker_host"].strip(),
                         user_input["broker_port"],
                         "fluval-" + normalize_mac(entry.data[CONF_MAC]).replace(":", "").lower(),
                         user_input["broker_user"],
@@ -536,10 +548,11 @@ class OptionsFlowHandler(OptionsFlowBase):
                 {
                     vol.Required("ssid"): str,
                     vol.Optional("wifi_password", default=""): password,
-                    vol.Required("broker_host"): str,
+                    vol.Required("broker_host", default=user_input["broker_host"] if user_input else broker_host): str,
                     vol.Required("broker_port", default=1883): vol.All(int, vol.Range(min=1, max=65535)),
                     vol.Optional("broker_user", default=""): str,
                     vol.Optional("broker_password", default=""): password,
+                    vol.Optional("confirm_broker_host", default=False): bool,
                     vol.Required("confirm", default=False): bool,
                 }
             ),

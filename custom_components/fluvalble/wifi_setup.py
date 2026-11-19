@@ -21,7 +21,8 @@ async def provision(hass: HomeAssistant, device: Device, wifi: bytes, broker: by
     async with device.command_transaction(), asyncio.timeout(BLE_SETUP_TIMEOUT):
         if not await device._async_prepare_command() or device.client is None or isinstance(device.client, MqttClient):
             raise ConnectionError("Fixture is not reachable over Bluetooth")
-        gatt = await device.client._ensure_client()
+        ble = device.client
+        gatt = await ble._ensure_client()
         characteristic = gatt.services.get_characteristic(PROVISION_UUID)
         if characteristic is None:
             raise ConnectionError("Fixture does not expose Wi-Fi setup")
@@ -61,17 +62,25 @@ async def provision(hass: HomeAssistant, device: Device, wifi: bytes, broker: by
                     return
 
         # Keep the client's idle timer from disconnecting a provisioning write.
-        async with device.client._command_lock:
-            await asyncio.wait_for(gatt.start_notify(characteristic, receive), 10)
+        async with ble._command_lock:
+            restore_state_notify = PROVISION_UUID in ble.notify_uuids
             try:
+                if restore_state_notify:
+                    await asyncio.wait_for(gatt.stop_notify(characteristic), 5)
+                await asyncio.wait_for(gatt.start_notify(characteristic, receive), 10)
                 await exchange(wifi, b"ip:")
                 await exchange(broker, b"mqtt:connected;;")
             finally:
                 try:
-                    await asyncio.wait_for(gatt.stop_notify(characteristic), 5)
+                    if gatt.is_connected:
+                        async with asyncio.timeout(5):
+                            await gatt.stop_notify(characteristic)
+                            if restore_state_notify:
+                                await gatt.start_notify(characteristic, ble.notify_callback)
                 except Exception:
-                    # The fixture may have dropped BLE while switching transports.
-                    _LOGGER.debug("Could not remove Wi-Fi provisioning notification")
+                    # Never keep a session that might no longer deliver state.
+                    _LOGGER.debug("Reconnecting BLE after provisioning notification cleanup failed")
+                    await ble._safe_disconnect()
 
     probe = MqttClient(hass, mac, lambda _: None, lambda _: True, device._initial_state_complete)
     try:

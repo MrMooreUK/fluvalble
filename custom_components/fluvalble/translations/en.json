@@ -40,6 +40,7 @@
     "error": {
       "wifi_confirmation_required": "Confirm that setup will replace the fixture’s saved Wi-Fi and broker settings.",
       "wifi_bluetooth_required": "Load this fixture in Home Assistant using Bluetooth first.",
+      "wifi_broker_host_mismatch": "This host differs from Home Assistant’s configured MQTT broker. Confirm only if both addresses reach the same broker.",
       "wifi_setup_failed": "Setup could not verify the fixture on Home Assistant’s MQTT broker. The fixture may already be on the new Wi-Fi network even if broker setup failed. Check Bluetooth and broker access before retrying.",
       "mqtt_required": "Configure the MQTT integration with your local broker first.",
       "invalid_format": "Enter a valid Wi-Fi MAC address.",
@@ -56,6 +57,7 @@
           "broker_port": "MQTT port",
           "broker_user": "Fixture MQTT username",
           "broker_password": "Fixture MQTT password",
+          "confirm_broker_host": "I confirm the different host reaches the same MQTT broker",
           "confirm": "Replace the fixture’s saved Wi-Fi and broker settings"
         }
       },
