@@ -52,14 +52,19 @@ class FluvalScheduleColours extends HTMLElement {
       const drafts=Object.entries({...this.edits});
       if(this.mode==='professional'){
         const changes=drafts.map(([key,levels])=>({target:Number(key.split(':')[1]),levels:[...levels],...(this.timeEdits[key]===undefined?{}:{times:this.timeEdits[key]})}));
-        await this._hass.callWS({type:'fluvalble/save_schedule_colours',entry_id:entry,schedule:'professional',changes,baseline:structuredClone(this.raw.professional)});
+        const result=await this._hass.callWS({type:'fluvalble/save_schedule_colours',entry_id:entry,schedule:'professional',changes,baseline:structuredClone(this.raw.professional)});
         if(stale())return;
+        const selectedMinute=this.timeEdits[this.key(this.selected)]??this.raw.professional[this.selected].minute;
         for(const change of changes){
-          const point=this.raw.professional[change.target];
-          change.levels.forEach((v,i)=>point['channel_'+(i+1)]=v);
-          if(change.times!==undefined)point.minute=change.times;
+          if(!Array.isArray(result?.schedule)){
+            const point=this.raw.professional[change.target];
+            change.levels.forEach((v,i)=>point['channel_'+(i+1)]=v);
+            if(change.times!==undefined)point.minute=change.times;
+          }
           delete this.edits['professional:'+change.target];delete this.timeEdits['professional:'+change.target];
         }
+        if(Array.isArray(result?.schedule))this.raw.professional=result.schedule;
+        this.selected=Math.max(0,this.raw.professional.findIndex(point=>point.minute===selectedMinute));
       }else for(const [key,levels] of drafts){
         const [mode,targetValue]=key.split(':');const target=mode==='auto'?targetValue:Number(targetValue);
         const times=this.timeEdits[key];

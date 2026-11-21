@@ -136,10 +136,13 @@ async def main():
                     ...Object.fromEntries(card.fixture.channels.map((_,i)=>['channel_'+(i+1),50]))}));
                 const count=card.fixture.channels.length,calls=[];
                 card.edits={'professional:1':Array(count).fill(60),'professional:2':Array(count).fill(70)};
-                card.timeEdits={'professional:1':1000,'professional:2':1100};
-                card._hass={callWS:async message=>{calls.push(structuredClone(message));return true;}};
+                card.timeEdits={'professional:1':1150,'professional:2':1100};card.selected=1;
+                card._hass={callWS:async message=>{calls.push(structuredClone(message));return {
+                    schedule:[60,1100,1150,1200].map((minute,index)=>({minute,
+                        ...Object.fromEntries(card.fixture.channels.map((_,i)=>['channel_'+(i+1),[50,70,60,50][index]]))})),
+                };}};
                 await card.save();
-                const success={calls,minutes:card.raw.professional.map(p=>p.minute),dirty:card.dirty};
+                const success={calls,minutes:card.raw.professional.map(p=>p.minute),dirty:card.dirty,selected:card.selected};
                 card.edits={'professional:1':Array(count).fill(20)};card.timeEdits={};
                 card._hass={callWS:async ()=>{throw Error('Readback did not confirm');}};
                 await card.save();
@@ -156,10 +159,11 @@ async def main():
                     level:card.raw.professional[0].channel_1,busy:card.busy}};
             }""")
             assert len(batch["success"]["calls"]) == 1
-            assert [edit["times"] for edit in batch["success"]["calls"][0]["changes"]] == [1000, 1100]
-            assert batch["success"]["minutes"] == [60, 1000, 1100, 1200]
+            assert [edit["times"] for edit in batch["success"]["calls"][0]["changes"]] == [1150, 1100]
+            assert batch["success"]["minutes"] == [60, 1100, 1150, 1200]
+            assert batch["success"]["selected"] == 2
             assert batch["success"]["dirty"] is False
-            assert batch["failure"] == {"dirty": True, "message": "Readback did not confirm", "level": 60}, batch
+            assert batch["failure"] == {"dirty": True, "message": "Readback did not confirm", "level": 70}, batch
             assert batch["stale"] == {"message": "New fixture", "minute": 30, "level": 99, "busy": False}
             assert errors == []
             await page.close()

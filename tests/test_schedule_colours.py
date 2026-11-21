@@ -43,8 +43,7 @@ def test_issue_133_actual_spp_capture_preserves_auto_and_all_eight_pro_points():
     assert [pro[-1][f"channel_{i}"] for i in range(1, 6)] == [0, 5, 0, 0, 0]
     times = {key: deepcopy(auto[key]) for key in ("sunrise", "sunset", "sleep")}
     packet = colour_packet(auto, transport="spp", channel_count=5, levels=[50] * 5, target="day", times=times)
-    decoded = protocol.decode_cbor_update(packet)
-    assert {key: decoded[key] for key in range(8, 13)} == {key: fields[key] for key in range(8, 13)}
+    assert packet == b""
     packet = colour_packet(pro, transport="spp", channel_count=5, levels=[84, 20, 73, 100, 80], target=1)
     assert protocol.decode_cbor_update(packet)[13] == fields[13]
 
@@ -64,12 +63,12 @@ def test_all_product_profiles_native_schedules_roundtrip_through_editor(product_
         {"minute": minute, **{f"channel_{i}": i * 10 for i in range(1, count + 1)}} for minute in (30, 480, 900, 1380)
     ]
 
-    def decode_auto(packet):
+    def decode_auto(packet, baseline=None):
         if transport == "classic":
             return protocol.decode_old_auto_schedule(bytes([1]) + packet[2:-1], channel_count=count)
         fields = protocol.decode_cbor_map(packet) if transport == "facebd" else protocol.decode_cbor_update(packet)
         decode = protocol.decode_wifi_auto_schedule if transport == "facebd" else protocol.decode_spp_auto_schedule
-        return decode(fields, channel_count=count)
+        return decode({**(baseline or {}), **fields}, channel_count=count)
 
     def decode_pro(packet):
         if transport == "classic":
@@ -79,16 +78,36 @@ def test_all_product_profiles_native_schedules_roundtrip_through_editor(product_
         return decode(fields, channel_count=count)
 
     times = {key: deepcopy(canonical_auto[key]) for key in ("sunrise", "sunset", "sleep")}
-    native_auto = decode_auto(
-        colour_packet(
-            canonical_auto,
-            transport=transport,
-            channel_count=count,
-            levels=canonical_auto["day_levels"],
-            target="day",
-            times=times,
+    baseline_fields = {}
+    if transport == "facebd":
+        baseline_fields = {
+            114: [1410, 30],
+            115: [1050, 1095],
+            116: 1320,
+            117: bytes(canonical_auto["day_levels"]),
+            118: bytes(canonical_auto["night_levels"]),
+        }
+        native_auto = protocol.decode_wifi_auto_schedule(baseline_fields, channel_count=count)
+    elif transport == "spp":
+        baseline_fields = {
+            8: bytes([23, 30, 60]),
+            9: bytes([18, 15, 45]),
+            10: bytes([22, 0]),
+            11: bytes(canonical_auto["day_levels"]),
+            12: bytes(canonical_auto["night_levels"]),
+        }
+        native_auto = protocol.decode_spp_auto_schedule(baseline_fields, channel_count=count)
+    else:
+        native_auto = decode_auto(
+            colour_packet(
+                canonical_auto,
+                transport=transport,
+                channel_count=count,
+                levels=canonical_auto["day_levels"],
+                target="day",
+                times=times,
+            )
         )
-    )
     native_pro = decode_pro(
         colour_packet(
             canonical_pro,
@@ -108,7 +127,10 @@ def test_all_product_profiles_native_schedules_roundtrip_through_editor(product_
     expected = replace_schedule_colours(
         native_auto, channel_count=count, levels=[55] * count, target="day", times=times
     )
-    assert editor_schedule(decode_auto(packet)) == expected
+    if transport != "classic":
+        fields = protocol.decode_cbor_update(packet)
+        assert set(fields) == ({114, 117} if transport == "facebd" else {8, 11})
+    assert editor_schedule(decode_auto(packet, baseline_fields)) == expected
     packet = colour_packet(
         native_pro, transport=transport, channel_count=count, levels=[65] * count, target=1, times=490
     )
@@ -262,14 +284,16 @@ def test_auto_time_edits_use_native_formats(transport, count, sleep_enabled):
         fields = protocol.decode_cbor_map(packet)
         assert fields[114] == [1410, 30]
         assert fields[115] == [195, 240]
-        assert fields[116] == (300 if sleep_enabled else 65535)
-        assert protocol.decode_wifi_auto_schedule(fields, channel_count=count) == expected
+        assert set(fields) == ({114, 115, 116, 117} if sleep_enabled else {114, 115, 117})
+        assert fields.get(116) == (300 if sleep_enabled else None)
+        assert fields[117] == bytes(expected["day_levels"])
     elif transport == "spp":
         fields = protocol.decode_cbor_update(packet)
         assert fields[8] == bytes([23, 30, 60])
         assert fields[9] == bytes([4, 0, 45])
-        assert fields[10] == (bytes([5, 0]) if sleep_enabled else b"\xff\xff")
-        assert fields[12] == bytes([5] * count)
+        assert set(fields) == ({8, 9, 10, 11} if sleep_enabled else {8, 9, 11})
+        assert fields.get(10) == (bytes([5, 0]) if sleep_enabled else None)
+        assert fields[11] == bytes(expected["day_levels"])
     else:
         assert packet[2:6] == bytes([23, 30, 0, 30])
         assert packet[6 + count : 10 + count] == bytes([3, 15, 4, 0])
@@ -303,11 +327,22 @@ def test_pro_time_changes_preserve_other_points_and_channels(transport, count):
     assert original == before
 
 
-@pytest.mark.parametrize("times", [-1, 1440, True, 480.5, 60, 1100])
-def test_pro_rejects_invalid_duplicate_or_out_of_order_time(times):
+@pytest.mark.parametrize("times", [-1, 1440, True, 480.5, 60])
+def test_pro_rejects_invalid_or_duplicate_time(times):
     points = [{"minute": minute, **{f"channel_{i}": 0 for i in range(1, 5)}} for minute in [60, 480, 900, 1200]]
     with pytest.raises(ValueError):
         colour_packet(points, transport="classic", channel_count=4, levels=[0] * 4, target=1, times=times)
+
+
+@pytest.mark.parametrize(("transport", "expected"), [("facebd", {114: [495, 525]}), ("spp", {8: bytes([8, 15, 30])})])
+def test_auto_timing_only_edit_does_not_write_either_colour_bank(transport, expected):
+    original = auto_schedule()
+    times = {name: deepcopy(original[name]) for name in ("sunrise", "sunset", "sleep")}
+    times["sunrise"]["minute"] = 15
+    packet = colour_packet(
+        original, transport=transport, channel_count=4, levels=original["day_levels"], target="day", times=times
+    )
+    assert protocol.decode_cbor_update(packet) == expected
 
 
 @pytest.mark.parametrize(
@@ -510,6 +545,7 @@ def test_editor_save_rejects_stale_baseline_without_writing(schedule, mode, key,
 )
 def test_editor_save_reports_refresh_write_and_readback_failures(refresh_results, send_result, message):
     original = auto_schedule()
+    original["day_levels"] = [20] * 4
     device = _save_device(
         values={"mode": "automatic", "native_auto_schedule": original},
         refresh_results=refresh_results,
@@ -562,6 +598,5 @@ def test_editor_save_accepts_normalized_baseline_and_verifies_raw_spp_readback()
     connection = _run_save(device=device, baseline=editor_schedule(native))
     connection.send_result.assert_called_once_with(7, True)
     connection.send_error.assert_not_called()
-    packet = device._async_send_packet.await_args.args[0]
-    assert protocol.decode_cbor_update(packet) == {11: bytes([50] * 4)}
+    device._async_send_packet.assert_not_awaited()
     assert device.values["native_auto_schedule"] == native

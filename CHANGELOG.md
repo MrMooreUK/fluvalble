@@ -9,6 +9,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Write only changed Auto schedule fields on FACEBD and FFF0/SPP, and keep
+  Professional timepoint colours attached when editing a time reorders them.
+- Assemble complete schedule readback from multiple maps within one explicit
+  read, without accepting fragments from an earlier read.
+- Bound and reset the classic BLE receive buffer, and redact free-form BLE
+  errors from downloadable diagnostics.
+
 - Allow five seconds for each initial state read and retry once before releasing
   an unready connection; normal command-verification timeouts are unchanged.
 - Preserve existing channel entities and their customizations when the channel

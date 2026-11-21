@@ -166,13 +166,14 @@ async def async_setup_editor(hass):
                     )
                 if entry_runtime_data(hass, entry) is not runtime or getattr(runtime, "unloading", False):
                     raise ValueError("Fixture unavailable")
-                if not await _write_schedule_packet(device, packet, transport):
+                if packet and not await _write_schedule_packet(device, packet, transport):
                     raise ValueError(device.command_error_message())
-                if not await device.async_refresh_state(schedule=key):
+                if packet and not await device.async_refresh_state(schedule=key):
                     raise ValueError("Write sent, but readback failed. Reload to confirm the result")
-                if editor_schedule(device.values.get(key)) != expected:
+                confirmed = editor_schedule(device.values.get(key))
+                if confirmed != expected:
                     raise ValueError("Fixture readback did not confirm the saved schedule. Reload before retrying")
-            connection.send_result(msg["id"], True)
+            connection.send_result(msg["id"], {"schedule": confirmed} if msg["schedule"] == "professional" else True)
         except (ValueError, KeyError, TypeError) as err:
             connection.send_error(msg["id"], "save_failed", str(err))
 
