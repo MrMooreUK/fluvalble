@@ -94,6 +94,56 @@ def test_facebd_schedule_read_combines_only_maps_from_same_request(schedule, lef
     asyncio.run(run())
 
 
+def test_facebd_split_notifications_wake_waiting_schedule_read():
+    async def run():
+        device = make_device(532, "facebd")
+        device.async_refresh_state = type(device).async_refresh_state.__get__(device)
+        device._async_ensure_client = AsyncMock(return_value=True)
+        client = _make_client()
+        device.client = client
+        client.raw_facebd = True
+        client.update_callback = device.decode_update_packet
+        client.notify_uuid = "notify"
+        client.ensure_connected = AsyncMock(return_value=True)
+        # The GATT read itself contributes no decoded state.
+        client._ensure_client = AsyncMock(return_value=SimpleNamespace(read_gatt_char=AsyncMock(return_value=b"\x00")))
+        waiting = asyncio.Queue()
+
+        def signal_wait(event):
+            original_wait = event.wait
+
+            async def wait():
+                waiting.put_nowait(None)
+                return await original_wait()
+
+            event.wait = wait
+
+        signal_wait(client._state_fragment_event)
+        signal_wait(client._state_update_event)
+        with patch("custom_components.fluvalble.core.client.STATE_NOTIFY_TIMEOUT", 1):
+            read = asyncio.create_task(device.async_refresh_state(schedule="native_auto_schedule"))
+            try:
+                await asyncio.wait_for(waiting.get(), 1)
+                assert client._dispatch_update(
+                    protocol.cbor_map({103: 1, 114: [360, 420], 115: [1020, 1080], 116: 65535})
+                )
+                await asyncio.wait_for(waiting.get(), 1)
+                assert not read.done()
+                assert device._schedule_revisions["native_auto_schedule"] == 0
+                # This half is not a valid schedule on its own and only
+                # signals the fragment event, not the accepted-state event.
+                assert not client._dispatch_update(protocol.cbor_map({117: bytes([20] * 4), 118: bytes(4)}))
+                assert await read, "The final notification must wake the waiting schedule read"
+                assert device.values["native_auto_schedule"]["day_levels"] == [20] * 4
+                assert device._schedule_revisions["native_auto_schedule"] == 1
+            finally:
+                if not read.done():
+                    read.cancel()
+                    await asyncio.gather(read, return_exceptions=True)
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("transport,product", ROUTES)
 def test_startup_accepts_reply_after_normal_verification_deadline(transport, product):
     async def run():
