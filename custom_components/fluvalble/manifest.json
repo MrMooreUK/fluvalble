@@ -1,7 +1,9 @@
 {
   "domain": "fluvalble",
   "name": "Fluval Aquarium LED",
-  "after_dependencies": ["mqtt"],
+  "after_dependencies": [
+    "mqtt"
+  ],
   "bluetooth": [
     {
       "local_name": "Fluval*"
@@ -102,5 +104,5 @@
     "custom_components.fluvalble"
   ],
   "requirements": [],
-  "version": "0.0.17"
+  "version": "0.0.18"
 }
