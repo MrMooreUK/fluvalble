@@ -1,6 +1,7 @@
 {
   "domain": "fluvalble",
   "name": "Fluval Aquarium LED",
+  "after_dependencies": ["mqtt"],
   "bluetooth": [
     {
       "local_name": "Fluval*"
@@ -90,7 +91,8 @@
   "dependencies": [
     "bluetooth_adapters",
     "frontend",
-    "http"
+    "http",
+    "network"
   ],
   "documentation": "https://github.com/MrMooreUK/fluvalble",
   "integration_type": "device",

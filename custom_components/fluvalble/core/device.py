@@ -8,7 +8,7 @@ from functools import wraps
 import logging
 from math import isfinite
 from time import monotonic
-from typing import Any, Concatenate, ParamSpec, TypeVar, TypedDict, cast
+from typing import Any, Concatenate, ParamSpec, TYPE_CHECKING, TypeVar, TypedDict, cast
 
 from bleak import AdvertisementData, BLEDevice, BleakError, BleakScanner
 from homeassistant.components import bluetooth
@@ -46,6 +46,9 @@ from .effects import (
 from . import protocol
 from .products import product_from_id, product_id_from_manufacturer_data
 from .scheduled_state import interpolate_levels, weather_may_be_active
+
+if TYPE_CHECKING:
+    from .mqtt_client import MqttClient
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -173,7 +176,7 @@ class Device:
         self._channel_count_hint: int | None = None
         self._schedule_revisions = {"native_auto_schedule": 0, "native_pro_schedule": 0}
         self.address = (config_data.get("mac") or (device.address if device else "")).upper()
-        self.client: Client | None = None
+        self.client: "Client | MqttClient | None" = None
         self._ping_interval = ping_interval
         self._active_time = active_time
         self.connected = False
@@ -469,7 +472,8 @@ class Device:
         if self.client is None:
             self.client = self._new_client(device)
         else:
-            self.client.device = device
+            if self.conn_info.get("transport") != "local_mqtt":
+                cast(Client, self.client).device = device
 
         self._notify_diagnostics_throttled()
         for handler in self.updates_component:
@@ -2404,7 +2408,8 @@ class Device:
         if self.client is None:
             self.client = self._new_client(device)
         else:
-            self.client.device = device
+            if self.conn_info.get("transport") != "local_mqtt":
+                cast(Client, self.client).device = device
         return True
 
     async def _async_find_device(self) -> BLEDevice | None:
@@ -2445,7 +2450,7 @@ class Device:
             )
             if service_info is not None:
                 return service_info.device
-        return self.client.device if self.client is not None else None
+        return getattr(self.client, "device", None)
 
     def _set_diagnostic_error(self, status: str, message: str) -> None:
         """Store command failures for downloadable diagnostics."""

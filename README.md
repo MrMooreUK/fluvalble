@@ -133,6 +133,41 @@ schedule evidence while removing Bluetooth addresses, names, manufacturer and
 service payloads, paths, and registry identifiers. Creating the report does not
 disconnect, scan for, reconnect to, or send commands to the light.
 
+### Native local Wi-Fi (experimental)
+
+For first-time setup, use **Configure → Fixture connection → Set up Local Wi-Fi
+over Bluetooth** on the existing Bluetooth entry. Home Assistant can use an
+active ESPHome proxy; a standalone provisioning script is not required.
+
+AquaSky 3.0 product **532** can also use its own Wi-Fi through your local MQTT
+broker, without a BLE bridge or vendor-cloud relay. This branch implements the
+protocol recovered from FluvalConnect and official product-532 v10 firmware;
+physical provisioning, reboot recovery and WAN-blocked operation still require
+validation on that fixture. This is not Wi-Fi support for legacy Plant 3.0.
+
+For an existing AquaSky 3, open **Configure → Fixture connection**, select
+**Local Wi-Fi**, and enter its **Wi-Fi** MAC address. Configure Home Assistant's
+MQTT integration and deliberately provision the fixture to that same broker
+first. Selecting the option alone does not reconfigure the fixture. The existing
+device, entity IDs, Manual storage and schedules remain attached to the same
+entry. Switch back to **Bluetooth** in the same place. Broker details stay saved
+in the fixture until explicitly changed; switching HA back does not restore the
+vendor cloud connection.
+
+For a new device, select **AquaSky 3 — native local Wi-Fi** during setup. Both
+addresses are required: Bluetooth for stable identity and Wi-Fi for its native
+MQTT topic. Do not add an existing BLE fixture a second time.
+
+The light, exact channel sliders, modes and hardware schedule editor use the
+existing APK-backed commands. MQTT status is refreshed every 30 seconds; broker
+availability alone is never treated as proof that the fixture is online. This
+transport has no Bluetooth signal-strength or proxy-source reading. Existing
+Bluetooth diagnostic rows are integration-disabled while using MQTT and restored
+when switching back, without deleting user customizations.
+
+See [native Wi-Fi setup and protocol evidence](docs/native-local-mqtt.md) for
+explicit provisioning, security considerations and the hardware test checklist.
+
 ### Scheduled on/off indication
 
 In **Automatic** or **Professional** mode, classic Bluetooth lights (including

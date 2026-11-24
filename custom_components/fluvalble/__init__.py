@@ -302,6 +302,8 @@ async def async_setup(hass: HomeAssistant, config: dict[str, Any]) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
     """Set up Fluval Aquarium LED from a config entry."""
     hass.data.setdefault(DOMAIN, {})
+    if entry.options.get("transport", entry.data.get("transport")) == "local_mqtt":
+        return await _async_setup_mqtt_entry(hass, entry)
     mac_raw = entry.data.get(CONF_MAC)
     # HA's Bluetooth stack uses uppercase MACs internally. Normalize here
     # so the address filter in async_register_callback matches correctly,
@@ -482,6 +484,43 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
     return True
 
 
+async def _async_setup_mqtt_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bool:
+    """Set up an explicitly selected native Wi-Fi fixture, without BLE scans."""
+    from homeassistant.components import mqtt
+    from homeassistant.exceptions import ConfigEntryNotReady
+
+    from .core.mqtt_device import MqttDevice
+    from .manual_settings import async_manual_settings_storage
+
+    if not await mqtt.async_wait_for_mqtt_client(hass):
+        raise ConfigEntryNotReady("Configure Home Assistant's MQTT integration first")
+    device = MqttDevice(entry.title, hass=hass, config_data={**entry.data, **entry.options})
+    device.entry_id = entry.entry_id
+    runtime = FluvalRuntimeData(device=device)
+    _store_entry_runtime_data(hass, entry, runtime)
+    try:
+        attach_manual_settings = await async_manual_settings_storage(hass, entry)
+        attach_manual_settings(device)
+        if device.client is None:
+            raise ConfigEntryNotReady("Local MQTT fixture client is unavailable")
+        if not await device.client.ensure_connected():
+            raise ConfigEntryNotReady(device.client.last_error or "Fixture did not answer on local MQTT")
+        _sync_connection_diagnostic_registry_entries(hass, entry, native_mqtt=True)
+        device.register_update(
+            "firmware_version", lambda: _sync_firmware_version_to_device_registry(hass, entry, device)
+        )
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    except BaseException:
+        if device.client is not None:
+            await device.client.stop()
+        for cleanup in runtime.unload_callbacks:
+            cleanup()
+        hass.data.get(DOMAIN, {}).pop(entry.entry_id, None)
+        raise
+    _register_legacy_options_reload(entry)
+    return True
+
+
 @callback
 def _migrate_legacy_registry_entries(hass: HomeAssistant, entry: ConfigEntry, mac: str) -> None:
     """Remove retired entities and clear a MAC formerly stored as a serial."""
@@ -510,6 +549,8 @@ def _migrate_legacy_registry_entries(hass: HomeAssistant, entry: ConfigEntry, ma
 def _sync_connection_diagnostic_registry_entries(
     hass: HomeAssistant,
     entry: ConfigEntry,
+    *,
+    native_mqtt: bool = False,
 ) -> None:
     """Restore diagnostics previously disabled by the integration, not the user."""
     from homeassistant.helpers import entity_registry as er  # noqa: PLC0415
@@ -519,10 +560,15 @@ def _sync_connection_diagnostic_registry_entries(
         unique_id = str(getattr(entity, "unique_id", ""))
         is_rssi = unique_id.endswith("_rssi")
         is_last_seen = unique_id.endswith("_last_seen")
-        if not is_rssi and not is_last_seen:
+        is_source = unique_id.endswith("_active_connection_source")
+        if not is_rssi and not is_last_seen and not is_source:
             continue
 
         disabled_by = getattr(entity, "disabled_by", None)
+        if native_mqtt and (is_rssi or is_source):
+            if disabled_by is None:
+                registry.async_update_entity(entity.entity_id, disabled_by=er.RegistryEntryDisabler.INTEGRATION)
+            continue
         if disabled_by is er.RegistryEntryDisabler.INTEGRATION:
             registry.async_update_entity(entity.entity_id, disabled_by=None)
 
