@@ -53,31 +53,35 @@ def colour_packet(
         sunrise, sunset = edited["sunrise"], edited["sunset"]
         start = sunrise["hour"] * 60 + sunrise["minute"]
         end = sunset["hour"] * 60 + sunset["minute"]
-        if times is not None and transport in ("facebd", "spp"):
+        if transport in ("facebd", "spp"):
+            original = editor_schedule(schedule)
             sleep = edited.get("sleep")
             if transport == "facebd":
-                return protocol.cbor_map(
-                    {
-                        114: [start, (start + sunrise["ramp"]) % 1440],
-                        115: [(end - sunset["ramp"]) % 1440, end],
-                        116: 0xFFFF if sleep is None else sleep["hour"] * 60 + sleep["minute"],
-                        117: bytes(edited["day_levels"]),
-                        118: bytes(edited["night_levels"]),
-                    }
-                )
-            return protocol.spp_command(
-                {
+                fields = {
+                    114: [start, (start + sunrise["ramp"]) % 1440],
+                    115: [(end - sunset["ramp"]) % 1440, end],
+                    116: 0xFFFF if sleep is None else sleep["hour"] * 60 + sleep["minute"],
+                    117: bytes(edited["day_levels"]),
+                    118: bytes(edited["night_levels"]),
+                }
+                encode = protocol.cbor_map
+            else:
+                fields = {
                     8: bytes((sunrise["hour"], sunrise["minute"], sunrise["ramp"])),
                     9: bytes((sunset["hour"], sunset["minute"], sunset["ramp"])),
                     10: b"\xff\xff" if sleep is None else bytes((sleep["hour"], sleep["minute"])),
                     11: bytes(edited["day_levels"]),
                     12: bytes(edited["night_levels"]),
                 }
-            )
-        if transport == "facebd":
-            return protocol.cbor_map({117 if target == "day" else 118: bytes(levels)})
-        if transport == "spp":
-            return protocol.spp_command({11 if target == "day" else 12: bytes(levels)})
+                encode = protocol.spp_command
+            changes = {
+                key: value
+                for (key, value), name in zip(
+                    fields.items(), ("sunrise", "sunset", "sleep", "day_levels", "night_levels"), strict=True
+                )
+                if edited.get(name) != original.get(name)
+            }
+            return encode(changes) if changes else b""
         sunrise, sunset = edited["sunrise"], edited["sunset"]
         start = sunrise["hour"] * 60 + sunrise["minute"]
         end = sunset["hour"] * 60 + sunset["minute"]
@@ -133,7 +137,7 @@ def replace_professional_batch(schedule, *, channel_count: int, changes: list[di
             if type(minute) is not int or not 0 <= minute < 1440:
                 raise ValueError("Timepoints must be minutes from 00:00 to 23:59")
             result[target]["minute"] = minute
-    _validate_professional_order(result)
+    _sort_professional_points(result)
     return result
 
 
@@ -142,13 +146,11 @@ def professional_batch_packet(schedule, *, transport, channel_count, changes):
     return _professional_packet(edited, transport=transport, channel_count=channel_count)
 
 
-def _validate_professional_order(points):
+def _sort_professional_points(points):
     minutes = [point["minute"] for point in points]
-    if (
-        len(set(minutes)) != len(minutes)
-        or sum((minutes[(i + 1) % len(minutes)] - minute) % 1440 for i, minute in enumerate(minutes)) != 1440
-    ):
-        raise ValueError("Timepoints must remain in chronological order without duplicates")
+    if len(set(minutes)) != len(minutes):
+        raise ValueError("Timepoints must not have duplicate times")
+    points.sort(key=lambda point: point["minute"])
 
 
 def replace_schedule_colours(
@@ -213,7 +215,7 @@ def replace_schedule_colours(
             if type(times) is not int or not 0 <= times < 1440:
                 raise ValueError("Timepoints must be minutes from 00:00 to 23:59")
             point["minute"] = times
-            _validate_professional_order(result)
+            _sort_professional_points(result)
     else:
         raise ValueError("Fixture schedule readback is required")
     return result

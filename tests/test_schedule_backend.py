@@ -492,7 +492,7 @@ def test_readback_payload_does_not_load_or_write_local_schedules():
     assert set(payload) == {"entry_id", "fixture", "refresh_ok", "colour_editor"}
     device.async_refresh_state.assert_not_awaited()
     payload = asyncio.run(_async_schedule_payload(hass, "entry_1", refresh=True))
-    device.async_refresh_state.assert_awaited_once_with()
+    device.async_refresh_state.assert_awaited_once_with(schedule="active")
     assert payload["refresh_ok"] is True
 
 
@@ -500,7 +500,8 @@ def test_explicit_schedule_refresh_times_out_and_keeps_cached_readback():
     async def run():
         device = _make_device()
 
-        async def hang():
+        async def hang(*, schedule):
+            assert schedule == "active"
             await asyncio.Event().wait()
 
         device.async_refresh_state = hang

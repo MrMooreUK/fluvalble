@@ -898,7 +898,7 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
     if refresh:
         try:
             async with asyncio.timeout(30):
-                refresh_ok = bool(device is not None and await device.async_refresh_state())
+                refresh_ok = bool(device is not None and await device.async_refresh_state(schedule="active"))
         except TimeoutError:
             refresh_ok = False
     return {

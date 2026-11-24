@@ -2213,6 +2213,10 @@ class Device:
     @serialized_device_command
     async def async_refresh_state(self, *, schedule: str | None = None, manual: bool = False) -> bool:
         """Resolve the controller and request its current state."""
+        async with self.command_transaction(supersede_transition=False):
+            return await self._async_refresh_state(schedule=schedule, manual=manual)
+
+    async def _async_refresh_state(self, *, schedule: str | None, manual: bool) -> bool:
         if not await self._async_ensure_client() or self.client is None:
             return False
         client = self.client
@@ -2220,7 +2224,7 @@ class Device:
         if not await client.ensure_connected():
             return False
 
-        revision = self._schedule_revisions.get(schedule, 0) if schedule else 0
+        schedule_revisions = dict(self._schedule_revisions)
         revisions = dict(self._control_readback_revision)
         try:
             if manual:
@@ -2228,11 +2232,41 @@ class Device:
                     await client.request_state(state_validator=lambda _state: self._fresh_manual_bank(revisions))
                 )
             if schedule:
-                return bool(
-                    await client.request_state(
-                        state_validator=lambda _state: self._schedule_revisions.get(schedule, 0) > revision
-                    )
-                )
+
+                def schedule_read(state: dict[int, object]) -> bool:
+                    target: str | None = schedule
+                    if target == "active":
+                        if self._control_readback_revision["mode"] <= revisions["mode"]:
+                            return False
+                        target = {
+                            "automatic": "native_auto_schedule",
+                            "professional": "native_pro_schedule",
+                        }.get(str(self.values.get("mode")))
+                    if target is None:
+                        return schedule == "active" and self.values.get("mode") == "manual"
+                    if self._schedule_revisions.get(target, 0) > schedule_revisions.get(target, 0):
+                        return True
+                    if not client.raw_facebd:
+                        return False
+                    spp = client.spp_transport
+                    count = self._resolved_channel_count()
+                    if target == "native_auto_schedule":
+                        decode = protocol.decode_spp_auto_schedule if spp else protocol.decode_wifi_auto_schedule
+                        auto, professional = decode(state, channel_count=count), None
+                    elif target == "native_pro_schedule":
+                        decode_pro = protocol.decode_spp_pro_schedule if spp else protocol.decode_wifi_pro_schedule
+                        auto, professional = None, decode_pro(state, channel_count=count)
+                    else:
+                        return False
+                    if not self._record_native_schedule_readback(
+                        protocol_name="spp" if spp else "facebd", auto=auto, professional=professional
+                    ):
+                        return False
+                    for handler in self.updates_component:
+                        handler()
+                    return True
+
+                return bool(await client.request_state(state_validator=schedule_read))
             return bool(await client.request_state())
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Unable to refresh Fluval state", exc_info=err)

@@ -9,6 +9,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Write only changed Auto schedule fields on FACEBD and FFF0/SPP, and keep
+  Professional timepoint colours attached when editing a time reorders them.
+- Assemble complete schedule readback from multiple maps within one explicit
+  read, without accepting fragments from an earlier read.
+- Bound and reset the classic BLE receive buffer, and redact free-form BLE
+  errors from downloadable diagnostics.
 - Keep Reachable accurate when Home Assistant suppresses duplicate Bluetooth
   callbacks. Last seen uses the observed advertisement time, not the polling time (#151).
 

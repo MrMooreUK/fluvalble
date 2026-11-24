@@ -30,6 +30,7 @@ INITIAL_STATE_TIMEOUT = 5.0
 # BleKxt configures a 5 ms delay between MTU-sized GATT write packages.
 CHUNK_WRITE_GAP = 0.005
 MAX_RAW_RECEIVE_BUFFER = 4096
+MAX_CLASSIC_RECEIVE_BUFFER = 256
 
 # Hardware capture from AquaSky 3.0 establishes this FACEBD split:
 #   facebd01 = raw CBOR command writes
@@ -134,6 +135,7 @@ class Client:
         self._command_lock = asyncio.Lock()
         self._session_initialized = False
         self._state_update_event = asyncio.Event()
+        self._state_fragment_event = asyncio.Event()
         self._observed_state: dict[int, object] = {}
         self.last_error: str | None = None
         self.last_write_targets: list[str] = []
@@ -361,6 +363,7 @@ class Client:
 
         self.client = None
         self._session_initialized = False
+        self.receive_buffer = b""
         self.raw_receive_buffer = b""
         if self.status_callback:
             self.status_callback(False)
@@ -408,11 +411,13 @@ class Client:
             if decoded:
                 self._observed_state.update(decoded)
                 self.last_confirmed_state = dict(self._observed_state)
+                self._state_fragment_event.set()
         if not self.update_callback:
             return False
         updated = bool(self.update_callback(bytes(data)))
         if updated:
             self._state_update_event.set()
+            self._state_fragment_event.set()
         return updated
 
     def notify_callback(self, sender: BleakGATTCharacteristic, data: bytearray):
@@ -472,7 +477,12 @@ class Client:
         # 0x68 frame, appends every chunk, and acts only once parsing succeeds.
         if decrypted[0] == 0x68:
             self.receive_buffer = b""
+        elif not self.receive_buffer:
+            return
         self.receive_buffer += decrypted
+        if len(self.receive_buffer) > MAX_CLASSIC_RECEIVE_BUFFER:
+            self.receive_buffer = b""
+            return
         if not protocol.old_receive_frame_ready(self.receive_buffer):
             return
         payload = self.receive_buffer
@@ -680,6 +690,7 @@ class Client:
         """Read current controller state and optionally verify requested values."""
         client = await self._ensure_client()
         self._state_update_event.clear()
+        self._state_fragment_event.clear()
         self._observed_state = {}
         observed = False
 
@@ -710,9 +721,11 @@ class Client:
             await self._write_packet(self.init_write_uuid, protocol.old_read_params_packet())
             self.last_command_at = time.time()
 
+        event = self._state_fragment_event if state_validator is not None else self._state_update_event
+
         def complete() -> bool:
             return (
-                (observed or self._state_update_event.is_set())
+                (observed or event.is_set())
                 and self._state_matches(expected_state)
                 and (state_validator is None or state_validator(self.observed_state))
             )
@@ -722,8 +735,8 @@ class Client:
         with contextlib.suppress(TimeoutError):
             async with asyncio.timeout(STATE_NOTIFY_TIMEOUT if timeout is None else timeout):
                 while not complete():
-                    self._state_update_event.clear()
-                    await self._state_update_event.wait()
+                    event.clear()
+                    await event.wait()
         return complete()
 
     @property
@@ -846,6 +859,7 @@ class Client:
         client = self.client
         self.client = None
         self._session_initialized = False
+        self.receive_buffer = b""
         self.raw_receive_buffer = b""
         if client:
             with contextlib.suppress(Exception):
