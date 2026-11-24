@@ -521,7 +521,7 @@ async def setup_editor_for_test(runtime, run):
         http=SimpleNamespace(register_static_path=MagicMock()),
         config_entries=SimpleNamespace(async_get_entry=lambda _: entry),
     )
-    connection = SimpleNamespace(require_admin=MagicMock(), send_result=MagicMock(), send_error=MagicMock())
+    connection = SimpleNamespace(user=SimpleNamespace(is_admin=True), send_result=MagicMock(), send_error=MagicMock())
     with (
         patch.dict(sys.modules, {"homeassistant.components.frontend": SimpleNamespace(add_extra_js_url=MagicMock())}),
         patch("custom_components.fluvalble.schedule_editor.vol.Any", lambda *args: object, create=True),

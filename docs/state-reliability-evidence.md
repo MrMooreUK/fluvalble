@@ -1,21 +1,20 @@
 # State reliability repairs
 
-These repairs follow the FluvalConnect 1.0.15 (versionCode 110) decompilation,
-base APK SHA-256 9c3cecf8edebff06ac945d7431b078813af9d4fd86ba9fba40453dc612be3415.
+These repairs follow FluvalConnect 1.0.15, derived for interoperability.
 They change Home Assistant state coordination, not firmware opcodes, GATT UUIDs,
 encryption, percentage scales, product identities or native effect catalogues.
 
-## APK and captured protocol evidence
+## App and captured protocol evidence
 
 | Area | Primary evidence | Integration repair |
 |---|---|---|
-| Initialization | LightDetailActivity.java 931–950 queues clock then parameter read; OLD read is 6805, current SPP is D0 FF | Wait for valid initial readback before declaring the session ready; release an unready connection |
-| Independent commands | LightKxtKt.java 640–787 defines separate mode, power and weather commands | Preserve completed operations and notifications when a later operation fails; do not pretend the sequence is atomic |
-| Physical channels | ManFragment.java 581–624, 1059–1175; LightInstructionsKxtKt.java 160–207 | Derive brightness and channel writes after connection readback; an individual channel notification does not redefine channel count |
-| Product layout | LightDeviceUtils.getLightType/getLightTypeAndOld/getLightChannel/getChannelCount | Keep known product layouts authoritative; reconcile deferred identification and exact channel entities |
-| Local clock | OldLightKxtKt.java 21–44; LightKxtKt.java 535–560, 1048 | Use HA-local calendar time and UTC offset, not the container timezone; epoch milliseconds remain absolute |
-| Schedule banks | LightKxtKt.java 931–989; AutoFragment and ProFragment handlers | Fresh Auto fields (FACEBD 114–118 / SPP 8–12) and Pro fields (120–122 / 13) are required for schedule conflict checks and confirmation |
-| Local recall | LightKxtKt.java 384–410; ManFragment.java 740–770 | Keep explicit local-bank recall, require freshly read Manual mode, never automatically stop an Auto/Pro programme |
+| Initialization | App initialization queues clock then parameter read; OLD read is 6805, current SPP is D0 FF | Wait for valid initial readback before declaring the session ready; release an unready connection |
+| Independent commands | The app defines separate mode, power and weather commands | Preserve completed operations and notifications when a later operation fails; do not pretend the sequence is atomic |
+| Physical channels | The app's Manual screen and channel command builders | Derive brightness and channel writes after connection readback; an individual channel notification does not redefine channel count |
+| Product layout | The app's product type, combined type, channel and channel-count lookups | Keep known product layouts authoritative; reconcile deferred identification and exact channel entities |
+| Local clock | The app's classic and current clock builders | Use HA-local calendar time and UTC offset, not the container timezone; epoch milliseconds remain absolute |
+| Schedule banks | The app's schedule builders and Auto/Pro screen handlers | Fresh Auto fields (FACEBD 114–118 / SPP 8–12) and Pro fields (120–122 / 13) are required for schedule conflict checks and confirmation |
+| Local recall | The app's local colour-bank storage and Manual recall | Keep explicit local-bank recall, require freshly read Manual mode, never automatically stop an Auto/Pro programme |
 
 [Issue #133's public SPP capture](https://github.com/MrMooreUK/fluvalble/issues/133#issuecomment-6895548202)
 contains Manual channels and both schedule banks together. It demonstrates the
@@ -71,9 +70,9 @@ contributions. Nine reproducible gaps were corrected on the same repair branch:
 8. Deferred FACEBD identification adds its DST control once. Unload cancels
    the subscription and prevents later entity creation.
 9. Product 281 follows the active screen's Reef labels, not the older unused
-   DeviceUtil table. ManFragment.initColor calls LightDeviceUtils.getColors;
-   getLightType defaults product 281 to type 1. Auto/Pro likewise use
-   LightDeviceUtils.getLightChannel. Spectrum is unchanged.
+   product table. The app's Manual screen uses the current table's colours and
+   defaults product 281 to type 1. Auto/Pro likewise use the current channel
+   lookup. Spectrum is unchanged.
 
 Additional regressions cover classic, FACEBD and SPP, every known product's
 invalid-channel rejection, late four/five-channel resolution, runtime replacement,

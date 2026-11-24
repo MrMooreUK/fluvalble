@@ -398,7 +398,7 @@ def test_editor_time_save_requires_exact_hardware_readback(confirmed):
         http=SimpleNamespace(register_static_path=MagicMock()),
         config_entries=SimpleNamespace(async_get_entry=lambda _: SimpleNamespace(domain="fluvalble")),
     )
-    connection = SimpleNamespace(require_admin=MagicMock(), send_result=MagicMock(), send_error=MagicMock())
+    connection = SimpleNamespace(user=SimpleNamespace(is_admin=True), send_result=MagicMock(), send_error=MagicMock())
     with (
         patch.dict(sys.modules, {"homeassistant.components.frontend": SimpleNamespace(add_extra_js_url=MagicMock())}),
         patch("custom_components.fluvalble.schedule_editor.vol.Any", lambda *args: object, create=True),
@@ -423,7 +423,6 @@ def test_editor_time_save_requires_exact_hardware_readback(confirmed):
             )
         )
     device._async_send_packet.assert_awaited_once()
-    connection.require_admin.assert_called_once()
     if confirmed:
         connection.send_result.assert_called_once_with(1, True)
         connection.send_error.assert_not_called()
@@ -432,7 +431,7 @@ def test_editor_time_save_requires_exact_hardware_readback(confirmed):
         connection.send_result.assert_not_called()
 
 
-def _run_save(*, device, entry="valid", schedule="auto", baseline=None, admin_error=None):
+def _run_save(*, device, entry="valid", schedule="auto", baseline=None, is_admin=True):
     """Register the editor, call the save command once and return the connection mock."""
     from custom_components.fluvalble.schedule_editor import async_setup_editor
 
@@ -448,7 +447,9 @@ def _run_save(*, device, entry="valid", schedule="auto", baseline=None, admin_er
         config_entries=SimpleNamespace(async_get_entry=lambda _: entry_obj),
     )
     connection = SimpleNamespace(
-        require_admin=MagicMock(side_effect=admin_error), send_result=MagicMock(), send_error=MagicMock()
+        user=None if is_admin is None else SimpleNamespace(is_admin=is_admin),
+        send_result=MagicMock(),
+        send_error=MagicMock(),
     )
     msg = {
         "id": 7,
@@ -572,13 +573,16 @@ def test_editor_save_reports_unavailable_when_device_is_none():
     connection.send_result.assert_not_called()
 
 
-def test_editor_save_raises_unauthorized_for_non_admin_before_any_work():
+@pytest.mark.parametrize("is_admin", [False, None], ids=["non_admin", "no_user"])
+def test_editor_save_raises_unauthorized_before_any_fixture_io(is_admin):
     from homeassistant.exceptions import Unauthorized
 
     original = auto_schedule()
     device = _save_device(values={"mode": "automatic", "native_auto_schedule": original})
+    device.async_refresh_state = AsyncMock()
     with pytest.raises(Unauthorized):
-        _run_save(device=device, baseline=deepcopy(original), admin_error=Unauthorized())
+        _run_save(device=device, baseline=deepcopy(original), is_admin=is_admin)
+    device.async_refresh_state.assert_not_awaited()
     device._async_send_packet.assert_not_awaited()
 
 

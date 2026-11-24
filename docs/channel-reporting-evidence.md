@@ -1,18 +1,16 @@
 # Channel reporting and schedule values
 
-FluvalConnect 1.0.15 (version code 110), SHA-256
-9c3cecf8edebff06ac945d7431b078813af9d4fd86ba9fba40453dc612be3415.
+Derived from FluvalConnect 1.0.15 for interoperability.
 
-## APK separation
+## App field separation
 
-- ManFragment.java, onMqttDataEvent, around lines 1059–1175: SPP keys 3–7
-  update the five Manual colour controls. The same handler separately
+- The app's Manual screen state handler: SPP keys 3–7 update the five Manual
+  colour controls. The same handler separately
   processes FACEBD channel keys 110–113.
-- AutoFragment.java, around lines 708–780: SPP keys 8/9 carry sunrise and
+- The app's Auto screen: SPP keys 8/9 carry sunrise and
   sunset timing; keys 11/12 populate the Day/Night banks. They are not
   substituted for keys 3–7 in the Manual controls.
-- LightInstructionsKxtKt.createLightTimeAutoData, around lines 385–409:
-  Professional points use SPP key 13 or FACEBD keys 120–122, with a separate
+- The app's schedule data builder: Professional points use SPP key 13 or FACEBD keys 120–122, with a separate
   classic encoder.
 - Classic 6805 mode-0 responses contain Manual channels; mode-1/mode-2
   responses contain schedules, not a corresponding live channel sample.
@@ -33,11 +31,10 @@ measurement. That channel-reporting review did not change native command formats
 
 ## Local Manual recall
 
-LightKxtKt.java lines 384–410 saves and retrieves non-classic P1–P4 colour banks
-through LightColorCache, whose MMKV storage is local to the app. ManFragment.java
-lines 740–770 explicitly recalls a bank through createLightAllZoneData.
-onHiddenChanged (around lines 400–438) only redraws the colour adapter; it does
-not automatically restore a bank on returning to the Manual screen.
+The app saves and retrieves non-classic P1–P4 colour banks in storage local to
+the app. Its Manual screen explicitly recalls a bank through the all-zone
+channel command. Returning to the Manual screen only redraws the colour
+controls; it does not automatically restore a bank.
 
 The HA last-Manual feature uses the same local-bank/full-channel-recall pattern,
 not a new firmware command. It is an HA-specific single last-confirmed bank,

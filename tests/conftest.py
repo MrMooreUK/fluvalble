@@ -352,6 +352,20 @@ def _stub_homeassistant():
     ha_ws.websocket_command = lambda schema: lambda func: func
     ha_ws.async_response = lambda func: func
 
+    def require_admin(func):
+        from functools import wraps
+
+        @wraps(func)
+        def with_admin(hass, connection, msg):
+            if connection.user is None or not connection.user.is_admin:
+                raise Unauthorized
+            # The async_response stub leaves the handler awaitable for tests.
+            return func(hass, connection, msg)
+
+        return with_admin
+
+    ha_ws.require_admin = require_admin
+
     # ---- homeassistant.helpers.storage ----
     class _FakeStore:
         def __init__(self, *args, **kwargs):
