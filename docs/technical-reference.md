@@ -29,8 +29,8 @@ Blue, White for RGBW. Product 385 retains the APK's unusual current Reef-type
 classification even though its older device name is A-Sky Aqua. Product 281
 likewise retains the APK's default current Reef spectrum while remaining an
 OLD/classic controller. Its active Manual, Auto and Pro screens use
-LightDeviceUtils, giving Pink, Cyan, Blue, Purple, Cold White. The older
-DeviceUtil table is not the active screen route. Neither exception is
+the current product table, giving Pink, Cyan, Blue, Purple, Cold White. The
+older product table is not the active screen route. Neither exception is
 normalized from its display name.
 
 If an advertisement has no APK-known product ID, the integration uses a
@@ -38,7 +38,7 @@ generic layout until an explicit fixture profile or decoded controller response
 supplies the missing capability information.
 
 See [APK colour-control evidence](apk-colour-evidence.md) for colour conversion
-details and their source locations in the decompiled APK.
+details.
 
 ## Controller transports
 
