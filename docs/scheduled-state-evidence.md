@@ -5,25 +5,20 @@ in upstream issue #110. It uses schedule-based presentation and refreshes
 parameter readback on mode selection. No new command bytes, scheduler,
 periodic Bluetooth polling, minimum HA version, or automatic clock writes are introduced.
 
-## FluvalConnect APK evidence
+## FluvalConnect evidence
 
-Paths are relative to the decompiled application's sources directory:
+Derived from FluvalConnect 1.0.15 for interoperability.
 
-- `eu/hagen/fluvalconnect/kxt/light/OldLightKxtKt.java`,
-  `createLightReadParamsValueForOld`: reads active-mode parameters using `6805`.
-- `eu/hagen/fluvalconnect/kxt/LightKxtKt.java`,
-  `analyticLightParameterToOld`: Manual includes switch/channel state; Auto/Pro
+- Classic read: the app reads active-mode parameters using `6805`.
+- Classic parameter parsing: Manual includes switch/channel state; Auto/Pro
   include programmed times and levels, not instantaneous power readback.
-- `eu/hagen/fluvalconnect/ui/main/device/light/detail/AutoFragment.java`,
-  `getBright`: four day/night points, or six including duplicate sleep-time
+- Auto preview: four day/night points, or six including duplicate sleep-time
   points, with integer interpolation at a 0..1000 scale and midnight wrapping.
-- `eu/hagen/fluvalconnect/ui/main/device/light/detail/ProFragment.java`,
-  `getBrights`: stable timepoint sorting, cyclic interpolation, and the same
+- Pro preview: stable timepoint sorting, cyclic interpolation, and the same
   integer scale. Descending integer division truncates toward zero.
 
-Both calculations were rechecked using JADX 1.5.5's `simple` decompilation mode,
-which exposes branch labels where the default decompilation lost control flow.
-They calculate preview output; they are not a physical light-output sensor.
+Both calculations produce preview output; they are not a physical light-output
+sensor.
 
 ## Implementation boundaries
 
@@ -44,7 +39,7 @@ They calculate preview output; they are not a physical light-output sensor.
 - Plain turn-on in classic Auto/Pro uses the existing power command even when
   cached Manual channels are zero. It does not apply a default colour or switch
   to Manual. Explicit colour and brightness requests retain their normal behavior.
-  `OldLightKxtKt.createLightSwitchValueForOld` constructs the separate `6803`
+  The app's classic power builder constructs the separate `6803`
   power command without channel data; no protocol bytes are changed here.
 - Shared power and mode bookkeeping now commits the requested value after a
   successful write, then notifies entities after updating the classic Off

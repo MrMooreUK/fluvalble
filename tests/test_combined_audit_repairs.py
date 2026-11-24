@@ -20,6 +20,130 @@ from tests.test_client import _make_client
 ROUTES = [("classic", 328), ("facebd", 532), ("spp", 545)]
 
 
+def test_classic_receive_buffer_discards_orphans_and_resets_on_disconnect():
+    from custom_components.fluvalble.core.client import MAX_CLASSIC_RECEIVE_BUFFER
+    from custom_components.fluvalble.core.encryption import encrypt
+
+    client = _make_client()
+    report = MagicMock(return_value=True)
+    client.update_callback = report
+    client.notify_callback(None, encrypt(b"\x01" * 15))
+    assert not client.receive_buffer
+    client.notify_callback(None, encrypt(b"\x68\x05\x01"))
+    for _ in range(MAX_CLASSIC_RECEIVE_BUFFER // 15 + 1):
+        client.notify_callback(None, encrypt(b"\x01" * 15))
+    assert not client.receive_buffer
+    client.notify_callback(None, encrypt(b"\x68\x05\x01"))
+    assert client.receive_buffer
+    client.client = object()
+    client._on_disconnected(client.client)
+    assert not client.receive_buffer
+    report.assert_not_called()
+
+
+def test_diagnostics_hide_addresses_embedded_in_freeform_errors():
+    from custom_components.fluvalble.diagnostics import REDACTED, _redact_diagnostics
+
+    report = _redact_diagnostics(
+        {
+            "gatt": {"last_error": "Failed to connect to AA:BB:CC:DD:EE:FF"},
+            "last_diagnostics": {"last_error": "Proxy AA:BB:CC:DD:EE:FF unavailable", "last_status": "connect_failed"},
+        }
+    )
+    assert report["gatt"]["last_error"] == REDACTED
+    assert report["last_diagnostics"] == {"last_error": REDACTED, "last_status": "connect_failed"}
+
+
+@pytest.mark.parametrize(
+    ("schedule", "left", "right"),
+    [
+        (
+            "native_auto_schedule",
+            {114: [360, 420], 115: [1020, 1080], 116: 65535},
+            {117: bytes([20] * 4), 118: bytes(4)},
+        ),
+        ("native_pro_schedule", {120: 4, 121: [360, 720, 1080, 1200]}, {122: bytes([20] * 16)}),
+    ],
+)
+@pytest.mark.parametrize("active", [False, True])
+def test_facebd_schedule_read_combines_only_maps_from_same_request(schedule, left, right, active):
+    async def run():
+        device = make_device(532, "facebd")
+        device.async_refresh_state = type(device).async_refresh_state.__get__(device)
+        device._async_ensure_client = AsyncMock(return_value=True)
+        client = _make_client()
+        device.client = client
+        client.raw_facebd = True
+        client.update_callback = device.decode_update_packet
+        client.notify_uuid = "notify"
+        client.state_read_uuids = ["first", "second"]
+        client.ensure_connected = AsyncMock(return_value=True)
+        mode = 1 if schedule == "native_auto_schedule" else 2
+        head = {103: mode, **left}
+        responses = AsyncMock(side_effect=[protocol.cbor_map(fields) for fields in (head, {}, {}, right, head, right)])
+        client._ensure_client = AsyncMock(return_value=SimpleNamespace(read_gatt_char=responses))
+        with patch("custom_components.fluvalble.core.client.STATE_NOTIFY_TIMEOUT", 0.01):
+            target = "active" if active else schedule
+            assert not await device.async_refresh_state(schedule=target)
+            assert not await device.async_refresh_state(schedule=target)
+            assert device._schedule_revisions[schedule] == 0
+            assert await device.async_refresh_state(schedule=target)
+        assert device._schedule_revisions[schedule] == 1
+        assert device.values[schedule]
+
+    asyncio.run(run())
+
+
+def test_facebd_split_notifications_wake_waiting_schedule_read():
+    async def run():
+        device = make_device(532, "facebd")
+        device.async_refresh_state = type(device).async_refresh_state.__get__(device)
+        device._async_ensure_client = AsyncMock(return_value=True)
+        client = _make_client()
+        device.client = client
+        client.raw_facebd = True
+        client.update_callback = device.decode_update_packet
+        client.notify_uuid = "notify"
+        client.ensure_connected = AsyncMock(return_value=True)
+        # The GATT read itself contributes no decoded state.
+        client._ensure_client = AsyncMock(return_value=SimpleNamespace(read_gatt_char=AsyncMock(return_value=b"\x00")))
+        waiting = asyncio.Queue()
+
+        def signal_wait(event):
+            original_wait = event.wait
+
+            async def wait():
+                waiting.put_nowait(None)
+                return await original_wait()
+
+            event.wait = wait
+
+        signal_wait(client._state_fragment_event)
+        signal_wait(client._state_update_event)
+        with patch("custom_components.fluvalble.core.client.STATE_NOTIFY_TIMEOUT", 1):
+            read = asyncio.create_task(device.async_refresh_state(schedule="native_auto_schedule"))
+            try:
+                await asyncio.wait_for(waiting.get(), 1)
+                assert client._dispatch_update(
+                    protocol.cbor_map({103: 1, 114: [360, 420], 115: [1020, 1080], 116: 65535})
+                )
+                await asyncio.wait_for(waiting.get(), 1)
+                assert not read.done()
+                assert device._schedule_revisions["native_auto_schedule"] == 0
+                # This half is not a valid schedule on its own and only
+                # signals the fragment event, not the accepted-state event.
+                assert not client._dispatch_update(protocol.cbor_map({117: bytes([20] * 4), 118: bytes(4)}))
+                assert await read, "The final notification must wake the waiting schedule read"
+                assert device.values["native_auto_schedule"]["day_levels"] == [20] * 4
+                assert device._schedule_revisions["native_auto_schedule"] == 1
+            finally:
+                if not read.done():
+                    read.cancel()
+                    await asyncio.gather(read, return_exceptions=True)
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("transport,product", ROUTES)
 def test_startup_accepts_reply_after_normal_verification_deadline(transport, product):
     async def run():
@@ -397,7 +521,7 @@ async def setup_editor_for_test(runtime, run):
         http=SimpleNamespace(register_static_path=MagicMock()),
         config_entries=SimpleNamespace(async_get_entry=lambda _: entry),
     )
-    connection = SimpleNamespace(require_admin=MagicMock(), send_result=MagicMock(), send_error=MagicMock())
+    connection = SimpleNamespace(user=SimpleNamespace(is_admin=True), send_result=MagicMock(), send_error=MagicMock())
     with (
         patch.dict(sys.modules, {"homeassistant.components.frontend": SimpleNamespace(add_extra_js_url=MagicMock())}),
         patch("custom_components.fluvalble.schedule_editor.vol.Any", lambda *args: object, create=True),
@@ -488,7 +612,7 @@ def test_professional_timing_batch_is_one_verified_native_write(transport, count
         d.values["mode"] = "professional"
         original = pro_points(count)
         changes = [
-            {"target": 1, "levels": [60] * count, "times": 1000},
+            {"target": 1, "levels": [60] * count, "times": 1150},
             {"target": 2, "levels": [70] * count, "times": 1100},
         ]
         if reverse:
@@ -520,9 +644,10 @@ def test_professional_timing_batch_is_one_verified_native_write(transport, count
 
         with patch("custom_components.fluvalble.schedule_editor.asyncio.sleep", new=AsyncMock()):
             connection = await setup_editor_for_test([FluvalRuntimeData(device=d)], call)
-        connection.send_result.assert_called_once_with(1, True)
+        connection.send_result.assert_called_once_with(1, {"schedule": expected})
         d._async_send_packet.assert_awaited_once_with(wire)
-        assert [point["minute"] for point in expected] == [60, 1000, 1100, 1200]
+        assert [point["minute"] for point in expected] == [60, 1100, 1150, 1200]
+        assert [point["channel_1"] for point in expected] == [50, 70, 60, 50]
         assert [point["minute"] for point in original] == [60, 480, 900, 1200]
 
     asyncio.run(run())

@@ -6,6 +6,7 @@ import contextlib
 from datetime import UTC, datetime, timedelta
 from functools import wraps
 import logging
+from math import isfinite
 from time import monotonic
 from typing import Any, Concatenate, ParamSpec, TYPE_CHECKING, TypeVar, TypedDict, cast
 
@@ -243,6 +244,7 @@ class Device:
         self._channel_restore_mode: str | None = None
         self._channel_restore_task: asyncio.Task[None] | None = None
         self._reachability_unsub: Callable[[], None] | None = None
+        self._advertisement_time: float | None = None
 
         if device and advertisement:
             self.update_ble(device, advertisement, advertisement_source)
@@ -355,14 +357,61 @@ class Device:
     def _on_reachability_expired(self, _now: datetime) -> None:
         """Refresh entities when the recent-activity window expires."""
         self._reachability_unsub = None
+        if self._bluetooth_presence():
+            self._refresh_advertisement_time()
+            self._schedule_reachability_refresh()
         for handler in self.updates_connect:
             handler()
 
+    def _bluetooth_presence(self) -> bool | None:
+        """Use HA's connectable advertisement history when available."""
+        present = getattr(bluetooth, "async_address_present", None)
+        if self.hass is None or present is None:
+            return None
+        return bool(present(self.hass, self.address, connectable=True))
+
+    def _refresh_advertisement_time(self) -> bool:
+        """Copy the latest real advertisement time, not the time of this check."""
+        last_info = getattr(bluetooth, "async_last_service_info", None)
+        if self.hass is None or last_info is None:
+            return False
+        info = last_info(self.hass, self.address, connectable=True)
+        return self._record_advertisement_time(getattr(info, "time", None))
+
+    def _record_advertisement_time(self, timestamp: object) -> bool:
+        """Convert the Bluetooth manager's monotonic sample to wall time."""
+        if not isinstance(timestamp, (int, float)) or not isfinite(timestamp) or timestamp < 0:
+            return False
+        if self._advertisement_time is None or timestamp > self._advertisement_time:
+            age = max(0.0, monotonic() - timestamp)
+            self.conn_info["advertisement_updated_at"] = datetime.now(UTC) - timedelta(seconds=age)
+            self._advertisement_time = timestamp
+        return True
+
+    @callback
+    def bluetooth_unavailable(self, info: object) -> None:
+        """Refresh entities as soon as HA drops the connectable address."""
+        if self._bluetooth_presence() is False:
+            self._record_advertisement_time(getattr(info, "time", None))
+            self.cancel_reachability_refresh()
+            for handler in self.updates_connect:
+                handler()
+
     def _schedule_reachability_refresh(self) -> None:
         """Schedule a one-shot refresh at the recent-activity expiry."""
-        if self.hass is None or self.connected:
+        if self.hass is None:
             return
 
+        presence = self._bluetooth_presence()
+        if presence is not None:
+            if not presence or self._reachability_unsub is not None:
+                return
+            self._reachability_unsub = async_track_point_in_time(
+                self.hass, self._on_reachability_expired, datetime.now(UTC) + timedelta(seconds=REACHABLE_SECONDS)
+            )
+            return
+        if self.connected:
+            return
         self.cancel_reachability_refresh()
         last_seen = self.conn_info.get("last_seen")
         if not isinstance(last_seen, datetime):
@@ -397,7 +446,11 @@ class Device:
         # active route's signal sample.
         route_rssi = advertisement.rssi if not self.connected or advertisement_source == active_source else None
         self.touch_seen(rssi=route_rssi, notify=False)
+        if not self._refresh_advertisement_time() and self._advertisement_time is None:
+            self.conn_info["advertisement_updated_at"] = self.conn_info.get("last_seen")
         self._record_advertisement_source(advertisement_source, advertisement.rssi)
+        if self.connected:
+            self._schedule_reachability_refresh()
         self.conn_info["service_uuids"] = list(advertisement.service_uuids)
         self.conn_info["service_data"] = {key: bytes(value).hex() for key, value in advertisement.service_data.items()}
         product_id = product_id_from_manufacturer_data(advertisement.manufacturer_data)
@@ -469,7 +522,6 @@ class Device:
                 "advertisement_source_address": metadata["source"],
                 "advertisement_source_type": metadata["source_type"],
                 "advertisement_rssi": rssi,
-                "advertisement_updated_at": self.conn_info.get("last_seen"),
             }
         )
 
@@ -519,7 +571,10 @@ class Device:
         self.connected = connected
         if connected:
             self.touch_seen(notify=False)
-            self.cancel_reachability_refresh()
+            if self._bluetooth_presence() is None:
+                self.cancel_reachability_refresh()
+            else:
+                self._schedule_reachability_refresh()
         else:
             # Allow clock sync again on the next successful connect (#8).
             self._clock_synced = False
@@ -535,6 +590,8 @@ class Device:
         """Return whether the fixture has a live session or recent activity."""
         if self.connected:
             return True
+        if (presence := self._bluetooth_presence()) is not None:
+            return presence
         last_seen = self.conn_info.get("last_seen")
         if not isinstance(last_seen, datetime):
             return False
@@ -1181,7 +1238,8 @@ class Device:
                 },
             )
         if attr == "last_seen":
-            return Attribute(value=self.conn_info.get("last_seen"))
+            key = "advertisement_updated_at" if self.hass is not None else "last_seen"
+            return Attribute(value=self.conn_info.get(key))
         return Attribute()
 
     def register_update(self, attr: str, handler: Callable):
@@ -2159,6 +2217,10 @@ class Device:
     @serialized_device_command
     async def async_refresh_state(self, *, schedule: str | None = None, manual: bool = False) -> bool:
         """Resolve the controller and request its current state."""
+        async with self.command_transaction(supersede_transition=False):
+            return await self._async_refresh_state(schedule=schedule, manual=manual)
+
+    async def _async_refresh_state(self, *, schedule: str | None, manual: bool) -> bool:
         if not await self._async_ensure_client() or self.client is None:
             return False
         client = self.client
@@ -2166,7 +2228,7 @@ class Device:
         if not await client.ensure_connected():
             return False
 
-        revision = self._schedule_revisions.get(schedule, 0) if schedule else 0
+        schedule_revisions = dict(self._schedule_revisions)
         revisions = dict(self._control_readback_revision)
         try:
             if manual:
@@ -2174,11 +2236,41 @@ class Device:
                     await client.request_state(state_validator=lambda _state: self._fresh_manual_bank(revisions))
                 )
             if schedule:
-                return bool(
-                    await client.request_state(
-                        state_validator=lambda _state: self._schedule_revisions.get(schedule, 0) > revision
-                    )
-                )
+
+                def schedule_read(state: dict[int, object]) -> bool:
+                    target: str | None = schedule
+                    if target == "active":
+                        if self._control_readback_revision["mode"] <= revisions["mode"]:
+                            return False
+                        target = {
+                            "automatic": "native_auto_schedule",
+                            "professional": "native_pro_schedule",
+                        }.get(str(self.values.get("mode")))
+                    if target is None:
+                        return schedule == "active" and self.values.get("mode") == "manual"
+                    if self._schedule_revisions.get(target, 0) > schedule_revisions.get(target, 0):
+                        return True
+                    if not client.raw_facebd:
+                        return False
+                    spp = client.spp_transport
+                    count = self._resolved_channel_count()
+                    if target == "native_auto_schedule":
+                        decode = protocol.decode_spp_auto_schedule if spp else protocol.decode_wifi_auto_schedule
+                        auto, professional = decode(state, channel_count=count), None
+                    elif target == "native_pro_schedule":
+                        decode_pro = protocol.decode_spp_pro_schedule if spp else protocol.decode_wifi_pro_schedule
+                        auto, professional = None, decode_pro(state, channel_count=count)
+                    else:
+                        return False
+                    if not self._record_native_schedule_readback(
+                        protocol_name="spp" if spp else "facebd", auto=auto, professional=professional
+                    ):
+                        return False
+                    for handler in self.updates_component:
+                        handler()
+                    return True
+
+                return bool(await client.request_state(state_validator=schedule_read))
             return bool(await client.request_state())
         except (TimeoutError, BleakError) as err:
             _LOGGER.debug("Unable to refresh Fluval state", exc_info=err)

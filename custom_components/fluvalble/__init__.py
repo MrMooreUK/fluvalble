@@ -445,6 +445,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
         service_info: bluetooth.BluetoothServiceInfoBleak,
         change: bluetooth.BluetoothChange,
     ) -> None:
+        if runtime.unloading:
+            return
         log_discovery_update("Fluval BLE update: %s %s", service_info, change)
         if device := runtime.device:
             device.update_ble(
@@ -467,6 +469,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: FluvalConfigEntry) -> bo
             bluetooth.BluetoothScanningMode.ACTIVE,
         )
     )
+
+    @callback
+    def bluetooth_unavailable(service_info: bluetooth.BluetoothServiceInfoBleak) -> None:
+        if not runtime.unloading and runtime.device is not None:
+            runtime.device.bluetooth_unavailable(service_info)
+
+    if track_unavailable := getattr(bluetooth, "async_track_unavailable", None):
+        entry.async_on_unload(track_unavailable(hass, bluetooth_unavailable, mac, connectable=True))
 
     _register_legacy_options_reload(entry)
 
@@ -934,7 +944,7 @@ async def _async_schedule_payload(hass: HomeAssistant, entry_id: str, *, refresh
     if refresh:
         try:
             async with asyncio.timeout(30):
-                refresh_ok = bool(device is not None and await device.async_refresh_state())
+                refresh_ok = bool(device is not None and await device.async_refresh_state(schedule="active"))
         except TimeoutError:
             refresh_ok = False
     return {

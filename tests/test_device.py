@@ -360,6 +360,70 @@ def test_cancel_reachability_refresh_releases_timer():
     assert device._reachability_unsub is None
 
 
+def test_bluetooth_presence_tracks_unchanged_advertisements_loss_and_recovery(monkeypatch):
+    import custom_components.fluvalble.core.device as device_module
+
+    wall_start = datetime(2026, 11, 22, 13, tzinfo=UTC)
+    elapsed = 0
+    present = True
+    sample = SimpleNamespace(time=1000.0)
+
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return wall_start + timedelta(seconds=elapsed)
+
+    monkeypatch.setattr(device_module, "datetime", Clock)
+    monkeypatch.setattr(device_module, "monotonic", lambda: 1000 + elapsed)
+    monkeypatch.setattr(
+        device_module.bluetooth, "async_address_present", lambda *args, **kwargs: present, raising=False
+    )
+    monkeypatch.setattr(device_module.bluetooth, "async_last_service_info", lambda *args, **kwargs: sample)
+    cancel = MagicMock()
+    timer = MagicMock(return_value=cancel)
+    monkeypatch.setattr(device_module, "async_track_point_in_time", timer)
+    device = _make_device()
+    device.hass = MagicMock()
+    device.client = SimpleNamespace()
+    handler = MagicMock()
+    device.register_update("last_seen", handler)
+    ble = SimpleNamespace(address=device.address, name="AquaSky", details={})
+    advertisement = SimpleNamespace(rssi=-70, service_uuids=[], service_data={}, manufacturer_data={})
+    device.update_ble(ble, advertisement)
+    assert device.attribute("last_seen")["value"] == wall_start
+
+    # HA hears this identical advertisement without invoking update_ble().
+    elapsed = REACHABLE_SECONDS + 1
+    sample.time = 1000 + elapsed - 9
+    assert device.is_reachable()
+    device._on_reachability_expired(Clock.now(UTC))
+    assert device.attribute("last_seen")["value"] == wall_start + timedelta(seconds=elapsed - 9)
+    assert device._reachability_unsub is cancel
+    handler.assert_called()
+    previous = device.attribute("last_seen")["value"]
+    elapsed += REACHABLE_SECONDS
+    device._on_reachability_expired(Clock.now(UTC))
+    assert device.attribute("last_seen")["value"] == previous
+
+    present = False
+    sample.time += 5
+    device.bluetooth_unavailable(sample)
+    assert not device.is_reachable()
+    assert device.attribute("last_seen")["value"] == previous + timedelta(seconds=5)
+    assert device._reachability_unsub is None
+    cancel.assert_called_once()
+    device.touch_seen()
+    assert not device.is_reachable()
+    assert device.attribute("last_seen")["value"] == previous + timedelta(seconds=5)
+
+    present = True
+    sample.time = 1000 + elapsed - 1
+    device.update_ble(ble, advertisement)
+    assert device.is_reachable()
+    assert device.attribute("last_seen")["value"] == wall_start + timedelta(seconds=elapsed - 1)
+    assert device._reachability_unsub is cancel
+
+
 def test_activity_updates_last_seen_and_schedules_expiry(monkeypatch):
     import custom_components.fluvalble.core.device as device_module
 

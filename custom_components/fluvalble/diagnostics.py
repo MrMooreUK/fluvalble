@@ -35,6 +35,7 @@ TO_REDACT = {
     "clientid",
     "configured_mac",
     "entry_id",
+    "last_error",
     "local_name",
     "mac",
     "manufacturer_data",

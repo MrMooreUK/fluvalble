@@ -19,7 +19,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   even without Bluetooth discoveries, and AquaSky 3.0 options include a
   connection picker. Bluetooth-only installs retain the original setup flow.
 
+## [0.0.17] — 2026-11-24
+
 ### Fixed
+
+- Write only changed Auto schedule fields on FACEBD and FFF0/SPP, and keep
+  Professional timepoint colours attached when editing a time reorders them.
+- Assemble complete schedule readback from multiple maps within one explicit
+  read, without accepting fragments from an earlier read.
+- Bound and reset the classic BLE receive buffer, and redact free-form BLE
+  errors from downloadable diagnostics.
+- Keep Reachable accurate when Home Assistant suppresses duplicate Bluetooth
+  callbacks. Last seen uses the observed advertisement time, not the polling time (#151).
 
 - Allow five seconds for each initial state read and retry once before releasing
   an unready connection; normal command-verification timeouts are unchanged.
@@ -28,6 +39,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - Recognize unidentified four-channel FACEBD reports when channel levels arrive
   separately from mode and power, without shrinking an established five-channel bank.
 - Reject incomplete schedule-edit requests before reading the fixture.
+- Use Home Assistant's WebSocket admin guard so administrators can save
+  schedules without an error and non-admin saves are still rejected (#153).
 - Confirm each effect command against only its own newer readback, so a
   preceding mode response cannot incorrectly reject a successful power write.
 - Resolve channel width after switching to Manual, and derive relative

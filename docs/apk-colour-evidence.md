@@ -7,23 +7,21 @@ the physical channels as independent percentage controls.
 
 ## Product 328
 
-The decompiled `LightDeviceUtils` identifies product 328 as
-`LIGHT_ID_AQUASKY_750`. Its relevant methods establish all of the following:
+FluvalConnect identifies product 328 as the AquaSky 750 and establishes all of
+the following:
 
-- `isOldLight(328)` is true.
-- `getLightType(328)` returns type 3.
-- Type 3 has four channels in the order Red, Green, Blue, White.
-- `getLightTypeAndOld(328)` returns type 6.
-- `ManFragment.initBar()` maps type 6 to the bundled spectrum asset
+- It is a classic (old) controller.
+- Its light type is 3, with four channels in the order Red, Green, Blue, White.
+- Its combined type is 6, which uses the bundled spectrum asset
   `532_old_new.txt`.
 
-`ManFragment` sends manual changes as channel percentages. For a classic
+The app's Manual screen sends manual changes as channel percentages. For a classic
 fixture, the protocol path encodes those values in the `6804` all-zone command;
 there is no RGB-to-RGBW function in the app.
 
 ## Spectrum profiles
 
-The decompiled `ManFragment.initBar()` switch selects these exact assets:
+FluvalConnect selects these exact spectrum assets:
 
 | Integration profile | APK light type | FluvalConnect asset | APK channel order |
 |---|---:|---|---|
@@ -34,21 +32,10 @@ The decompiled `ManFragment.initBar()` switch selects these exact assets:
 | `plant_legacy` | 5 | `540_plant_old.txt` | Pink, Blue, Cold White, Pure White, Warm White |
 | `aquasky_legacy` | 6 | `532_old_new.txt` | Red, Green, Blue, White |
 
-The product-to-profile table in `core/products.py` mirrors
-`LightDeviceUtils.getLightTypeAndOld()`.
+The product-to-profile table in `core/products.py` mirrors FluvalConnect's
+product classification.
 
-The audited base APK is FluvalConnect `1.0.15` (`versionCode` 110), SHA-256
-`9c3cecf8edebff06ac945d7431b078813af9d4fd86ba9fba40453dc612be3415`.
-The bundled spectrum assets have these SHA-256 checksums:
-
-| Asset | SHA-256 |
-|---|---|
-| `532_new.txt` | `8340ee49d26f2f2cbb392507e1748068a6fcf3b731dc4bbe9907f0f766c383e2` |
-| `532_old_new.txt` | `72b12bb81916630657297a447746f43d5de27e6a2a7c8496fa41ca2aaf20cbae` |
-| `540_plant.txt` | `bec0c3be7618c53699002459f0af2ba66f163c85efd20a10fb326be10a6fed64` |
-| `540_plant_old.txt` | `5159fbeaddee040f9bab6e30608563b198cd29d436e3a06db16e6ca79d1ff946` |
-| `540_reef.txt` | `9984f39ee4689dfaceab111b094db654299985d6cb827ede3d594582c7abc05f` |
-| `540_reef_old.txt` | `d610cf18fb92fc65e19aa84db7820c2632c62e3a4cd3d6d1363a40c925c71667` |
+Derived from FluvalConnect 1.0.15 for interoperability.
 
 ## Home Assistant translation
 
@@ -95,7 +82,7 @@ verified on product 328 as visibly purple.
 
 ## Primary references
 
-- FluvalConnect decompilation: `LightDeviceUtils.java`, `ManFragment.java`,
-  `SpectrumUtil.java`, and the six spectrum assets listed above.
+- FluvalConnect 1.0.15 product classification, spectrum handling and the six
+  spectrum assets listed above, derived for interoperability.
 - CIE 1931 2-degree colour-matching functions, data set DOI
   `10.25039/CIE.DS.xvudnb9b` (CIE 018:2019, Table 6).
