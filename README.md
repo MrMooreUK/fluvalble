@@ -298,8 +298,8 @@ After setup you'll see one device with entities like:
 | **Select** | Mode | Manual / Automatic / Professional. |
 | **Scenes** | Manual preset P1–P4 | Recalls one fixture-resident manual preset on classic controllers. |
 | **Button** | Identify | Runs the fixture's native FluvalConnect Find command so the physical light identifies itself. |
-| **Binary sensor** | Reachable | Fixture seen recently over BLE; raw GATT connection state remains available as an attribute. |
-| **Sensors** | Signal strength / Source / Last seen | Bluetooth diagnostics. Source shows the active route's friendly name. |
+| **Binary sensor** | Reachable | Home Assistant still hears the fixture on a connectable Bluetooth route, or an active GATT session exists. |
+| **Sensors** | Signal strength / Source / Last seen | Bluetooth diagnostics. Last seen is the latest advertisement timestamp observed by Home Assistant; Source shows the active route's friendly name. |
 | **Button** | Sync Clock | Synchronizes the fixture's real-time clock with Home Assistant. |
 | **Switch** | Daylight saving time | Onboard setting available on supported AquaSky 3.0 fixtures. |
 
@@ -417,7 +417,7 @@ documented separately in
 
 - Home Assistant selects the best connectable local adapter or ESPHome proxy on each connection.
 - Connections release after the configured idle window.
-- Reachable describes recent fixture activity rather than only the current GATT connection.
+- Reachable follows Home Assistant's Bluetooth presence tracking and stays on through idle GATT disconnects while the fixture still advertises.
 - Signal strength and Last seen retain their entity IDs and history; Source shows the active route's friendly name.
 
 ---

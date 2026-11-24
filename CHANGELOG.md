@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 
+- Keep Reachable accurate when Home Assistant suppresses duplicate Bluetooth
+  callbacks. Last seen uses the observed advertisement time, not the polling time (#151).
+
 - Allow five seconds for each initial state read and retry once before releasing
   an unready connection; normal command-verification timeouts are unchanged.
 - Preserve existing channel entities and their customizations when the channel
