@@ -108,9 +108,9 @@ async def async_setup_editor(hass):
             vol.Optional("times"): vol.Any(dict, int),
         }
     )
+    @websocket_api.require_admin
     @websocket_api.async_response
     async def save(hass, connection, msg):
-        connection.require_admin()
         if "changes" not in msg and ("target" not in msg or "levels" not in msg):
             connection.send_error(msg["id"], "invalid_format", "Provide a schedule target and channel levels")
             return
